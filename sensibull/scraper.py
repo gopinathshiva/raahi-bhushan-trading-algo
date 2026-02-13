@@ -70,11 +70,12 @@ def get_normalized_trades(data):
     for p in positions:
         for t in p.get('trades', []):
             # Key fields that define a trade's identity and state
+            instrument_info = t.get('instrument_info') or {}
             trade_key = {
                 'symbol': t.get('trading_symbol'),
                 'product': t.get('product'),
-                'strike': t.get('instrument_info', {}).get('strike'),
-                'option_type': t.get('instrument_info', {}).get('instrument_type'),
+                'strike': instrument_info.get('strike'),
+                'option_type': instrument_info.get('instrument_type'),
                 'quantity': t.get('quantity'),
                 'avg_price': t.get('average_price'),
                 # We include PnL in comparison if we want to track price changes too, 
@@ -86,7 +87,7 @@ def get_normalized_trades(data):
             all_trades.append(trade_key)
 
     # Sort by symbol and product to ensure list order doesn't affect comparison
-    all_trades.sort(key=lambda x: (x['symbol'], x['product'], x['quantity']))
+    all_trades.sort(key=lambda x: (x['symbol'] or '', x['product'] or '', x['quantity'] or 0))
     return all_trades
 
 DAYS_TO_KEEP_DATA = 30
@@ -138,10 +139,6 @@ def run_scraper():
 
     for slug in slugs:
         print(f"Checking {slug}...")
-        current_data = fetch_data(slug)
-        if not current_data:
-            print(f"Skipping {slug}, no data.")
-        conn.commit()
         
         # Get Profile ID
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (slug,)).fetchone()
@@ -157,15 +154,16 @@ def run_scraper():
         should_run = (last_snapshot is None) or is_market_open()
         
         if not should_run:
+            print(f"Skipping {slug} (market closed and data exists)")
             continue
 
         print(f"Processing {slug}...")
         
         # Fetch current data
         try:
-            current_data = fetch_data(slug) # Changed from fetch_positions to fetch_data
+            current_data = fetch_data(slug)
             if not current_data:
-                print(f"Skipping {slug}, no data.")
+                print(f"Skipping {slug}, no data returned from API.")
                 continue
             
             # ALWAYS update the latest snapshot for Realtime P&L

@@ -102,8 +102,19 @@ def sync_profiles():
     
     conn = get_db()
     c = conn.cursor()
+    
+    # Add new profiles
     for slug in clean_slugs:
         c.execute("INSERT OR IGNORE INTO profiles (slug, name) VALUES (?, ?)", (slug, slug))
+    
+    # Remove profiles that are no longer in urls.txt
+    if clean_slugs:
+        placeholders = ','.join('?' * len(clean_slugs))
+        c.execute(f"DELETE FROM profiles WHERE slug NOT IN ({placeholders})", clean_slugs)
+        deleted = c.rowcount
+        if deleted > 0:
+            print(f"Removed {deleted} profiles no longer in urls.txt")
+    
     conn.commit()
     conn.close()
 

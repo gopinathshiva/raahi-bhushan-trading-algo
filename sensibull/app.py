@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import subprocess
+import signal
 
 app = Flask(__name__)
 # Configure standard port or 5010 as per previous context
@@ -534,7 +535,15 @@ def delete_date(date):
         print(f"Error deleting data for {date}: {e}")
         return jsonify({'error': str(e)}), 500
 
+def signal_handler(sig, frame):
+    print('\nShutting down gracefully...')
+    sys.exit(0)
+
 if __name__ == '__main__':
+    # Register signal handlers for clean shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     # Start monitor thread
     threading.Thread(target=monitor_scraper, daemon=True).start()
     app.run(debug=False, host='0.0.0.0', port=PORT)
