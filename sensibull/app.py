@@ -1565,6 +1565,57 @@ def download_master_contract():
         print(f"Error downloading master contract: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/scraper-status')
+def scraper_status():
+    """Get current scraper status - running, stuck, or stopped"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get last update timestamp
+        last_updated_row = c.execute("SELECT MAX(timestamp) FROM latest_snapshots").fetchone()
+        last_updated = last_updated_row[0] if last_updated_row else None
+        
+        conn.close()
+        
+        # Determine status
+        is_market_hours = is_market_open()
+        
+        status = {
+            'running': False,
+            'market_open': is_market_hours,
+            'last_updated': last_updated,
+            'status_text': '',
+            'time_since_update': None
+        }
+        
+        if not is_market_hours:
+            status['status_text'] = 'Market Closed - Scraper Paused'
+            status['running'] = False
+        elif last_updated:
+            last_dt = to_datetime_filter(last_updated)
+            time_diff = (datetime.now() - last_dt).total_seconds()
+            status['time_since_update'] = time_diff
+            
+            if time_diff <= 180:  # Less than 3 minutes
+                status['running'] = True
+                status['status_text'] = 'Running'
+            else:
+                status['running'] = False
+                status['status_text'] = f'Stuck or Stopped (Last update {int(time_diff/60)} mins ago)'
+        else:
+            status['running'] = False
+            status['status_text'] = 'No data yet - Scraper may be starting'
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'running': False,
+            'status_text': 'Error checking status'
+        }), 500
+
 @app.route('/restart', methods=['POST'])
 def restart_scraper_endpoint():
     threading.Thread(target=restart_scraper_internal).start()
