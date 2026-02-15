@@ -12,8 +12,15 @@
         }
 
         .container {
-            max-width: 800px;
+            /* Use more of the available width on laptops / high-res screens */
+            width: min(1400px, 100%);
             margin: 0 auto;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 12px;
+            }
         }
 
         .timeline-item {
@@ -60,8 +67,7 @@
             margin: 8vh auto;
             /* Vertical spacing */
             padding: 20px;
-            width: 90%;
-            max-width: 800px;
+            width: min(1200px, 95vw);
             border-radius: 8px;
             max-height: 84vh;
             /* Max height less than screen */
@@ -101,7 +107,61 @@
     <div class="container">
         <h2>Activity for {{ slug }} on {{ date }}</h2>
         <a href="{{ url_for('index') }}">&larr; Back to Dashboard</a>
-        <br><br>
+
+        <!-- Tabs -->
+        <style>
+            .tabs { display: flex; gap: 8px; margin-top: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+            .tab-btn { padding: 8px 12px; border: 1px solid #ccc; background: #f8f9fa; cursor: pointer; border-radius: 6px; }
+            .tab-btn.active { background: #007bff; color: white; border-color: #007bff; }
+            .tab-panel { display: none; }
+            .tab-panel.active { display: block; }
+            .search-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+            .search-row input[type="text"] { padding: 8px; min-width: min(520px, 90vw); border: 1px solid #ccc; border-radius: 6px; }
+            .search-row select { padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+            .search-row button { padding: 8px 12px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 6px; }
+
+            .suggest-wrap { position: relative; }
+            .suggest-box { position: absolute; left: 0; top: calc(100% + 4px); width: 100%; max-height: 260px; overflow-y: auto; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 6px 16px rgba(0,0,0,0.12); z-index: 9999; }
+            .suggest-item { padding: 8px 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .suggest-item:hover { background: #f1f1f1; }
+            .suggest-muted { color: #666; font-size: 0.85em; padding: 8px 10px; }
+            .search-help { color: #666; font-size: 0.9em; }
+            .lifecycle-table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .lifecycle-table th, .lifecycle-table td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
+            .lifecycle-table th { background: #f2f2f2; position: sticky; top: 0; z-index: 1; }
+            .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.85em; font-weight: bold; }
+            .pill.entered { background: #d4edda; color: #155724; }
+            .pill.modified { background: #fff3cd; color: #856404; }
+            .pill.exited { background: #f8d7da; color: #721c24; }
+            .num { text-align: right; font-variant-numeric: tabular-nums; }
+            
+            /* Collapsible underlying groups */
+            .underlying-group { background: #fff; margin-bottom: 12px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .underlying-header { padding: 12px 15px; cursor: pointer; background: #f8f9fa; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; user-select: none; }
+            .underlying-header:hover { background: #e9ecef; }
+            .underlying-header.active { background: #007bff; color: white; }
+            .underlying-title { font-weight: bold; font-size: 1.05em; }
+            .underlying-count { color: #666; font-size: 0.9em; margin-left: 10px; }
+            .underlying-header.active .underlying-count { color: rgba(255,255,255,0.8); }
+            .underlying-toggle { font-size: 1.2em; transition: transform 0.2s; }
+            .underlying-toggle.expanded { transform: rotate(90deg); }
+            .underlying-content { display: none; padding: 0; }
+            .underlying-content.expanded { display: block; }
+        </style>
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-btn-daily" onclick="switchTab('daily')">Daily Timeline</button>
+            <button class="tab-btn" id="tab-btn-search" onclick="switchTab('search')">Symbol Search (Lifecycle)</button>
+            <button class="tab-btn" id="tab-btn-underlyings" onclick="switchTab('underlyings')">All Underlying Trades</button>
+        </div>
+
+        <div id="tab-panel-daily" class="tab-panel active">
+            <div style="margin-top: 10px; margin-bottom: 10px;">
+                <label style="cursor:pointer; user-select:none;">
+                    <input type="checkbox" id="hide-modified-zero" checked style="margin-right:6px;" />
+                    Hide "No position changes"
+                </label>
+            </div>
+            <br>
 
         <!-- P&L Metrics -->
         {% if metrics %}
@@ -188,7 +248,7 @@
         <div class="timeline-item">
             <div class="time">{{ change.timestamp | to_datetime | attr('strftime')('%H:%M:%S') }}</div>
             <div class="summary">
-                {{ change.diff_summary or 'Position Update' }}
+                <span class="diff-summary" data-change-id="{{ change.id }}">{{ change.diff_summary or 'Position Update' }}</span>
                 &nbsp;
                 <button class="details-link" onclick="showDiff({{ change.id }})">(View Details)</button>
             </div>
@@ -196,6 +256,58 @@
         {% else %}
         <p>No activity recorded for this date.</p>
         {% endfor %}
+
+        </div> <!-- end tab-panel-daily -->
+
+        <div id="tab-panel-search" class="tab-panel">
+            <div class="search-row">
+                <div class="suggest-wrap">
+                    <input id="symbol-search-input" type="text" placeholder="Exact symbol (e.g., NIFTY26APR27150CE)" autocomplete="off" />
+                    <div id="symbol-suggest-box" class="suggest-box" style="display:none;"></div>
+                </div>
+                <select id="symbol-search-product">
+                    <option value="">All Products</option>
+                </select>
+                <button onclick="runSymbolSearch()">Search</button>
+                <span class="search-help">Tip: press Enter to search</span>
+            </div>
+            <div id="symbol-search-status" class="search-help"></div>
+            <div style="overflow-x:auto; width: 100%;">
+                <table class="lifecycle-table" id="symbol-search-table" style="display:none;">
+                    <thead>
+                        <tr>
+                            <th style="min-width: 150px;">Time</th>
+                            <th style="min-width: 110px;">Type</th>
+                            <th>Symbol</th>
+                            <th style="min-width: 70px;">Product</th>
+                            <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
+                            <th style="min-width: 140px;" class="num">Avg (Before)</th>
+                            <th style="min-width: 140px;" class="num">Avg (After)</th>
+                            <th style="min-width: 140px;" class="num">LTP (After)</th>
+                            <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
+                            <th style="min-width: 240px;">Exit / Fill</th>
+                            <th style="width: 70px; text-align:center;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="symbol-search-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="tab-panel-underlyings" class="tab-panel">
+            <div class="search-row">
+                <select id="underlying-filter">
+                    <option value="">All Underlyings</option>
+                </select>
+                <button onclick="loadUnderlyingTrades()">Load / Refresh</button>
+                <span class="search-help">Showing all historical positions grouped by underlying</span>
+            </div>
+            <div id="underlying-status" class="search-help"></div>
+            <div id="underlying-groups-container" style="margin-top: 20px;">
+                <!-- Collapsible groups will be inserted here -->
+            </div>
+        </div>
+
     </div>
 
     <!-- Main Modal for single diff view -->
@@ -210,7 +322,7 @@
     <div id="log-modal"
         style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);">
         <div id="log-modal-content"
-            style="background:#fff; margin:5vh auto; padding:20px; width:95%; max-width:1000px; max-height:90vh; border-radius:8px; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+            style="background:#fff; margin:5vh auto; padding:20px; width:min(1400px, 96vw); max-height:90vh; border-radius:8px; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(0,0,0,0.1);">
             <span class="close" style="align-self:flex-end; cursor:pointer; font-size:28px;"
                 onclick="closeLogModal()">&times;</span>
             <h3>Daily Change Log</h3>
@@ -218,9 +330,576 @@
         </div>
     </div>
 
+    <!-- Chart Modal -->
+    <div id="chart-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10000;">
+        <div id="chart-modal-content" style="background:#fff; margin:2vh auto; padding:20px; width:min(1600px, 98vw); max-height:96vh; border-radius:8px; display:flex; flex-direction:column; box-shadow:0 4px 6px rgba(0,0,0,0.2);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3 id="chart-modal-title" style="margin:0;">Chart</h3>
+                <span class="close" style="cursor:pointer; font-size:28px;" onclick="closeChartModal()">&times;</span>
+            </div>
+            
+            <!-- Controls -->
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:15px; padding:15px; background:#f8f9fa; border-radius:6px;">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">Enctoken:</label>
+                    <input id="chart-enctoken" type="text" placeholder="Enter Zerodha enctoken" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; width:250px; font-size:0.9em;" />
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">From Date:</label>
+                    <input id="chart-from-date" type="date" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.9em;" />
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">To Date:</label>
+                    <input id="chart-to-date" type="date" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.9em;" />
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">Interval:</label>
+                    <select id="chart-interval" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.9em;">
+                        <option value="minute">1 Minute</option>
+                        <option value="3minute">3 Minutes</option>
+                        <option value="5minute" selected>5 Minutes</option>
+                        <option value="10minute">10 Minutes</option>
+                        <option value="15minute">15 Minutes</option>
+                        <option value="30minute">30 Minutes</option>
+                        <option value="60minute">1 Hour</option>
+                        <option value="day">Daily</option>
+                    </select>
+                </div>
+                <div style="display:flex; align-items:flex-end;">
+                    <button id="chart-load-btn" onclick="loadChartData()" style="padding:8px 16px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Load Chart</button>
+                </div>
+            </div>
+
+            <!-- Chart Status -->
+            <div id="chart-status" style="padding:8px; margin-bottom:10px; border-radius:4px; display:none;"></div>
+
+            <!-- Chart Container -->
+            <div id="chart-container" style="flex:1; overflow:hidden; min-height:500px; background:#fff; border:1px solid #ddd; border-radius:6px; position:relative;">
+                <div id="chart-loading" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center;">
+                    <div style="font-size:1.2em; color:#666;">Loading chart data...</div>
+                </div>
+                <div id="chart-canvas" style="width:100%; height:100%;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recharts Library -->
+    <script src="https://cdn.jsdelivr.net/npm/recharts@2.5.0/dist/Recharts.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
     <script>
+        function switchTab(tab) {
+            const dailyBtn = document.getElementById('tab-btn-daily');
+            const searchBtn = document.getElementById('tab-btn-search');
+            const underlyingsBtn = document.getElementById('tab-btn-underlyings');
+            const dailyPanel = document.getElementById('tab-panel-daily');
+            const searchPanel = document.getElementById('tab-panel-search');
+            const underlyingsPanel = document.getElementById('tab-panel-underlyings');
+
+            const setActive = (btn, active) => {
+                if (!btn) return;
+                btn.classList.toggle('active', !!active);
+            };
+            const setPanelActive = (panel, active) => {
+                if (!panel) return;
+                panel.classList.toggle('active', !!active);
+            };
+
+            if (tab === 'search') {
+                setActive(dailyBtn, false);
+                setActive(searchBtn, true);
+                setActive(underlyingsBtn, false);
+                setPanelActive(dailyPanel, false);
+                setPanelActive(searchPanel, true);
+                setPanelActive(underlyingsPanel, false);
+
+                // Focus input when entering Search tab
+                const inp = document.getElementById('symbol-search-input');
+                if (inp) inp.focus();
+            } else if (tab === 'underlyings') {
+                setActive(dailyBtn, false);
+                setActive(searchBtn, false);
+                setActive(underlyingsBtn, true);
+                setPanelActive(dailyPanel, false);
+                setPanelActive(searchPanel, false);
+                setPanelActive(underlyingsPanel, true);
+
+                // Auto-load data when entering Underlyings tab
+                loadUnderlyingTrades();
+            } else {
+                setActive(dailyBtn, true);
+                setActive(searchBtn, false);
+                setActive(underlyingsBtn, false);
+                setPanelActive(dailyPanel, true);
+                setPanelActive(searchPanel, false);
+                setPanelActive(underlyingsPanel, false);
+            }
+        }
+
+        function fmtNum(n, digits = 2) {
+            const v = Number(n || 0);
+            return v.toLocaleString('en-IN', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+        }
+
+        function fmtTimestamp(timestamp) {
+            if (!timestamp) return '';
+            try {
+                const d = new Date(timestamp);
+                if (isNaN(d.getTime())) return timestamp;
+                // Format: 11 Feb, 1:52 PM
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const day = d.getDate();
+                const month = months[d.getMonth()];
+                const hours = d.getHours();
+                const minutes = d.getMinutes().toString().padStart(2, '0');
+                const ampm = hours >= 12 ? 'PM' : 'AM';
+                const hour12 = hours % 12 || 12;
+                
+                return `${day} ${month}, ${hour12}:${minutes} ${ampm}`;
+            } catch (e) {
+                return timestamp;
+            }
+        }
+
+        function renderLifecycleEvents(events) {
+            const tbody = document.getElementById('symbol-search-tbody');
+            const table = document.getElementById('symbol-search-table');
+            const status = document.getElementById('symbol-search-status');
+            if (!tbody || !table) return;
+
+            tbody.innerHTML = '';
+
+            if (!events || events.length === 0) {
+                table.style.display = 'none';
+                if (status) status.textContent = 'No lifecycle events found for this symbol.';
+                return;
+            }
+
+            table.style.display = 'table';
+            if (status) status.textContent = `Found ${events.length} lifecycle events (latest first).`;
+
+            events.forEach(e => {
+                const tr = document.createElement('tr');
+
+                const typeLower = (e.type || '').toLowerCase();
+                const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
+
+                const qtyBefore = Number(e.before_quantity || 0);
+                const qtyAfter = Number(e.after_quantity || 0);
+                const dq = Number(e.quantity_diff || (qtyAfter - qtyBefore));
+                const dqSign = dq > 0 ? '+' : '';
+
+                let exitFillHtml = '';
+                if ((e.type || '') === 'EXITED') {
+                    exitFillHtml = `<div style="font-weight:bold; color:#721c24;">Exit P&L: ₹${fmtNum(e.exit_pnl || 0, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
+                } else if ((e.type || '') === 'MODIFIED') {
+                    const side = (e.implied_fill_side || '').toUpperCase();
+                    const fillQty = Math.abs(parseInt(e.implied_fill_qty || 0, 10) || 0);
+                    const fillPrice = Number(e.implied_fill_price || 0);
+                    if (side && fillQty > 0 && fillPrice > 0) {
+                        const fillColor = side === 'BUY' ? '#28a745' : '#dc3545';
+                        exitFillHtml = `<div style="font-weight:bold; color:${fillColor};">Implied Fill (${side}): Qty ${fillQty} @ ₹${fmtNum(fillPrice, 2)} <span style="color:#666; font-weight:normal;">(approx)</span></div>`;
+                    }
+                }
+
+                const actionHtml = e.change_id
+                    ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>`
+                    : `<span style="color:#aaa;" title="No diff record for this snapshot">-</span>`;
+
+                tr.innerHTML = `
+                    <td>${fmtTimestamp(e.timestamp)}</td>
+                    <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
+                    <td>${e.symbol || ''}</td>
+                    <td>${e.product || ''}</td>
+                    <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
+                    <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
+                    <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
+                    <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
+                    <td class="num">₹${fmtNum(e.after_unbooked_pnl || 0, 2)}</td>
+                    <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
+                    <td style="text-align:center;">${actionHtml}</td>
+                `;
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        let _symbolSuggestTimer = null;
+        let _lastSuggestQuery = '';
+
+        function setSuggestOptions(symbols) {
+            const box = document.getElementById('symbol-suggest-box');
+            if (!box) return;
+
+            const items = (symbols || []).slice(0, 50);
+            if (items.length === 0) {
+                box.innerHTML = '<div class="suggest-muted">No matches</div>';
+                box.style.display = 'none';
+                return;
+            }
+
+            box.innerHTML = items.map(s => `<div class="suggest-item" data-value="${s}">${s}</div>`).join('');
+            box.style.display = 'block';
+        }
+
+        async function fetchSymbolSuggestions(query) {
+            const pathParts = window.location.pathname.split('/');
+            const slug = pathParts[2];
+
+            const params = new URLSearchParams({ q: query || '', limit: '40' });
+            const res = await fetch('/api/profile_symbol_suggest/' + slug + '?' + params.toString());
+            return await res.json();
+        }
+
+        function scheduleSymbolSuggestions(query) {
+            query = (query || '').trim();
+            if (_symbolSuggestTimer) clearTimeout(_symbolSuggestTimer);
+
+            // Avoid spamming for very short inputs
+            if (query.length < 2) {
+                const box = document.getElementById('symbol-suggest-box');
+                if (box) box.style.display = 'none';
+                return;
+            }
+
+            _symbolSuggestTimer = setTimeout(async () => {
+                try {
+                    _lastSuggestQuery = query;
+                    const data = await fetchSymbolSuggestions(query);
+                    // If user typed more since request started, ignore stale response
+                    const current = (document.getElementById('symbol-search-input')?.value || '').trim();
+                    if (current !== _lastSuggestQuery && current.length >= 2) return;
+                    if (data && data.symbols) setSuggestOptions(data.symbols);
+                } catch (e) {
+                    // ignore
+                }
+            }, 180);
+        }
+
+        async function runSymbolSearch() {
+            const inp = document.getElementById('symbol-search-input');
+            const productSel = document.getElementById('symbol-search-product');
+            const status = document.getElementById('symbol-search-status');
+
+            const symbol = (inp?.value || '').trim();
+            const product = (productSel?.value || '').trim();
+
+            if (!symbol) {
+                if (status) status.textContent = 'Enter a symbol to search.';
+                renderLifecycleEvents([]);
+                return;
+            }
+
+            // Ensure we're on search tab
+            switchTab('search');
+            // Hide suggestions if open
+            const sb = document.getElementById('symbol-suggest-box');
+            if (sb) sb.style.display = 'none';
+
+            if (status) status.textContent = 'Searching...';
+
+            const pathParts = window.location.pathname.split('/');
+            const slug = pathParts[2];
+
+            const params = new URLSearchParams({ symbol });
+            if (product) params.set('product', product);
+
+            try {
+                const res = await fetch('/api/profile_symbol_lifecycle/' + slug + '?' + params.toString());
+                const data = await res.json();
+                if (data.error) {
+                    if (status) status.textContent = data.error;
+                    renderLifecycleEvents([]);
+                    return;
+                }
+
+                // Populate product dropdown (keep current selection)
+                if (productSel && data.products_seen) {
+                    const current = productSel.value || '';
+                    const options = [''].concat(data.products_seen);
+                    productSel.innerHTML = options
+                        .map(p => `<option value="${p}">${p ? p : 'All Products'}</option>`)
+                        .join('');
+                    // restore selection
+                    productSel.value = options.includes(current) ? current : '';
+                }
+
+                renderLifecycleEvents(data.events || []);
+            } catch (e) {
+                if (status) status.textContent = 'Search failed: ' + e;
+                renderLifecycleEvents([]);
+            }
+        }
+
+        // Track if underlying trades have been loaded
+        let _underlyingTradesLoaded = false;
+
+        async function loadUnderlyingTrades() {
+            // Only auto-load once
+            if (_underlyingTradesLoaded) return;
+            _underlyingTradesLoaded = true;
+
+            const status = document.getElementById('underlying-status');
+            const container = document.getElementById('underlying-groups-container');
+            const filterSelect = document.getElementById('underlying-filter');
+
+            if (status) status.textContent = 'Loading...';
+            if (container) container.innerHTML = '';
+
+            const pathParts = window.location.pathname.split('/');
+            const slug = pathParts[2];
+
+            const underlyingFilter = (filterSelect?.value || '').trim();
+            const params = new URLSearchParams();
+            if (underlyingFilter) params.set('underlying', underlyingFilter);
+
+            try {
+                const res = await fetch('/api/profile_all_underlyings/' + slug + '?' + params.toString());
+                const data = await res.json();
+                
+                if (data.error) {
+                    if (status) status.textContent = 'Error: ' + data.error;
+                    return;
+                }
+
+                // Populate filter dropdown
+                if (filterSelect && data.underlyings) {
+                    const current = filterSelect.value || '';
+                    const options = [''].concat(data.underlyings);
+                    filterSelect.innerHTML = options
+                        .map(u => `<option value="${u}">${u ? u : 'All Underlyings'}</option>`)
+                        .join('');
+                    filterSelect.value = options.includes(current) ? current : '';
+                }
+
+                const events = data.events || {};
+                const underlyings = data.underlyings || [];
+
+                if (underlyings.length === 0) {
+                    if (status) status.textContent = 'No underlying events found.';
+                    return;
+                }
+
+                let totalEvents = 0;
+                underlyings.forEach(u => {
+                    totalEvents += (events[u] || []).length;
+                });
+
+                if (status) status.textContent = `Found ${underlyings.length} underlyings with ${totalEvents} total events.`;
+
+                renderUnderlyingGroups(underlyings, events);
+            } catch (e) {
+                if (status) status.textContent = 'Failed to load: ' + e;
+            }
+        }
+
+        function renderUnderlyingGroups(underlyings, events) {
+            const container = document.getElementById('underlying-groups-container');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            underlyings.forEach(underlying => {
+                const eventList = events[underlying] || [];
+                if (eventList.length === 0) return;
+
+                const groupDiv = document.createElement('div');
+                groupDiv.className = 'underlying-group';
+                groupDiv.id = `underlying-group-${underlying}`;
+
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'underlying-header';
+                headerDiv.onclick = () => toggleUnderlyingGroup(underlying);
+
+                const titleSpan = document.createElement('span');
+                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span><span class="underlying-count">(${eventList.length} events)</span>`;
+
+                const buttonsDiv = document.createElement('div');
+                buttonsDiv.style.display = 'flex';
+                buttonsDiv.style.gap = '10px';
+                buttonsDiv.style.alignItems = 'center';
+
+                const chartBtn = document.createElement('button');
+                chartBtn.innerHTML = '📊 View Trades with Chart';
+                chartBtn.style.padding = '6px 12px';
+                chartBtn.style.background = '#28a745';
+                chartBtn.style.color = 'white';
+                chartBtn.style.border = 'none';
+                chartBtn.style.borderRadius = '4px';
+                chartBtn.style.cursor = 'pointer';
+                chartBtn.style.fontSize = '0.9em';
+                chartBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openChartModal(underlying, eventList);
+                };
+
+                const toggleSpan = document.createElement('span');
+                toggleSpan.className = 'underlying-toggle';
+                toggleSpan.textContent = '▶';
+                toggleSpan.id = `underlying-toggle-${underlying}`;
+
+                buttonsDiv.appendChild(chartBtn);
+                buttonsDiv.appendChild(toggleSpan);
+
+                headerDiv.appendChild(titleSpan);
+                headerDiv.appendChild(buttonsDiv);
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'underlying-content';
+                contentDiv.id = `underlying-content-${underlying}`;
+
+                // Create table with same columns as Symbol Search
+                const tableHtml = `
+                    <table class="lifecycle-table">
+                        <thead>
+                            <tr>
+                                <th style="min-width: 150px;">Time</th>
+                                <th style="min-width: 110px;">Type</th>
+                                <th>Symbol</th>
+                                <th style="min-width: 70px;">Product</th>
+                                <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
+                                <th style="min-width: 140px;" class="num">Avg (Before)</th>
+                                <th style="min-width: 140px;" class="num">Avg (After)</th>
+                                <th style="min-width: 140px;" class="num">LTP (After)</th>
+                                <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
+                                <th style="min-width: 240px;">Exit / Fill</th>
+                                <th style="width: 70px; text-align:center;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${eventList.map(e => {
+                                const typeLower = (e.type || '').toLowerCase();
+                                const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
+
+                                const qtyBefore = Number(e.before_quantity || 0);
+                                const qtyAfter = Number(e.after_quantity || 0);
+                                const dq = Number(e.quantity_diff || (qtyAfter - qtyBefore));
+                                const dqSign = dq > 0 ? '+' : '';
+
+                                let exitFillHtml = '';
+                                if ((e.type || '') === 'EXITED') {
+                                    exitFillHtml = `<div style="font-weight:bold; color:#721c24;">Exit P&L: ₹${fmtNum(e.exit_pnl || 0, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
+                                } else if ((e.type || '') === 'MODIFIED') {
+                                    const side = (e.implied_fill_side || '').toUpperCase();
+                                    const fillQty = Math.abs(parseInt(e.implied_fill_qty || 0, 10) || 0);
+                                    const fillPrice = Number(e.implied_fill_price || 0);
+                                    if (side && fillQty > 0 && fillPrice > 0) {
+                                        const fillColor = side === 'BUY' ? '#28a745' : '#dc3545';
+                                        exitFillHtml = `<div style="font-weight:bold; color:${fillColor};">Implied Fill (${side}): Qty ${fillQty} @ ₹${fmtNum(fillPrice, 2)} <span style="color:#666; font-weight:normal;">(approx)</span></div>`;
+                                    }
+                                    // Show exit P&L if reducing position
+                                    if (e.exit_pnl && e.exit_pnl != 0) {
+                                        const exitColor = e.exit_pnl > 0 ? '#28a745' : '#dc3545';
+                                        exitFillHtml += `<div style="font-weight:bold; color:${exitColor}; margin-top:4px;">Exit P&L: ₹${fmtNum(e.exit_pnl, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
+                                    }
+                                }
+
+                                const actionHtml = e.change_id
+                                    ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>`
+                                    : `<span style="color:#aaa;" title="No diff record">-</span>`;
+
+                                return `<tr>
+                                    <td>${fmtTimestamp(e.timestamp)}</td>
+                                    <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
+                                    <td>${e.symbol || ''}</td>
+                                    <td>${e.product || ''}</td>
+                                    <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
+                                    <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
+                                    <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
+                                    <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
+                                    <td class="num">₹${fmtNum(e.after_unbooked_pnl || 0, 2)}</td>
+                                    <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
+                                    <td style="text-align:center;">${actionHtml}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+
+                contentDiv.innerHTML = tableHtml;
+
+                groupDiv.appendChild(headerDiv);
+                groupDiv.appendChild(contentDiv);
+                container.appendChild(groupDiv);
+            });
+        }
+
+        function toggleUnderlyingGroup(underlying) {
+            const header = document.querySelector(`#underlying-group-${underlying} .underlying-header`);
+            const content = document.getElementById(`underlying-content-${underlying}`);
+            const toggle = document.getElementById(`underlying-toggle-${underlying}`);
+
+            if (!content || !toggle) return;
+
+            const isExpanded = content.classList.contains('expanded');
+
+            if (isExpanded) {
+                content.classList.remove('expanded');
+                toggle.classList.remove('expanded');
+                header.classList.remove('active');
+            } else {
+                content.classList.add('expanded');
+                toggle.classList.add('expanded');
+                header.classList.add('active');
+            }
+        }
+
         // Add button dynamically to header
         document.addEventListener("DOMContentLoaded", function () {
+            const HIDE_MODIFIED_ZERO_KEY = 'sensibull.hide_modified_zero';
+
+            const hideModifiedZeroCheckbox = document.getElementById('hide-modified-zero');
+            const getHideModifiedZeroPref = () => {
+                const v = localStorage.getItem(HIDE_MODIFIED_ZERO_KEY);
+                // Default: enabled
+                if (v === null) return true;
+                return v === 'true';
+            };
+            const setHideModifiedZeroPref = (val) => {
+                localStorage.setItem(HIDE_MODIFIED_ZERO_KEY, val ? 'true' : 'false');
+            };
+
+            const shouldHideModifiedZero = () => !!(hideModifiedZeroCheckbox && hideModifiedZeroCheckbox.checked);
+
+            const isNoPositionChangeSummary = (text) => {
+                text = (text || '').trim();
+                // Legacy
+                if (text.startsWith('Positions Modified') && /\(0\)/.test(text)) return true;
+
+                // New explicit summary
+                // e.g. Positions Changed (Added: 0, Removed: 0, Modified: 0)
+                const m = text.match(/Positions Changed\s*\(Added:\s*(\d+),\s*Removed:\s*(\d+),\s*Modified:\s*(\d+)\)/i);
+                if (m) {
+                    const a = parseInt(m[1], 10) || 0;
+                    const r = parseInt(m[2], 10) || 0;
+                    const mod = parseInt(m[3], 10) || 0;
+                    return a === 0 && r === 0 && mod === 0;
+                }
+                return false;
+            };
+
+            const applyHideModifiedZeroFilter = () => {
+                const hide = shouldHideModifiedZero();
+                document.querySelectorAll('.timeline-item').forEach(item => {
+                    const summaryEl = item.querySelector('.diff-summary');
+                    if (!summaryEl) return;
+                    const text = (summaryEl.textContent || '').trim();
+
+                    const isNoOp = isNoPositionChangeSummary(text);
+                    item.style.display = (hide && isNoOp) ? 'none' : '';
+                });
+            };
+
+            // Initialize checkbox from preference (default on)
+            if (hideModifiedZeroCheckbox) {
+                hideModifiedZeroCheckbox.checked = getHideModifiedZeroPref();
+                hideModifiedZeroCheckbox.addEventListener('change', () => {
+                    setHideModifiedZeroPref(hideModifiedZeroCheckbox.checked);
+                    applyHideModifiedZeroFilter();
+                });
+            }
+
             let header = document.querySelector(".container h2");
             let btn = document.createElement("button");
             btn.innerText = "See All Changes";
@@ -233,6 +912,142 @@
             btn.style.borderRadius = "4px";
             btn.onclick = showDailyLog;
             header.appendChild(btn);
+
+            // Apply initial filter (in case some rows already have counts stored)
+            applyHideModifiedZeroFilter();
+
+            // Backfill counts for older records that stored just "Positions Modified" without (n)
+            // or for records that used only the legacy single-type string.
+            const formatSummaryFromDiff = (diff) => {
+                const addedCount = (diff.added || []).length;
+                const removedCount = (diff.removed || []).length;
+                const modifiedCount = (diff.modified || []).length;
+
+                if (addedCount && !removedCount && !modifiedCount) return `Positions Added (${addedCount})`;
+                if (removedCount && !addedCount && !modifiedCount) return `Positions Reduced (${removedCount})`;
+                if (modifiedCount && !addedCount && !removedCount) return `Positions Modified (${modifiedCount})`;
+
+                return `Positions Changed (Added: ${addedCount}, Removed: ${removedCount}, Modified: ${modifiedCount})`;
+            };
+
+            // Underlying filter dropdown change handler
+            const underlyingFilterSelect = document.getElementById('underlying-filter');
+            if (underlyingFilterSelect) {
+                underlyingFilterSelect.addEventListener('change', () => {
+                    _underlyingTradesLoaded = false; // Force reload
+                    loadUnderlyingTrades();
+                });
+            }
+
+            // Symbol suggestions dropdown + Enter key triggers search
+            const symbolSearchInput = document.getElementById('symbol-search-input');
+            const suggestBox = document.getElementById('symbol-suggest-box');
+            let suggestActiveIndex = -1;
+
+            const hideSuggestBox = () => {
+                if (suggestBox) suggestBox.style.display = 'none';
+                suggestActiveIndex = -1;
+            };
+
+            const applySuggestActive = () => {
+                if (!suggestBox) return;
+                const items = Array.from(suggestBox.querySelectorAll('.suggest-item'));
+                items.forEach((el, idx) => {
+                    el.style.background = (idx === suggestActiveIndex) ? '#e9ecef' : '';
+                });
+            };
+
+            const chooseSuggestion = (value) => {
+                if (!symbolSearchInput) return;
+                symbolSearchInput.value = value || '';
+                hideSuggestBox();
+                symbolSearchInput.focus();
+            };
+
+            if (symbolSearchInput) {
+                symbolSearchInput.addEventListener('input', (ev) => {
+                    suggestActiveIndex = -1;
+                    scheduleSymbolSuggestions(ev.target.value || '');
+                });
+
+                symbolSearchInput.addEventListener('keydown', (ev) => {
+                    if (!suggestBox || suggestBox.style.display === 'none') {
+                        if (ev.key === 'Enter') {
+                            ev.preventDefault();
+                            runSymbolSearch();
+                        }
+                        return;
+                    }
+
+                    const items = Array.from(suggestBox.querySelectorAll('.suggest-item'));
+                    if (items.length === 0) return;
+
+                    if (ev.key === 'ArrowDown') {
+                        ev.preventDefault();
+                        suggestActiveIndex = Math.min(items.length - 1, suggestActiveIndex + 1);
+                        applySuggestActive();
+                    } else if (ev.key === 'ArrowUp') {
+                        ev.preventDefault();
+                        suggestActiveIndex = Math.max(0, suggestActiveIndex - 1);
+                        applySuggestActive();
+                    } else if (ev.key === 'Enter') {
+                        ev.preventDefault();
+                        const chosen = items[Math.max(0, suggestActiveIndex)]?.getAttribute('data-value');
+                        if (chosen) chooseSuggestion(chosen);
+                        runSymbolSearch();
+                    } else if (ev.key === 'Escape') {
+                        ev.preventDefault();
+                        hideSuggestBox();
+                    }
+                });
+
+                // Preload a small suggestion list on focus (optional)
+                symbolSearchInput.addEventListener('focus', () => {
+                    const v = (symbolSearchInput.value || '').trim();
+                    scheduleSymbolSuggestions(v.length >= 2 ? v : 'NI');
+                });
+            }
+
+            if (suggestBox) {
+                suggestBox.addEventListener('click', (ev) => {
+                    const t = ev.target;
+                    if (!t) return;
+                    const item = t.closest ? t.closest('.suggest-item') : null;
+                    if (!item) return;
+                    const value = item.getAttribute('data-value');
+                    if (value) {
+                        chooseSuggestion(value);
+                        runSymbolSearch();
+                    }
+                });
+            }
+
+            // Hide suggestions when clicking outside
+            document.addEventListener('click', (ev) => {
+                const target = ev.target;
+                if (!target) return;
+                if (target.id === 'symbol-search-input') return;
+                if (suggestBox && (target === suggestBox || (suggestBox.contains && suggestBox.contains(target)))) return;
+                hideSuggestBox();
+            });
+
+            document.querySelectorAll('.diff-summary').forEach(el => {
+                const text = (el.textContent || '').trim();
+                if (!text.startsWith('Positions Modified') || text.includes('(')) return;
+
+                const changeId = el.getAttribute('data-change-id');
+                if (!changeId) return;
+
+                fetch('/api/diff/' + changeId)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data || !data.diff) return;
+                        el.textContent = formatSummaryFromDiff(data.diff);
+                        // Re-apply filter once counts are known
+                        applyHideModifiedZeroFilter();
+                    })
+                    .catch(() => { /* ignore */ });
+            });
         });
 
         function showDailyLog() {
@@ -292,7 +1107,7 @@
                             changeHtml = event.diff || 'Update'; // Fallback
                         }
 
-                        tableHtml += '<tr>';
+                        tableHtml += `<tr class="log-row" data-change-id="${event.change_id}">`;
                         tableHtml += `<td style="${tdStyle} text-align:left;">${event.time}</td>`;
                         tableHtml += `<td style="${tdStyle} text-align:left;">${symbolHtml}</td>`;
                         tableHtml += `<td style="${tdStyle} text-align:left;">${changeHtml}</td>`;
@@ -304,12 +1119,476 @@
 
                     tableHtml += '</tbody></table>';
                     document.getElementById('log-content').innerHTML = tableHtml;
+
+                    // If enabled, hide rows where there are no position changes.
+                    // We compute this from the diff API to support older rows and avoid relying on summary text.
+                    const hideModifiedZero = (() => {
+                        const v = localStorage.getItem('sensibull.hide_modified_zero');
+                        if (v === null) return true; // default on
+                        return v === 'true';
+                    })();
+
+                    if (!hideModifiedZero) return;
+
+                    const rows = Array.from(document.querySelectorAll('#log-content .log-row[data-change-id]'));
+                    const limit = 6; // small concurrency to avoid spamming
+                    let i = 0;
+
+                    const worker = async () => {
+                        while (i < rows.length) {
+                            const row = rows[i++];
+                            const changeId = row.getAttribute('data-change-id');
+                            if (!changeId) continue;
+                            try {
+                                const r = await fetch('/api/diff/' + changeId);
+                                const data = await r.json();
+                                if (!data || !data.diff) continue;
+                                const addedCount = (data.diff.added || []).length;
+                                const removedCount = (data.diff.removed || []).length;
+                                const modifiedCount = (data.diff.modified || []).length;
+
+                                // Hide only if there are no adds/removes AND modified count is 0
+                                if (addedCount === 0 && removedCount === 0 && modifiedCount === 0) {
+                                    row.style.display = 'none';
+                                }
+                            } catch (e) {
+                                // ignore
+                            }
+                        }
+                    };
+
+                    for (let w = 0; w < limit; w++) worker();
                 });
         }
 
         function closeLogModal() {
             document.getElementById('log-modal').style.display = 'none';
         }
+
+        // Chart Modal Functions
+        let currentChartUnderlying = null;
+        let currentChartEvents = [];
+
+        function openChartModal(underlying, events) {
+            currentChartUnderlying = underlying;
+            currentChartEvents = events;
+
+            const modal = document.getElementById('chart-modal');
+            const title = document.getElementById('chart-modal-title');
+            title.textContent = `${underlying} - Trades with Chart`;
+
+            // Load enctoken from localStorage (using same key as historical_data page)
+            const enctoken = localStorage.getItem('zerodha_enctoken') || '';
+            document.getElementById('chart-enctoken').value = enctoken;
+
+            // Calculate date range from events (first to last event with 2-day buffer)
+            if (events && events.length > 0) {
+                const timestamps = events.map(e => new Date(e.timestamp)).filter(d => !isNaN(d));
+                if (timestamps.length > 0) {
+                    const minDate = new Date(Math.min(...timestamps));
+                    const maxDate = new Date(Math.max(...timestamps));
+                    
+                    // Add 2-day buffer
+                    minDate.setDate(minDate.getDate() - 2);
+                    maxDate.setDate(maxDate.getDate() + 2);
+
+                    document.getElementById('chart-from-date').value = minDate.toISOString().split('T')[0];
+                    document.getElementById('chart-to-date').value = maxDate.toISOString().split('T')[0];
+                }
+            }
+
+            // Reset interval to default
+            document.getElementById('chart-interval').value = '5minute';
+
+            // Clear previous chart
+            document.getElementById('chart-canvas').innerHTML = '';
+            document.getElementById('chart-status').style.display = 'none';
+
+            modal.style.display = 'block';
+
+            // Auto-load chart if enctoken is available
+            if (enctoken) {
+                loadChartData();
+            }
+        }
+
+        function closeChartModal() {
+            document.getElementById('chart-modal').style.display = 'none';
+        }
+
+        // Close modal on ESC key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                const chartModal = document.getElementById('chart-modal');
+                const logModal = document.getElementById('log-modal');
+                if (chartModal && chartModal.style.display !== 'none') {
+                    closeChartModal();
+                }
+                if (logModal && logModal.style.display !== 'none') {
+                    closeLogModal();
+                }
+            }
+        });
+
+        async function loadChartData() {
+            const enctoken = document.getElementById('chart-enctoken').value.trim();
+            const fromDate = document.getElementById('chart-from-date').value;
+            const toDate = document.getElementById('chart-to-date').value;
+            const interval = document.getElementById('chart-interval').value;
+
+            const statusDiv = document.getElementById('chart-status');
+            const loadingDiv = document.getElementById('chart-loading');
+            const canvasDiv = document.getElementById('chart-canvas');
+
+            // Validation
+            if (!enctoken) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#fff3cd';
+                statusDiv.style.color = '#856404';
+                statusDiv.textContent = 'Please enter your Zerodha enctoken';
+                return;
+            }
+
+            if (!fromDate || !toDate) {
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#fff3cd';
+                statusDiv.style.color = '#856404';
+                statusDiv.textContent = 'Please select date range';
+                return;
+            }
+
+            // Save enctoken to localStorage (using same key as historical_data page)
+            localStorage.setItem('zerodha_enctoken', enctoken);
+
+            // Show loading
+            loadingDiv.style.display = 'block';
+            canvasDiv.innerHTML = '';
+            statusDiv.style.display = 'none';
+
+            try {
+                // Step 1: Get instrument token for underlying
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#d1ecf1';
+                statusDiv.style.color = '#0c5460';
+                statusDiv.textContent = `Fetching instrument for ${currentChartUnderlying}...`;
+
+                const instrumentRes = await fetch(`/api/get_index_instrument?underlying=${encodeURIComponent(currentChartUnderlying)}`);
+                const instrumentData = await instrumentRes.json();
+
+                if (!instrumentData.success) {
+                    throw new Error(instrumentData.error || 'Failed to get instrument token');
+                }
+
+                const instrumentToken = instrumentData.instrument_token;
+                const tradingSymbol = instrumentData.trading_symbol;
+
+                // Step 2: Fetch historical data
+                statusDiv.textContent = `Loading historical data for ${tradingSymbol} (${interval})...`;
+
+                const histRes = await fetch('/api/fetch_historical_data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        enctoken: enctoken,
+                        instrument_token: instrumentToken,
+                        from_date: fromDate,
+                        to_date: toDate,
+                        interval: interval
+                    })
+                });
+
+                const histData = await histRes.json();
+
+                if (!histData.success) {
+                    throw new Error(histData.error || 'Failed to fetch historical data');
+                }
+
+                const candles = histData.data || [];
+
+                if (candles.length === 0) {
+                    throw new Error('No data available for selected date range');
+                }
+
+                // Step 3: Render chart
+                loadingDiv.style.display = 'none';
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#d4edda';
+                statusDiv.style.color = '#155724';
+                statusDiv.textContent = `Loaded ${candles.length} candles for ${tradingSymbol}. Chart ready!`;
+
+                renderChart(candles, currentChartEvents);
+
+            } catch (error) {
+                loadingDiv.style.display = 'none';
+                statusDiv.style.display = 'block';
+                statusDiv.style.background = '#f8d7da';
+                statusDiv.style.color = '#721c24';
+                statusDiv.textContent = `Error: ${error.message}`;
+                console.error('Chart loading error:', error);
+            }
+        }
+
+        function renderChart(candles, events) {
+            const canvasDiv = document.getElementById('chart-canvas');
+            canvasDiv.innerHTML = '';
+
+            // Prepare data for simple line chart (we'll use Recharts LineChart for simplicity)
+            // For candlestick, we'd need a more complex setup, but line chart works well for price action
+
+            const chartData = candles.map(c => ({
+                time: new Date(c.date).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                timestamp: new Date(c.date).getTime(),
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+                volume: c.volume
+            }));
+
+            // Prepare trade markers
+            const markers = events.map(e => {
+                const eventTime = new Date(e.timestamp).getTime();
+                // Find closest candle
+                const closest = chartData.reduce((prev, curr) => {
+                    return Math.abs(curr.timestamp - eventTime) < Math.abs(prev.timestamp - eventTime) ? curr : prev;
+                });
+
+                return {
+                    time: closest.time,
+                    timestamp: closest.timestamp,
+                    price: closest.close,
+                    type: e.type,
+                    symbol: e.symbol,
+                    event: e
+                };
+            });
+
+            // Create chart HTML using vanilla approach (Recharts CDN needs proper React setup)
+            // For now, we'll create a simple canvas-based chart
+            createSimpleChart(chartData, markers, canvasDiv);
+        }
+
+        function createSimpleChart(data, markers, container) {
+            // Create a simple HTML/CSS based chart
+            const width = container.clientWidth;
+            const height = container.clientHeight || 500;
+
+            if (data.length === 0) {
+                container.innerHTML = '<div style="padding:20px; text-align:center; color:#666;">No data to display</div>';
+                return;
+            }
+
+            // Calculate price range
+            const prices = data.flatMap(d => [d.high, d.low]);
+            const minPrice = Math.min(...prices);
+            const maxPrice = Math.max(...prices);
+            const priceRange = maxPrice - minPrice;
+            const padding = priceRange * 0.1;
+
+            // Create SVG
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('width', width);
+            svg.setAttribute('height', height);
+            svg.style.background = '#fff';
+
+            const chartPadding = { top: 40, right: 60, bottom: 60, left: 60 };
+            const chartWidth = width - chartPadding.left - chartPadding.right;
+            const chartHeight = height - chartPadding.top - chartPadding.bottom;
+
+            // Scale functions
+            const xScale = (index) => chartPadding.left + (index / (data.length - 1)) * chartWidth;
+            const yScale = (price) => chartPadding.top + chartHeight - ((price - (minPrice - padding)) / (maxPrice - minPrice + 2 * padding)) * chartHeight;
+
+            // Draw grid lines
+            for (let i = 0; i <= 5; i++) {
+                const y = chartPadding.top + (i / 5) * chartHeight;
+                const price = maxPrice - (i / 5) * priceRange;
+                
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', chartPadding.left);
+                line.setAttribute('y1', y);
+                line.setAttribute('x2', chartPadding.left + chartWidth);
+                line.setAttribute('y2', y);
+                line.setAttribute('stroke', '#e0e0e0');
+                line.setAttribute('stroke-width', '1');
+                svg.appendChild(line);
+
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', chartPadding.left - 10);
+                text.setAttribute('y', y + 4);
+                text.setAttribute('text-anchor', 'end');
+                text.setAttribute('font-size', '12');
+                text.setAttribute('fill', '#666');
+                text.textContent = price.toFixed(2);
+                svg.appendChild(text);
+            }
+
+            // Draw candlesticks
+            data.forEach((d, i) => {
+                const x = xScale(i);
+                const candleWidth = Math.max(2, chartWidth / data.length - 2);
+
+                const color = d.close >= d.open ? '#26a69a' : '#ef5350';
+
+                // Wick (high-low line)
+                const wick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                wick.setAttribute('x1', x);
+                wick.setAttribute('y1', yScale(d.high));
+                wick.setAttribute('x2', x);
+                wick.setAttribute('y2', yScale(d.low));
+                wick.setAttribute('stroke', color);
+                wick.setAttribute('stroke-width', '1');
+                svg.appendChild(wick);
+
+                // Body (open-close rect)
+                const bodyHeight = Math.abs(yScale(d.open) - yScale(d.close));
+                const bodyY = Math.min(yScale(d.open), yScale(d.close));
+                const body = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                body.setAttribute('x', x - candleWidth / 2);
+                body.setAttribute('y', bodyY);
+                body.setAttribute('width', candleWidth);
+                body.setAttribute('height', Math.max(1, bodyHeight));
+                body.setAttribute('fill', color);
+                svg.appendChild(body);
+            });
+
+            // Draw trade markers
+            markers.forEach(marker => {
+                const dataIndex = data.findIndex(d => d.timestamp === marker.timestamp);
+                if (dataIndex === -1) return;
+
+                const x = xScale(dataIndex);
+                const y = yScale(marker.price);
+
+                let markerColor, markerSymbol, markerSize;
+                if (marker.type === 'ENTERED') {
+                    markerColor = '#28a745';
+                    markerSymbol = '●';
+                    markerSize = 8;
+                } else if (marker.type === 'MODIFIED') {
+                    markerColor = '#ffc107';
+                    markerSymbol = '▲';
+                    markerSize = 8;
+                } else if (marker.type === 'EXITED') {
+                    markerColor = '#dc3545';
+                    markerSymbol = '✕';
+                    markerSize = 10;
+                }
+
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', x);
+                circle.setAttribute('cy', y);
+                circle.setAttribute('r', markerSize);
+                circle.setAttribute('fill', markerColor);
+                circle.setAttribute('stroke', '#fff');
+                circle.setAttribute('stroke-width', '2');
+                circle.style.cursor = 'pointer';
+                
+                // Enhanced Tooltip with full trade details
+                const evt = marker.event;
+                let tooltipLines = [];
+                
+                tooltipLines.push(`${marker.type}: ${marker.symbol}`);
+                tooltipLines.push(`Time: ${new Date(evt.timestamp).toLocaleString('en-IN')}`);
+                tooltipLines.push(`Product: ${evt.product || 'N/A'}`);
+                tooltipLines.push('');
+                
+                if (marker.type === 'ENTERED') {
+                    tooltipLines.push(`Entered Qty: ${evt.after_quantity}`);
+                    tooltipLines.push(`Entry Price: ₹${evt.after_average_price.toFixed(2)}`);
+                    tooltipLines.push(`LTP: ₹${evt.after_last_price.toFixed(2)}`);
+                    if (evt.after_unbooked_pnl !== 0) {
+                        tooltipLines.push(`Unbooked P&L: ₹${evt.after_unbooked_pnl.toFixed(2)}`);
+                    }
+                } else if (marker.type === 'MODIFIED') {
+                    const qtyChange = evt.quantity_diff;
+                    const sign = qtyChange > 0 ? '+' : '';
+                    tooltipLines.push(`Qty Change: ${evt.before_quantity} → ${evt.after_quantity} (${sign}${qtyChange})`);
+                    
+                    if (evt.implied_fill_side) {
+                        tooltipLines.push(`Fill: ${evt.implied_fill_side} ${evt.implied_fill_qty} @ ₹${evt.implied_fill_price.toFixed(2)}`);
+                    }
+                    
+                    tooltipLines.push(`Avg Price: ₹${evt.before_average_price.toFixed(2)} → ₹${evt.after_average_price.toFixed(2)}`);
+                    tooltipLines.push(`LTP: ₹${evt.after_last_price.toFixed(2)}`);
+                    
+                    if (evt.exit_pnl !== 0) {
+                        tooltipLines.push(`Exit P&L: ₹${evt.exit_pnl.toFixed(2)}`);
+                        tooltipLines.push(`Exit Price: ₹${evt.exit_price.toFixed(2)}`);
+                    }
+                    
+                    if (evt.after_unbooked_pnl !== 0) {
+                        tooltipLines.push(`Unbooked P&L: ₹${evt.after_unbooked_pnl.toFixed(2)}`);
+                    }
+                } else if (marker.type === 'EXITED') {
+                    tooltipLines.push(`Exited Qty: ${evt.before_quantity}`);
+                    tooltipLines.push(`Entry Price: ₹${evt.before_average_price.toFixed(2)}`);
+                    
+                    if (evt.exit_pnl !== 0) {
+                        const pnlColor = evt.exit_pnl > 0 ? 'Profit' : 'Loss';
+                        tooltipLines.push(`Exit P&L: ₹${evt.exit_pnl.toFixed(2)} (${pnlColor})`);
+                        tooltipLines.push(`Exit Price: ₹${evt.exit_price.toFixed(2)}`);
+                    }
+                }
+                
+                const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                title.textContent = tooltipLines.join('\n');
+                circle.appendChild(title);
+                
+                svg.appendChild(circle);
+            });
+
+            // X-axis labels (show every nth label to avoid crowding)
+            const labelStep = Math.ceil(data.length / 10);
+            for (let i = 0; i < data.length; i += labelStep) {
+                const x = xScale(i);
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', x);
+                text.setAttribute('y', chartPadding.top + chartHeight + 20);
+                text.setAttribute('text-anchor', 'middle');
+                text.setAttribute('font-size', '11');
+                text.setAttribute('fill', '#666');
+                text.textContent = data[i].time.split(',')[0]; // Just date part
+                svg.appendChild(text);
+            }
+
+            // Legend
+            const legendY = 20;
+            const legendItems = [
+                { color: '#28a745', label: '● Entry', x: chartPadding.left },
+                { color: '#ffc107', label: '▲ Modified', x: chartPadding.left + 100 },
+                { color: '#dc3545', label: '✕ Exit', x: chartPadding.left + 220 }
+            ];
+
+            legendItems.forEach(item => {
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', item.x);
+                text.setAttribute('y', legendY);
+                text.setAttribute('font-size', '13');
+                text.setAttribute('fill', item.color);
+                text.setAttribute('font-weight', 'bold');
+                text.textContent = item.label;
+                svg.appendChild(text);
+            });
+
+            container.appendChild(svg);
+        }
+
+        // Close any open modal on ESC
+        document.addEventListener('keydown', function (event) {
+            // 'Escape' is standard; 'Esc' for older browsers.
+            if (event.key !== 'Escape' && event.key !== 'Esc') return;
+
+            const modal = document.getElementById('modal');
+            const logModal = document.getElementById('log-modal');
+
+            if (modal && modal.style.display === 'block') {
+                closeModal();
+            }
+            if (logModal && logModal.style.display === 'block') {
+                closeLogModal();
+            }
+        });
 
 
         // Close modal when clicking outside
@@ -331,11 +1610,15 @@
                     if (data.error) {
                         html += '<p class="error">' + data.error + '</p>';
                     } else {
-                        // 1. Changes Table (Start with this as requested)
-                        html += '<h3>Recent Changes</h3>';
+                        // 1. Changes Table
                         if (data.diff) {
+                            const addedCount = (data.diff.added || []).length;
+                            const removedCount = (data.diff.removed || []).length;
+                            const modifiedCount = (data.diff.modified || []).length;
+                            html += `<h3>Recent Changes (Added: ${addedCount}, Removed: ${removedCount}, Modified: ${modifiedCount})</h3>`;
                             html += buildDiffTable(data.diff);
                         } else {
+                            html += '<h3>Recent Changes</h3>';
                             html += '<p>No structured diff available.</p>';
                         }
 
@@ -361,18 +1644,72 @@
                 let rows = '';
                 items.forEach(item => {
                     let desc = '';
+                    let priceInfo = '';
+                    
                     if (type === 'MODIFIED') {
                         let sign = item.quantity_diff > 0 ? '+' : '';
                         desc = `Qty: ${item.old_quantity} &rarr; <b>${item.quantity}</b> (${sign}${item.quantity_diff})`;
+                        
+                        // Show price info for all modified positions
+                        // NOTE: For MODIFIED, we want the *pre-change* (previous snapshot) average price.
+                        // `original_average_price` is computed server-side with history fallback (similar to REMOVED).
+                        let avgPriceBefore = parseFloat(item.original_average_price ?? 0).toFixed(2);
+                        let avgPriceAfter = parseFloat(item.average_price ?? 0).toFixed(2);
+                        let lastPrice = parseFloat(item.last_price || 0).toFixed(2);
+                        let pnl = parseFloat(item.unbooked_pnl || 0);
+                        let pnlColor = pnl >= 0 ? '#28a745' : '#dc3545';
+                        
+                        priceInfo = `<br><span style="color:#666; font-size:0.85em;">Avg (Before): ₹${avgPriceBefore} | Avg (Current): ₹${avgPriceAfter} | LTP: ₹${lastPrice} | Unbooked P&L: <span style="color:${pnlColor}">₹${pnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></span>`;
+
+                        // Show implied fill price for the net modification between snapshots (best-effort).
+                        // Always display as positive price with BUY/SELL based on quantity delta.
+                        const fillSide = (item.implied_fill_side || '').toUpperCase();
+                        const fillQty = Math.abs(parseInt(item.implied_fill_qty ?? item.quantity_diff ?? 0, 10) || 0);
+                        const fillPrice = parseFloat(item.implied_fill_price || 0);
+                        if (fillSide && fillQty > 0 && fillPrice > 0) {
+                            const fillColor = fillSide === 'BUY' ? '#28a745' : '#dc3545';
+                            priceInfo += `<br><span style="color:${fillColor}; font-size:0.85em; font-weight:bold;">Implied Fill (${fillSide}): Qty ${fillQty} @ ₹${fillPrice.toFixed(2)} <span style="color:#666; font-weight:normal;">(approx)</span></span>`;
+                        }
+                        
+                        // Show exit P&L if there's a reduction (negative diff for long, positive for short)
+                        if ((item.old_quantity > 0 && item.quantity_diff < 0) || (item.old_quantity < 0 && item.quantity_diff > 0)) {
+                            if (item.exit_pnl != 0) {
+                                let exitPnlColor = item.exit_pnl > 0 ? '#28a745' : '#dc3545';
+                                priceInfo += `<br><span style="color:${exitPnlColor}; font-size:0.85em; font-weight:bold;">Exit P&L: ₹${item.exit_pnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} | Exit Price: ₹${(item.exit_price || 0).toFixed(2)}</span>`;
+                            }
+                        }
+                    } else if (type === 'REMOVED') {
+                        // Show original quantity → 0
+                        let originalQty = item.original_quantity || item.quantity || 0;
+                        desc = `Qty: ${originalQty} → 0`;
+                        
+                        // Show exit P&L and exit price
+                        let avgPrice = parseFloat(item.average_price || 0).toFixed(2);
+                        let exitPnl = parseFloat(item.exit_pnl || 0);
+                        let exitPrice = parseFloat(item.exit_price || 0).toFixed(2);
+                        
+                        // Show exit info whenever we have an exit price, even if Exit P&L is 0
+                        // (Exit P&L may be 0 from broker feed even when a leg was closed, so we compute
+                        // best-effort in the backend and still render the exit metrics here.)
+                        if (parseFloat(exitPrice) > 0 || exitPnl != 0) {
+                            let pnlColor = exitPnl > 0 ? '#28a745' : (exitPnl < 0 ? '#dc3545' : '#666');
+                            priceInfo = `<br><span style="color:${pnlColor}; font-size:0.85em; font-weight:bold;">Avg Price: ₹${avgPrice} | Exit P&L: ₹${exitPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} | Exit Price: ₹${exitPrice}</span>`;
+                        } else {
+                            priceInfo = `<br><span style="color:#666; font-size:0.85em;">Avg Price: ₹${avgPrice}</span>`;
+                        }
                     } else {
                         desc = `Qty: ${item.quantity}`;
+                        // Show price info for added positions too
+                        let avgPrice = parseFloat(item.average_price || 0).toFixed(2);
+                        let lastPrice = parseFloat(item.last_price || 0).toFixed(2);
+                        priceInfo = `<br><span style="color:#666; font-size:0.85em;">Avg: ₹${avgPrice} | LTP: ₹${lastPrice}</span>`;
                     }
 
                     rows += `<tr style="background-color: ${color};">
                         <td><b>${type}</b></td>
                         <td>${item.trading_symbol}</td>
                         <td>${item.product}</td>
-                        <td>${desc}</td>
+                        <td>${desc}${priceInfo}</td>
                     </tr>`;
                 });
                 return rows;
@@ -384,7 +1721,10 @@
             rows += renderRows(diff.modified, 'MODIFIED', '#fff3cd'); // Yellowish
 
             if (!hasChanges) {
-                return '<p>No changes detected in position structure.</p>';
+                const addedCount = (diff.added || []).length;
+                const removedCount = (diff.removed || []).length;
+                const modifiedCount = (diff.modified || []).length;
+                return `<p>No position structure changes (Added: ${addedCount}, Removed: ${removedCount}, Modified: ${modifiedCount}).</p>`;
             }
 
             html += '<table border="1" cellpadding="5" style="border-collapse:collapse; width:100%">';

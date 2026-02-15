@@ -64,29 +64,29 @@ def normalize_trades(trades):
     return sorted(trades, key=lambda x: (x.get('trading_symbol', ''), x.get('product', ''), x.get('quantity', 0)))
 
 def get_normalized_trades(data):
-    # Extract and normalize trades for deep comparison
+    """Return a stable, comparable representation of the position structure.
+
+    Important: This is used to decide whether we record a new `position_changes` row.
+    It should only change when the *structure/quantity* changes (symbol/product/strike/type/qty),
+    not when prices or P&L fluctuate.
+    """
     positions = data.get('data', [])
     all_trades = []
+
     for p in positions:
         for t in p.get('trades', []):
-            # Key fields that define a trade's identity and state
+            instrument_info = t.get('instrument_info') or {}
             trade_key = {
                 'symbol': t.get('trading_symbol'),
                 'product': t.get('product'),
-                'strike': t.get('instrument_info', {}).get('strike'),
-                'option_type': t.get('instrument_info', {}).get('instrument_type'),
+                'strike': instrument_info.get('strike'),
+                'option_type': instrument_info.get('instrument_type'),
                 'quantity': t.get('quantity'),
-                'avg_price': t.get('average_price'),
-                # We include PnL in comparison if we want to track price changes too, 
-                # but user asked for "changes in the positions". 
-                # Usually position changes mean Qty/Strike/Symbol changes. 
-                # If we track PnL, it will change every second. 
-                # Let's stick to structural fields + quantity + price.
             }
             all_trades.append(trade_key)
 
-    # Sort by symbol and product to ensure list order doesn't affect comparison
-    all_trades.sort(key=lambda x: (x['symbol'], x['product'], x['quantity']))
+    # Sort by identity and qty to ensure list order doesn't affect comparison
+    all_trades.sort(key=lambda x: (x['symbol'] or '', x['product'] or '', x['strike'] or 0, x['option_type'] or '', x['quantity'] or 0))
     return all_trades
 
 DAYS_TO_KEEP_DATA = 30
@@ -138,10 +138,6 @@ def run_scraper():
 
     for slug in slugs:
         print(f"Checking {slug}...")
-        current_data = fetch_data(slug)
-        if not current_data:
-            print(f"Skipping {slug}, no data.")
-        conn.commit()
         
         # Get Profile ID
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (slug,)).fetchone()
@@ -157,15 +153,16 @@ def run_scraper():
         should_run = (last_snapshot is None) or is_market_open()
         
         if not should_run:
+            print(f"Skipping {slug} (market closed and data exists)")
             continue
 
         print(f"Processing {slug}...")
         
         # Fetch current data
         try:
-            current_data = fetch_data(slug) # Changed from fetch_positions to fetch_data
+            current_data = fetch_data(slug)
             if not current_data:
-                print(f"Skipping {slug}, no data.")
+                print(f"Skipping {slug}, no data returned from API.")
                 continue
             
             # ALWAYS update the latest snapshot for Realtime P&L
@@ -206,17 +203,62 @@ def run_scraper():
 
     conn.close()
 
+def _positions_key(trade):
+    """Identity of a position leg for summary purposes."""
+    return (
+        trade.get('symbol'),
+        trade.get('product'),
+        trade.get('strike'),
+        trade.get('option_type'),
+    )
+
+
 def generate_diff_summary(old_data, new_data):
-    # Quick helper for summary string
+    """Generate a user-facing summary for the profile timeline.
+
+    IMPORTANT: This must match the conceptual model used by the UI "Recent Changes"
+    popup (Added / Removed / Modified). The old implementation inferred "Added" and
+    "Reduced" purely from list length, which breaks when one leg is removed and a
+    different leg is added in the same snapshot (net length unchanged).
+
+    We define a "position leg" identity by `_positions_key()` (symbol+product+strike+type)
+    and detect:
+      - Added: present in new, not in old
+      - Removed: present in old, not in new
+      - Modified: present in both but quantity changed
+
+    The summary string is intentionally compact for single-type events, and more
+    explicit when multiple types occur together.
+    """
     old_trades = get_normalized_trades(old_data)
     new_trades = get_normalized_trades(new_data)
-    
-    if len(new_trades) > len(old_trades):
-        return f"Positions Added ({len(new_trades) - len(old_trades)})"
-    elif len(new_trades) < len(old_trades):
-        return f"Positions Reduced ({len(old_trades) - len(new_trades)})"
-    else:
-        return "Positions Modified"
+
+    old_map = {_positions_key(t): (t.get('quantity') or 0) for t in old_trades}
+    new_map = {_positions_key(t): (t.get('quantity') or 0) for t in new_trades}
+
+    old_keys = set(old_map.keys())
+    new_keys = set(new_map.keys())
+
+    added_count = len(new_keys - old_keys)
+    removed_count = len(old_keys - new_keys)
+
+    modified_count = 0
+    for k in (old_keys & new_keys):
+        if old_map.get(k, 0) != new_map.get(k, 0):
+            modified_count += 1
+
+    # Prefer the legacy compact labels when only one type is present
+    if added_count and not removed_count and not modified_count:
+        return f"Positions Added ({added_count})"
+    if removed_count and not added_count and not modified_count:
+        return f"Positions Reduced ({removed_count})"
+    if modified_count and not added_count and not removed_count:
+        return f"Positions Modified ({modified_count})"
+
+    # Otherwise be explicit to avoid misleading titles.
+    return (
+        f"Positions Changed (Added: {added_count}, Removed: {removed_count}, Modified: {modified_count})"
+    )
 
 def is_market_open():
     now = datetime.now()

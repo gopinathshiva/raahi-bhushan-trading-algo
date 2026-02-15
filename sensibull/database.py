@@ -64,6 +64,21 @@ def init_db():
         )
     ''')
     
+    # Table to store Zerodha master contract data
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS master_contract (
+            instrument_token INTEGER PRIMARY KEY,
+            trading_symbol TEXT NOT NULL,
+            exchange TEXT,
+            name TEXT,
+            expiry TEXT,
+            strike REAL,
+            lot_size INTEGER,
+            instrument_type TEXT,
+            last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     print("Database initialized.")
@@ -102,8 +117,19 @@ def sync_profiles():
     
     conn = get_db()
     c = conn.cursor()
+    
+    # Add new profiles
     for slug in clean_slugs:
         c.execute("INSERT OR IGNORE INTO profiles (slug, name) VALUES (?, ?)", (slug, slug))
+    
+    # Remove profiles that are no longer in urls.txt
+    if clean_slugs:
+        placeholders = ','.join('?' * len(clean_slugs))
+        c.execute(f"DELETE FROM profiles WHERE slug NOT IN ({placeholders})", clean_slugs)
+        deleted = c.rowcount
+        if deleted > 0:
+            print(f"Removed {deleted} profiles no longer in urls.txt")
+    
     conn.commit()
     conn.close()
 

@@ -11,6 +11,18 @@
             background: #f4f4f9;
         }
 
+        /* Use more of the screen on laptops / high-res displays */
+        .container {
+            width: min(1600px, 100%);
+            margin: 0 auto;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 12px;
+            }
+        }
+
         h1 {
             color: #333;
         }
@@ -55,6 +67,7 @@
 </head>
 
 <body>
+    <div class="container">
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div>
             <h1>Sensibull Tracker Dashboard</h1>
@@ -73,11 +86,50 @@
             </div>
             {% endif %}
         </div>
-        <button onclick="restartApp()"
-            style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Restart
-            Scraper</button>
+        <div style="display: flex; gap: 10px;">
+            <button onclick="window.location.href='/historical_data'"
+                style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Historical
+                Data</button>
+            <button onclick="downloadMasterContract()"
+                style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Download
+                Master Contract</button>
+            <button onclick="restartApp()"
+                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Restart
+                Scraper</button>
+        </div>
     </div>
     <script>
+        function downloadMasterContract() {
+            if (confirm("Download Zerodha Master Contract? This will update the instrument database.")) {
+                // Show loading state
+                const btn = event.target;
+                const originalText = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = 'Downloading...';
+                btn.style.background = '#6c757d';
+                
+                fetch('/api/download_master_contract', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        btn.disabled = false;
+                        btn.innerHTML = originalText;
+                        btn.style.background = '#28a745';
+                        
+                        if (data.success) {
+                            alert(data.message + '\n\nTotal instruments: ' + data.count);
+                        } else {
+                            alert('Error: ' + (data.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(err => {
+                        btn.disabled = false;
+                        btn.innerHTML = originalText;
+                        btn.style.background = '#28a745';
+                        alert("Error downloading master contract: " + err);
+                    });
+            }
+        }
+
         function restartApp() {
             if (confirm("Are you sure you want to restart the scraper?")) {
                 fetch('/restart', { method: 'POST' })
@@ -152,6 +204,7 @@
                 {% endfor %}
             </tbody>
         </table>
+    </div>
     </div>
 </body>
 
