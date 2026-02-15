@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>Historical Data - Zerodha</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            background: #f4f4f9;
+        }
+
+        .container {
+            width: min(1400px, 100%);
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        input[type="text"],
+        input[type="date"],
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        .autocomplete-container {
+            position: relative;
+        }
+
+        .autocomplete-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-top: none;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+
+        .autocomplete-item {
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .autocomplete-item:hover {
+            background: #f8f8f8;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .results-section {
+            margin-top: 40px;
+            display: none;
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        th,
+        td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #f8f8f8;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:hover {
+            background: #f9f9f9;
+        }
+
+        .error {
+            color: #dc3545;
+            padding: 10px;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .success {
+            color: #28a745;
+            padding: 10px;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .info {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← Back to Dashboard</a>
+        <h1>Historical Data Download</h1>
+        <p class="info">Download historical OHLCV data from Zerodha using enctoken</p>
+
+        <form id="historicalForm">
+            <div class="form-group">
+                <label for="enctoken">Enctoken</label>
+                <input type="text" id="enctoken" placeholder="Enter your Zerodha enctoken" required>
+                <p class="info">Your enctoken will be saved in browser localStorage</p>
+            </div>
+
+            <div class="form-group">
+                <label for="symbol">Trading Symbol</label>
+                <div class="autocomplete-container">
+                    <input type="text" id="symbol" placeholder="Search for instrument (e.g., NIFTY, INFY, RELIANCE)"
+                        autocomplete="off" required>
+                    <div class="autocomplete-results" id="autocompleteResults"></div>
+                </div>
+                <input type="hidden" id="instrumentToken">
+                <p class="info" id="selectedInfo"></p>
+            </div>
+
+            <div class="row">
+                <div class="form-group">
+                    <label for="fromDate">From Date</label>
+                    <input type="date" id="fromDate" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="toDate">To Date</label>
+                    <input type="date" id="toDate" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="interval">Interval</label>
+                <select id="interval" required>
+                    <option value="minute">1 Minute</option>
+                    <option value="3minute">3 Minutes</option>
+                    <option value="5minute">5 Minutes</option>
+                    <option value="15minute">15 Minutes</option>
+                    <option value="30minute">30 Minutes</option>
+                    <option value="60minute">60 Minutes</option>
+                    <option value="day" selected>Day</option>
+                </select>
+            </div>
+
+            <button type="submit" id="submitBtn">Fetch Historical Data</button>
+            <div id="message"></div>
+        </form>
+
+        <div class="results-section" id="resultsSection">
+            <div class="results-header">
+                <h2>Historical Data (<span id="recordCount">0</span> records)</h2>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date/Time</th>
+                            <th>Open</th>
+                            <th>High</th>
+                            <th>Low</th>
+                            <th>Close</th>
+                            <th>Volume</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load enctoken from localStorage on page load
+        window.addEventListener('DOMContentLoaded', function () {
+            const savedEnctoken = localStorage.getItem('zerodha_enctoken');
+            if (savedEnctoken) {
+                document.getElementById('enctoken').value = savedEnctoken;
+            }
+
+            // Set default date range (last 30 days to today)
+            const today = new Date();
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+
+            document.getElementById('toDate').valueAsDate = today;
+            document.getElementById('fromDate').valueAsDate = thirtyDaysAgo;
+        });
+
+        // Save enctoken to localStorage when changed
+        document.getElementById('enctoken').addEventListener('change', function () {
+            const enctoken = this.value.trim();
+            if (enctoken) {
+                localStorage.setItem('zerodha_enctoken', enctoken);
+            }
+        });
+
+        // Autocomplete functionality
+        let autocompleteTimeout;
+        const symbolInput = document.getElementById('symbol');
+        const autocompleteResults = document.getElementById('autocompleteResults');
+
+        symbolInput.addEventListener('input', function () {
+            const query = this.value.trim();
+
+            clearTimeout(autocompleteTimeout);
+
+            if (query.length < 2) {
+                autocompleteResults.style.display = 'none';
+                return;
+            }
+
+            autocompleteTimeout = setTimeout(() => {
+                fetch(`/api/search_instruments?q=${encodeURIComponent(query)}&limit=20`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.results && data.results.length > 0) {
+                            displayAutocompleteResults(data.results);
+                        } else {
+                            autocompleteResults.innerHTML = '<div class="autocomplete-item">No results found</div>';
+                            autocompleteResults.style.display = 'block';
+                        }
+                    })
+                    .catch(err => console.error('Autocomplete error:', err));
+            }, 300);
+        });
+
+        function displayAutocompleteResults(results) {
+            autocompleteResults.innerHTML = '';
+            results.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'autocomplete-item';
+                div.innerHTML = `
+                    <strong>${item.trading_symbol}</strong> (${item.exchange})
+                    <br><small>${item.name || ''} ${item.instrument_type ? '- ' + item.instrument_type : ''}</small>
+                `;
+                div.addEventListener('click', () => selectInstrument(item));
+                autocompleteResults.appendChild(div);
+            });
+            autocompleteResults.style.display = 'block';
+        }
+
+        function selectInstrument(item) {
+            document.getElementById('symbol').value = item.trading_symbol;
+            document.getElementById('instrumentToken').value = item.instrument_token;
+            document.getElementById('selectedInfo').textContent =
+                `Selected: ${item.trading_symbol} (${item.exchange}) - Token: ${item.instrument_token}`;
+            autocompleteResults.style.display = 'none';
+        }
+
+        // Close autocomplete when clicking outside
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('.autocomplete-container')) {
+                autocompleteResults.style.display = 'none';
+            }
+        });
+
+        // Form submission
+        document.getElementById('historicalForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const enctoken = document.getElementById('enctoken').value.trim();
+            const instrumentToken = document.getElementById('instrumentToken').value.trim();
+            const fromDate = document.getElementById('fromDate').value;
+            const toDate = document.getElementById('toDate').value;
+            const interval = document.getElementById('interval').value;
+
+            if (!instrumentToken) {
+                showMessage('Please select an instrument from the autocomplete suggestions', 'error');
+                return;
+            }
+
+            // Save enctoken
+            localStorage.setItem('zerodha_enctoken', enctoken);
+
+            const submitBtn = document.getElementById('submitBtn');
+            const originalText = submitBtn.textContent;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Fetching...';
+
+            fetch('/api/fetch_historical_data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    enctoken: enctoken,
+                    instrument_token: instrumentToken,
+                    from_date: fromDate,
+                    to_date: toDate,
+                    interval: interval
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = originalText;
+
+                    if (data.success) {
+                        displayResults(data.data);
+                        showMessage(`Successfully fetched ${data.count} records`, 'success');
+                    } else {
+                        showMessage('Error: ' + (data.error || 'Unknown error'), 'error');
+                    }
+                })
+                .catch(err => {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = originalText;
+                    showMessage('Network error: ' + err.message, 'error');
+                });
+        });
+
+        function displayResults(data) {
+            const resultsBody = document.getElementById('resultsBody');
+            const resultsSection = document.getElementById('resultsSection');
+            const recordCount = document.getElementById('recordCount');
+
+            resultsBody.innerHTML = '';
+
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                const date = new Date(row.date);
+                tr.innerHTML = `
+                    <td>${date.toLocaleString()}</td>
+                    <td>${row.open.toFixed(2)}</td>
+                    <td>${row.high.toFixed(2)}</td>
+                    <td>${row.low.toFixed(2)}</td>
+                    <td>${row.close.toFixed(2)}</td>
+                    <td>${row.volume.toLocaleString()}</td>
+                `;
+                resultsBody.appendChild(tr);
+            });
+
+            recordCount.textContent = data.length;
+            resultsSection.style.display = 'block';
+
+            // Scroll to results
+            resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function showMessage(text, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = type;
+            messageDiv.textContent = text;
+            messageDiv.style.display = 'block';
+
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 5000);
+        }
+    </script>
+</body>
+
+</html>

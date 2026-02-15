@@ -64,6 +64,21 @@ def init_db():
         )
     ''')
     
+    # Table to store Zerodha master contract data
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS master_contract (
+            instrument_token INTEGER PRIMARY KEY,
+            trading_symbol TEXT NOT NULL,
+            exchange TEXT,
+            name TEXT,
+            expiry TEXT,
+            strike REAL,
+            lot_size INTEGER,
+            instrument_type TEXT,
+            last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     print("Database initialized.")
