@@ -103,8 +103,8 @@ def monitor_scraper():
                  pass
                  
             if should_restart:
-                # Check cooldown (don't restart if we just restarted < 5 mins ago)
-                if LAST_AUTO_RESTART and (datetime.now() - LAST_AUTO_RESTART).total_seconds() < 300:
+                # Check cooldown (don't restart if we just restarted < 1 min ago)
+                if LAST_AUTO_RESTART and (datetime.now() - LAST_AUTO_RESTART).total_seconds() < 60:
                     print("Monitor: Skipping restart due to cooldown.")
                 else:
                     print("Monitor: Triggering auto-restart.")
