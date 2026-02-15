@@ -90,6 +90,9 @@
             <button onclick="window.location.href='/historical_data'"
                 style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Historical
                 Data</button>
+            <button onclick="fetchScraperStatus()"
+                style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Scraper
+                Status</button>
             <button onclick="downloadMasterContract()"
                 style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Download
                 Master Contract</button>
@@ -99,6 +102,84 @@
         </div>
     </div>
     <script>
+        function fetchScraperStatus() {
+            fetch('/api/scraper-status')
+                .then(response => response.json())
+                .then(data => {
+                    showScraperStatusModal(data);
+                })
+                .catch(err => {
+                    alert("Error fetching scraper status: " + err);
+                });
+        }
+
+        function showScraperStatusModal(status) {
+            const modalHTML = `
+                <div id="statusModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
+                    <div style="background: white; padding: 30px; border-radius: 10px; max-width: 600px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                        <h2 style="margin-top: 0; color: #333;">Scraper Status</h2>
+                        <div style="margin: 20px 0;">
+                            <div style="display: flex; align-items: center; margin-bottom: 15px;">
+                                <strong style="min-width: 180px;">Status:</strong>
+                                <span style="padding: 5px 15px; border-radius: 5px; background: ${status.running ? '#28a745' : '#dc3545'}; color: white; font-weight: bold;">
+                                    ${status.running ? '✓ Running' : '✗ Not Running'}
+                                </span>
+                            </div>
+                            <div style="display: flex; align-items: center; margin-bottom: 15px;">
+                                <strong style="min-width: 180px;">Market:</strong>
+                                <span style="padding: 5px 15px; border-radius: 5px; background: ${status.market_open ? '#28a745' : '#ffc107'}; color: ${status.market_open ? 'white' : '#000'}; font-weight: bold;">
+                                    ${status.market_open ? 'Open' : 'Closed'}
+                                </span>
+                            </div>
+                            <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                                <strong style="min-width: 180px;">Status Text:</strong>
+                                <span style="color: #555;">${status.status_text}</span>
+                            </div>
+                            ${status.last_updated ? `
+                                <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                                    <strong style="min-width: 180px;">Last Updated:</strong>
+                                    <span style="color: #555;">${new Date(status.last_updated).toLocaleString()}</span>
+                                </div>
+                            ` : ''}
+                            ${status.time_since_update !== null && status.time_since_update !== undefined ? `
+                                <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                                    <strong style="min-width: 180px;">Time Since Update:</strong>
+                                    <span style="color: #555;">${formatTimeDiff(status.time_since_update)}</span>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div style="margin-top: 20px; text-align: right;">
+                            <button onclick="closeStatusModal()" 
+                                style="padding: 10px 30px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+        }
+
+        function formatTimeDiff(seconds) {
+            if (seconds < 60) {
+                return Math.floor(seconds) + ' seconds';
+            } else if (seconds < 3600) {
+                return Math.floor(seconds / 60) + ' minutes';
+            } else {
+                const hours = Math.floor(seconds / 3600);
+                const mins = Math.floor((seconds % 3600) / 60);
+                return hours + ' hours ' + mins + ' minutes';
+            }
+        }
+
+        function closeStatusModal() {
+            const modal = document.getElementById('statusModal');
+            if (modal) {
+                modal.remove();
+            }
+        }
+
         function downloadMasterContract() {
             if (confirm("Download Zerodha Master Contract? This will update the instrument database.")) {
                 // Show loading state
