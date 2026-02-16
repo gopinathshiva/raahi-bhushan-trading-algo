@@ -28,17 +28,26 @@ SYMBOL_SUGGESTIONS_TTL_SEC = 60
 
 # Global variable to track last restart to prevent loops
 LAST_AUTO_RESTART = None
+# Global variable to track app start time for auto-start countdown
+APP_START_TIME = None
+SCRAPER_AUTO_START_DELAY = 30  # seconds
 
 @app.template_filter('to_datetime')
 def to_datetime_filter(value):
     # Timestamps in DB are stored in ISO format with IST timezone (e.g., "2026-02-16T10:30:00+05:30")
     # We parse them and return as timezone-aware datetime objects for accurate calculations
     if isinstance(value, datetime):
+        # If datetime is naive (old data), assume it's IST
+        if value.tzinfo is None:
+            return value.replace(tzinfo=IST)
         return value
     
     try:
         # First try ISO format with timezone (new format)
         dt = datetime.fromisoformat(value)
+        # Ensure it has timezone info
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=IST)
         return dt
     except (ValueError, AttributeError):
         try:
@@ -81,6 +90,15 @@ def monitor_scraper():
     global LAST_AUTO_RESTART
     print("Scraper monitor thread started.")
     
+    # Wait for auto-start delay before first check
+    print(f"Waiting {SCRAPER_AUTO_START_DELAY} seconds before auto-starting scraper...")
+    time.sleep(SCRAPER_AUTO_START_DELAY)
+    
+    # Auto-start scraper on first run
+    print("Auto-starting scraper...")
+    restart_scraper_internal()
+    LAST_AUTO_RESTART = now_ist()
+    
     while True:
         try:
             # Check every minute
@@ -101,6 +119,9 @@ def monitor_scraper():
             
             if last_updated:
                 last_dt = to_datetime_filter(last_updated)
+                # Ensure both datetimes are timezone-aware for comparison
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=IST)
                 time_diff = (now_ist() - last_dt).total_seconds()
                 
                 # If no update for > 5 minutes (300 seconds)
@@ -200,7 +221,12 @@ def index():
         # Check if stuck (no update in last 3 minutes)
         if last_updated:
             last_dt = to_datetime_filter(last_updated)
-            if (now_ist() - last_dt).total_seconds() > 180:
+            # Ensure both datetimes are timezone-aware for comparison
+            current_time = now_ist()
+            if last_dt.tzinfo is None:
+                # If old data without timezone, assume it's IST
+                last_dt = last_dt.replace(tzinfo=IST)
+            if (current_time - last_dt).total_seconds() > 180:
                 scraper_error = "Scraper is stuck or not running! (Last update > 3 mins ago)"
         else:
              scraper_error = "Scraper has no data yet!"
@@ -1598,14 +1624,29 @@ def scraper_status():
             'market_open': is_market_hours,
             'last_updated': last_updated,
             'status_text': '',
-            'time_since_update': None
+            'time_since_update': None,
+            'auto_start_in': None  # New field for countdown
         }
+        
+        # Check if we're in the auto-start waiting period
+        if APP_START_TIME:
+            elapsed_since_start = (now_ist() - APP_START_TIME).total_seconds()
+            if elapsed_since_start < SCRAPER_AUTO_START_DELAY:
+                # Still waiting for auto-start
+                remaining = int(SCRAPER_AUTO_START_DELAY - elapsed_since_start)
+                status['auto_start_in'] = remaining
+                status['status_text'] = f'Auto-starting in {remaining} seconds...'
+                status['running'] = False
+                return jsonify(status)
         
         if not is_market_hours:
             status['status_text'] = 'Market Closed - Scraper Paused'
             status['running'] = False
         elif last_updated:
             last_dt = to_datetime_filter(last_updated)
+            # Ensure both datetimes are timezone-aware for comparison
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=IST)
             time_diff = (now_ist() - last_dt).total_seconds()
             status['time_since_update'] = time_diff
             
@@ -1659,15 +1700,49 @@ def delete_date(date):
         print(f"Error deleting data for {date}: {e}")
         return jsonify({'error': str(e)}), 500
 
+def cleanup_port():
+    """Kill any process using port 6060"""
+    try:
+        print(f"Cleaning up port {PORT}...")
+        # Find and kill process using the port
+        result = subprocess.run(
+            ['lsof', '-ti', f':{PORT}'],
+            capture_output=True,
+            text=True
+        )
+        if result.stdout.strip():
+            pids = result.stdout.strip().split('\n')
+            for pid in pids:
+                try:
+                    os.kill(int(pid), signal.SIGKILL)
+                    print(f"Killed process {pid} using port {PORT}")
+                except:
+                    pass
+    except Exception as e:
+        print(f"Error cleaning up port: {e}")
+
 def signal_handler(sig, frame):
     print('\nShutting down gracefully...')
+    cleanup_port()
     sys.exit(0)
 
 if __name__ == '__main__':
+    # Clean up port before starting (in case of unclean shutdown)
+    cleanup_port()
+    time.sleep(0.5)  # Give OS time to release the port
+    
     # Register signal handlers for clean shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    # Record app start time for auto-start countdown
+    APP_START_TIME = now_ist()
+    
     # Start monitor thread
     threading.Thread(target=monitor_scraper, daemon=True).start()
-    app.run(debug=False, host='0.0.0.0', port=PORT)
+    
+    try:
+        app.run(debug=False, host='0.0.0.0', port=PORT)
+    finally:
+        # Ensure cleanup on exit
+        cleanup_port()
