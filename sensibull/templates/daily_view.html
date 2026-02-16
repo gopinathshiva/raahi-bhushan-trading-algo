@@ -303,6 +303,12 @@
                 <button onclick="loadUnderlyingTrades()">Load / Refresh</button>
                 <span class="search-help">Showing all historical positions grouped by underlying</span>
             </div>
+            <div style="margin-top: 10px; margin-bottom: 10px;">
+                <label style="cursor:pointer; user-select:none;">
+                    <input type="checkbox" id="sort-by-strike" style="margin-right:6px;" />
+                    Sort by Strike Price (PE first, then CE)
+                </label>
+            </div>
             <div id="underlying-status" class="search-help"></div>
             <div id="underlying-groups-container" style="margin-top: 20px;">
                 <!-- Collapsible groups will be inserted here -->
@@ -368,6 +374,31 @@
                 </div>
                 <div style="display:flex; align-items:flex-end;">
                     <button id="chart-load-btn" onclick="loadChartData()" style="padding:8px 16px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Load Chart</button>
+                </div>
+            </div>
+
+            <!-- Position Filter -->
+            <div style="margin-bottom:15px; padding:15px; background:#f8f9fa; border-radius:6px;">
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">Filter Positions:</label>
+                    <div style="position:relative;">
+                        <button id="chart-filter-toggle" onclick="togglePositionFilter()" style="padding:6px 12px; border:1px solid #ccc; border-radius:4px; background:white; cursor:pointer; min-width:200px; text-align:left; font-size:0.9em;">
+                            <span id="chart-filter-label">All Positions Selected</span>
+                            <span style="float:right;">▼</span>
+                        </button>
+                        <div id="chart-filter-dropdown" style="display:none; position:absolute; top:100%; left:0; margin-top:4px; background:white; border:1px solid #ccc; border-radius:4px; box-shadow:0 4px 8px rgba(0,0,0,0.15); min-width:300px; max-height:400px; overflow-y:auto; z-index:1000;">
+                            <div style="padding:10px; border-bottom:1px solid #eee; background:#f8f9fa;">
+                                <label style="cursor:pointer; font-weight:bold; user-select:none;">
+                                    <input type="checkbox" id="chart-filter-select-all" checked onchange="toggleSelectAllPositions()" style="margin-right:6px;" />
+                                    Select All
+                                </label>
+                            </div>
+                            <div id="chart-filter-options" style="padding:8px;">
+                                <!-- Options will be populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                    <span id="chart-filter-count" style="font-size:0.85em; color:#666;"></span>
                 </div>
             </div>
 
@@ -462,6 +493,238 @@
                 return timestamp;
             }
         }
+
+        // ========== Utility functions for parsing options symbols ==========
+        
+        function getStrikePrice(tradingsymbol) {
+            try {
+                const suffixMatch = tradingsymbol.match(/(CE|PE)$/i);
+                if (!suffixMatch) {
+                    console.warn(`Invalid option symbol: ${tradingsymbol}`);
+                    return null;
+                }
+                // Remove CE/PE
+                const base = tradingsymbol.slice(0, -suffixMatch[0].length);
+
+                // Grab the last contiguous numeric block (may include a decimal)
+                const blockMatch = base.match(/(\d+(?:\.\d+)?)$/);
+                if (!blockMatch) {
+                    console.warn(`Could not find strike in symbol: ${tradingsymbol}`);
+                    return null;
+                }
+
+                const numericBlock = blockMatch[1];
+                // Integer path. If the block looks like "#####<strike>" (expiry+strike), drop the first 5 digits.
+                const expiryThenStrike = numericBlock.match(/^(\d{5})(\d{2,7})$/);
+                const strikeStr = expiryThenStrike ? expiryThenStrike[2] : numericBlock;
+
+                return Number(strikeStr);
+            } catch (error) {
+                console.error('Error in getStrikePrice:', error, tradingsymbol);
+                return null;
+            }
+        }
+
+        function getDayName(dayOfWeek) {
+            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            return days[dayOfWeek] || 'Unknown';
+        }
+
+        function getLastDayOfWeekInMonth(month, year, dayOfWeek) {
+            // Start from the last day of the month
+            let date = new Date(year, month + 1, 0); // Last day of the month
+            
+            // Move backwards to find the last occurrence of the specified day
+            while (date.getDay() !== dayOfWeek) {
+                date.setDate(date.getDate() - 1);
+            }
+            
+            return date;
+        }
+
+        function getExpiryDateFromSymbolEnhanced(tradingSymbol, expiryDayOfWeek = 2) {
+            try {
+                if (!tradingSymbol || typeof tradingSymbol !== 'string') {
+                    return null;
+                }
+
+                // If symbol contains 'SENSEX', set expiryDayOfWeek to 5 (Friday)
+                if (tradingSymbol.includes('SENSEX')) {
+                    expiryDayOfWeek = 5;
+                }
+
+                // Try different patterns
+                let match = null;
+                let day, month, year;
+                let useLastDayOfWeek = false;
+
+                // Pattern 1: Standard DDMMM format (e.g., 25JUN) - but 25 is year, not day
+                const standardRegex = /(\d{2})([A-Z]{3})/;
+                match = standardRegex.exec(tradingSymbol);
+
+                if (match) {
+                    year = 2000 + parseInt(match[1], 10); // Convert 25 to 2025
+                    const monthAbbr = match[2].toUpperCase();
+
+                    // Month abbreviation to month number mapping
+                    const monthMap = {
+                        'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
+                        'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+                    };
+
+                    month = monthMap[monthAbbr];
+                    if (month === undefined) {
+                        console.warn(`Invalid month abbreviation: ${monthAbbr} in symbol: ${tradingSymbol}`);
+                        return null;
+                    }
+
+                    // For month names, use last specified day of week
+                    useLastDayOfWeek = true;
+                } else {
+                    // Pattern 2: Single-letter month codes (O=October, N=November, D=December)
+                    const singleLetterMonthPattern = /^([A-Z]+)(\d{2})([OND])(\d{2})(\d+)([CP]E)$/;
+                    match = singleLetterMonthPattern.exec(tradingSymbol);
+
+                    if (match) {
+                        const yearPart = match[2];
+                        const monthLetter = match[3];
+                        const dayPart = match[4];
+
+                        year = 2000 + parseInt(yearPart, 10);
+                        day = parseInt(dayPart, 10);
+
+                        // Map single letter to month
+                        const singleLetterMonthMap = {
+                            'O': 9,  // October (0-based)
+                            'N': 10, // November (0-based)
+                            'D': 11  // December (0-based)
+                        };
+
+                        month = singleLetterMonthMap[monthLetter];
+
+                        // Validate day
+                        if (day < 1 || day > 31) {
+                            console.warn(`Invalid day: ${day} in symbol: ${tradingSymbol}`);
+                            return null;
+                        }
+                    } else {
+                        // Pattern 3: DDMMM format where MMM is numeric
+                        const numericRegex = /(\d{2})(\d{3})/;
+                        match = numericRegex.exec(tradingSymbol);
+
+                        if (match) {
+                            const firstPart = parseInt(match[1], 10);
+                            const secondPart = parseInt(match[2], 10);
+
+                            // Try multiple parsing strategies
+                            const monthCodeStr = secondPart.toString().padStart(4, '0');
+                            const monthPart = parseInt(monthCodeStr.substring(0, 2), 10);
+                            const dayPart = parseInt(monthCodeStr.substring(2, 4), 10);
+
+                            let validStrategy = false;
+
+                            if (monthPart >= 1 && monthPart <= 12 && dayPart >= 1 && dayPart <= 31) {
+                                month = monthPart - 1;
+                                day = dayPart;
+                                validStrategy = true;
+                            } else if (firstPart >= 1 && firstPart <= 12 && secondPart >= 1 && secondPart <= 31) {
+                                month = firstPart - 1;
+                                day = secondPart;
+                                validStrategy = true;
+                            } else {
+                                const firstPartStr = firstPart.toString().padStart(4, '0');
+                                const firstMonthPart = parseInt(firstPartStr.substring(0, 2), 10);
+                                const firstDayPart = parseInt(firstPartStr.substring(2, 4), 10);
+
+                                if (firstMonthPart >= 1 && firstMonthPart <= 12 && firstDayPart >= 1 && firstDayPart <= 31) {
+                                    month = firstMonthPart - 1;
+                                    day = firstDayPart;
+                                    validStrategy = true;
+                                } else {
+                                    const firstPart3Digit = firstPart.toString().padStart(3, '0');
+                                    const firstMonthPart3 = parseInt(firstPart3Digit.substring(0, 1), 10);
+                                    const firstDayPart3 = parseInt(firstPart3Digit.substring(1, 3), 10);
+
+                                    if (firstMonthPart3 >= 1 && firstMonthPart3 <= 12 && firstDayPart3 >= 1 && firstDayPart3 <= 31) {
+                                        month = firstMonthPart3 - 1;
+                                        day = firstDayPart3;
+                                        validStrategy = true;
+                                    }
+                                }
+                            }
+
+                            if (!validStrategy) {
+                                console.warn(`Invalid month/day combination in symbol: ${tradingSymbol}`);
+                                return null;
+                            }
+
+                            if (month < 0 || month > 11) {
+                                console.warn(`Invalid month: ${month + 1} in symbol: ${tradingSymbol}`);
+                                return null;
+                            }
+
+                            if (day < 1 || day > 31) {
+                                console.warn(`Invalid day: ${day} in symbol: ${tradingSymbol}`);
+                                return null;
+                            }
+
+                            // Extract year from the symbol
+                            const yearMatch = tradingSymbol.match(/^[A-Z]+\d{2}/);
+                            if (yearMatch) {
+                                const yearStr = yearMatch[0].match(/\d{2}/)[0];
+                                year = 2000 + parseInt(yearStr, 10);
+                            } else {
+                                year = new Date().getFullYear();
+                            }
+                        } else {
+                            console.warn(`No expiry date pattern found in symbol: ${tradingSymbol}`);
+                            return null;
+                        }
+                    }
+                }
+
+                let expiryDate;
+
+                if (useLastDayOfWeek) {
+                    expiryDate = getLastDayOfWeekInMonth(month, year, expiryDayOfWeek);
+                } else {
+                    expiryDate = new Date(year, month, day);
+
+                    if (isNaN(expiryDate.getTime())) {
+                        console.warn(`Invalid date created: ${day}/${month + 1}/${year} from symbol: ${tradingSymbol}`);
+                        return null;
+                    }
+                }
+
+                return expiryDate;
+
+            } catch (error) {
+                console.error('Error in getExpiryDateFromSymbolEnhanced:', error, tradingSymbol);
+                return null;
+            }
+        }
+
+        function formatExpiryDate(date) {
+            if (!date) return 'Unknown';
+            
+            const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+                                'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+            
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = monthNames[date.getMonth()];
+            const year = date.getFullYear();
+            
+            return `${day} ${month} ${year}`;
+        }
+
+        function getOptionType(symbol) {
+            if (!symbol) return null;
+            if (symbol.toUpperCase().endsWith('PE')) return 'PE';
+            if (symbol.toUpperCase().endsWith('CE')) return 'CE';
+            return null;
+        }
+
+        // ========== End of utility functions ==========
 
         function renderLifecycleEvents(events) {
             const tbody = document.getElementById('symbol-search-tbody');
@@ -646,6 +909,7 @@
 
         // Track if underlying trades have been loaded
         let _underlyingTradesLoaded = false;
+        let _cachedUnderlyingsData = null;
 
         async function loadUnderlyingTrades() {
             // Only auto-load once
@@ -700,9 +964,18 @@
 
                 if (status) status.textContent = `Found ${underlyings.length} underlyings with ${totalEvents} total events.`;
 
+                // Cache the data for re-rendering when toggle changes
+                _cachedUnderlyingsData = { underlyings, events };
+                
                 renderUnderlyingGroups(underlyings, events);
             } catch (e) {
                 if (status) status.textContent = 'Failed to load: ' + e;
+            }
+        }
+
+        function reRenderUnderlyingGroups() {
+            if (_cachedUnderlyingsData) {
+                renderUnderlyingGroups(_cachedUnderlyingsData.underlyings, _cachedUnderlyingsData.events);
             }
         }
 
@@ -716,6 +989,30 @@
                 const eventList = events[underlying] || [];
                 if (eventList.length === 0) return;
 
+                // Group events by expiry date
+                const eventsByExpiry = {};
+                eventList.forEach(e => {
+                    const symbol = e.symbol || '';
+                    const expiryDate = getExpiryDateFromSymbolEnhanced(symbol);
+                    const expiryKey = expiryDate ? expiryDate.getTime() : 'unknown';
+                    
+                    if (!eventsByExpiry[expiryKey]) {
+                        eventsByExpiry[expiryKey] = {
+                            date: expiryDate,
+                            events: []
+                        };
+                    }
+                    eventsByExpiry[expiryKey].events.push(e);
+                });
+
+                // Sort expiry dates chronologically
+                const sortedExpiryKeys = Object.keys(eventsByExpiry).sort((a, b) => {
+                    if (a === 'unknown') return 1;
+                    if (b === 'unknown') return -1;
+                    return Number(a) - Number(b);
+                });
+
+                // Create underlying group
                 const groupDiv = document.createElement('div');
                 groupDiv.className = 'underlying-group';
                 groupDiv.id = `underlying-group-${underlying}`;
@@ -761,92 +1058,152 @@
                 contentDiv.className = 'underlying-content';
                 contentDiv.id = `underlying-content-${underlying}`;
 
-                // Create table with same columns as Symbol Search
-                const tableHtml = `
-                    <table class="lifecycle-table">
-                        <thead>
-                            <tr>
-                                <th style="min-width: 150px;">Time</th>
-                                <th style="min-width: 110px;">Type</th>
-                                <th>Symbol</th>
-                                <th style="min-width: 70px;">Product</th>
-                                <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
-                                <th style="min-width: 140px;" class="num">Avg (Before)</th>
-                                <th style="min-width: 140px;" class="num">Avg (After)</th>
-                                <th style="min-width: 140px;" class="num">LTP (After)</th>
-                                <th style="min-width: 170px;" class="num">Booked P&L (After)</th>
-                                <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
-                                <th style="min-width: 240px;">Exit / Fill</th>
-                                <th style="width: 70px; text-align:center;">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${eventList.map(e => {
-                                const typeLower = (e.type || '').toLowerCase();
-                                const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
+                // Create expiry sections
+                let expiryHtml = '';
+                sortedExpiryKeys.forEach(expiryKey => {
+                    const expiryData = eventsByExpiry[expiryKey];
+                    const expiryDateStr = expiryData.date ? formatExpiryDate(expiryData.date) : 'Unknown Expiry';
+                    const expiryEvents = expiryData.events;
 
-                                const qtyBefore = Number(e.before_quantity || 0);
-                                const qtyAfter = Number(e.after_quantity || 0);
-                                const dq = Number(e.quantity_diff || (qtyAfter - qtyBefore));
-                                const dqSign = dq > 0 ? '+' : '';
+                    // Check if strike price sorting is enabled
+                    const sortByStrike = document.getElementById('sort-by-strike')?.checked || false;
+                    
+                    // Sort events based on toggle
+                    const sortedEvents = expiryEvents.slice().sort((a, b) => {
+                        if (sortByStrike) {
+                            // Sort by option type (PE first) and strike price
+                            const symbolA = a.symbol || '';
+                            const symbolB = b.symbol || '';
+                            
+                            const typeA = getOptionType(symbolA);
+                            const typeB = getOptionType(symbolB);
+                            const strikeA = getStrikePrice(symbolA) || 0;
+                            const strikeB = getStrikePrice(symbolB) || 0;
 
-                                let exitFillHtml = '';
-                                if ((e.type || '') === 'EXITED') {
-                                    exitFillHtml = `<div style="font-weight:bold; color:#721c24;">Exit P&L: ₹${fmtNum(e.exit_pnl || 0, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
-                                } else if ((e.type || '') === 'MODIFIED') {
-                                    const side = (e.implied_fill_side || '').toUpperCase();
-                                    const fillQty = Math.abs(parseInt(e.implied_fill_qty || 0, 10) || 0);
-                                    const fillPrice = Number(e.implied_fill_price || 0);
-                                    if (side && fillQty > 0 && fillPrice > 0) {
-                                        const fillColor = side === 'BUY' ? '#28a745' : '#dc3545';
-                                        exitFillHtml = `<div style="font-weight:bold; color:${fillColor};">Implied Fill (${side}): Qty ${fillQty} @ ₹${fmtNum(fillPrice, 2)} <span style="color:#666; font-weight:normal;">(approx)</span></div>`;
-                                    }
-                                    // Show exit P&L if reducing position
-                                    if (e.exit_pnl && e.exit_pnl != 0) {
-                                        const exitColor = e.exit_pnl > 0 ? '#28a745' : '#dc3545';
-                                        exitFillHtml += `<div style="font-weight:bold; color:${exitColor}; margin-top:4px;">Exit P&L: ₹${fmtNum(e.exit_pnl, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
-                                    }
-                                }
+                            // PE before CE
+                            if (typeA === 'PE' && typeB === 'CE') return -1;
+                            if (typeA === 'CE' && typeB === 'PE') return 1;
 
-                                const actionHtml = e.change_id
-                                    ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>`
-                                    : `<span style="color:#aaa;" title="No diff record">-</span>`;
+                            // Within same type, sort by strike price
+                            return strikeA - strikeB;
+                        } else {
+                            // Default: sort by timestamp (latest first)
+                            const timeA = new Date(a.timestamp || 0).getTime();
+                            const timeB = new Date(b.timestamp || 0).getTime();
+                            return timeB - timeA;
+                        }
+                    });
 
-                                // Format Booked P&L with color coding
-                                const bookedPnl = Number(e.after_booked_pnl || 0);
-                                const bookedPnlColor = bookedPnl > 0 ? '#28a745' : (bookedPnl < 0 ? '#dc3545' : '#666');
-                                const bookedPnlHtml = `<span style="color:${bookedPnlColor}; font-weight:bold;">₹${fmtNum(bookedPnl, 2)}</span>`;
+                    const expiryId = `${underlying}-${expiryKey}`.replace(/[^a-zA-Z0-9]/g, '_');
 
-                                // Format Unbooked P&L with color coding
-                                const unbookedPnl = Number(e.after_unbooked_pnl || 0);
-                                const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
-                                const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
+                    expiryHtml += `
+                        <div class="expiry-section" style="margin-top: 15px; border-left: 3px solid #ddd; padding-left: 15px;">
+                            <div class="expiry-header" onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer; padding: 8px; background: #f8f9fa; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                                <span style="font-weight: bold; color: #555;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span></span>
+                                <span class="expiry-toggle" id="expiry-toggle-${expiryId}">▶</span>
+                            </div>
+                            <div class="expiry-content" id="expiry-content-${expiryId}" style="display: none;">
+                                <table class="lifecycle-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="min-width: 150px;">Time</th>
+                                            <th style="min-width: 110px;">Type</th>
+                                            <th>Symbol</th>
+                                            <th style="min-width: 70px;">Product</th>
+                                            <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
+                                            <th style="min-width: 140px;" class="num">Avg (Before)</th>
+                                            <th style="min-width: 140px;" class="num">Avg (After)</th>
+                                            <th style="min-width: 140px;" class="num">LTP (After)</th>
+                                            <th style="min-width: 170px;" class="num">Booked P&L (After)</th>
+                                            <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
+                                            <th style="min-width: 240px;">Exit / Fill</th>
+                                            <th style="width: 70px; text-align:center;">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${sortedEvents.map(e => {
+                                            const typeLower = (e.type || '').toLowerCase();
+                                            const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
 
-                                return `<tr>
-                                    <td>${fmtTimestamp(e.timestamp)}</td>
-                                    <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
-                                    <td>${e.symbol || ''}</td>
-                                    <td>${e.product || ''}</td>
-                                    <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
-                                    <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
-                                    <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
-                                    <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
-                                    <td class="num">${bookedPnlHtml}</td>
-                                    <td class="num">${unbookedPnlHtml}</td>
-                                    <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
-                                    <td style="text-align:center;">${actionHtml}</td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                `;
+                                            const qtyBefore = Number(e.before_quantity || 0);
+                                            const qtyAfter = Number(e.after_quantity || 0);
+                                            const dq = Number(e.quantity_diff || (qtyAfter - qtyBefore));
+                                            const dqSign = dq > 0 ? '+' : '';
 
-                contentDiv.innerHTML = tableHtml;
+                                            let exitFillHtml = '';
+                                            if ((e.type || '') === 'EXITED') {
+                                                exitFillHtml = `<div style="font-weight:bold; color:#721c24;">Exit P&L: ₹${fmtNum(e.exit_pnl || 0, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
+                                            } else if ((e.type || '') === 'MODIFIED') {
+                                                const side = (e.implied_fill_side || '').toUpperCase();
+                                                const fillQty = Math.abs(parseInt(e.implied_fill_qty || 0, 10) || 0);
+                                                const fillPrice = Number(e.implied_fill_price || 0);
+                                                if (side && fillQty > 0 && fillPrice > 0) {
+                                                    const fillColor = side === 'BUY' ? '#28a745' : '#dc3545';
+                                                    exitFillHtml = `<div style="font-weight:bold; color:${fillColor};">Implied Fill (${side}): Qty ${fillQty} @ ₹${fmtNum(fillPrice, 2)} <span style="color:#666; font-weight:normal;">(approx)</span></div>`;
+                                                }
+                                                if (e.exit_pnl && e.exit_pnl != 0) {
+                                                    const exitColor = e.exit_pnl > 0 ? '#28a745' : '#dc3545';
+                                                    exitFillHtml += `<div style="font-weight:bold; color:${exitColor}; margin-top:4px;">Exit P&L: ₹${fmtNum(e.exit_pnl, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
+                                                }
+                                            }
+
+                                            const actionHtml = e.change_id
+                                                ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>`
+                                                : `<span style="color:#aaa;" title="No diff record">-</span>`;
+
+                                            const bookedPnl = Number(e.after_booked_pnl || 0);
+                                            const bookedPnlColor = bookedPnl > 0 ? '#28a745' : (bookedPnl < 0 ? '#dc3545' : '#666');
+                                            const bookedPnlHtml = `<span style="color:${bookedPnlColor}; font-weight:bold;">₹${fmtNum(bookedPnl, 2)}</span>`;
+
+                                            const unbookedPnl = Number(e.after_unbooked_pnl || 0);
+                                            const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
+                                            const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
+
+                                            return `<tr>
+                                                <td>${fmtTimestamp(e.timestamp)}</td>
+                                                <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
+                                                <td>${e.symbol || ''}</td>
+                                                <td>${e.product || ''}</td>
+                                                <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
+                                                <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
+                                                <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
+                                                <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
+                                                <td class="num">${bookedPnlHtml}</td>
+                                                <td class="num">${unbookedPnlHtml}</td>
+                                                <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
+                                                <td style="text-align:center;">${actionHtml}</td>
+                                            </tr>`;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                contentDiv.innerHTML = expiryHtml;
 
                 groupDiv.appendChild(headerDiv);
                 groupDiv.appendChild(contentDiv);
                 container.appendChild(groupDiv);
             });
+        }
+
+        function toggleExpiryGroup(expiryId) {
+            const content = document.getElementById(`expiry-content-${expiryId}`);
+            const toggle = document.getElementById(`expiry-toggle-${expiryId}`);
+
+            if (!content || !toggle) return;
+
+            const isExpanded = content.style.display !== 'none';
+
+            if (isExpanded) {
+                content.style.display = 'none';
+                toggle.textContent = '▶';
+            } else {
+                content.style.display = 'block';
+                toggle.textContent = '▼';
+            }
         }
 
         function toggleUnderlyingGroup(underlying) {
@@ -862,10 +1219,30 @@
                 content.classList.remove('expanded');
                 toggle.classList.remove('expanded');
                 header.classList.remove('active');
+                
+                // Collapse all expiry sections when closing underlying
+                const expirySections = content.querySelectorAll('.expiry-content');
+                expirySections.forEach(section => {
+                    section.style.display = 'none';
+                });
+                const expiryToggles = content.querySelectorAll('.expiry-toggle');
+                expiryToggles.forEach(toggle => {
+                    toggle.textContent = '▶';
+                });
             } else {
                 content.classList.add('expanded');
                 toggle.classList.add('expanded');
                 header.classList.add('active');
+                
+                // Expand all expiry sections when opening underlying
+                const expirySections = content.querySelectorAll('.expiry-content');
+                expirySections.forEach(section => {
+                    section.style.display = 'block';
+                });
+                const expiryToggles = content.querySelectorAll('.expiry-toggle');
+                expiryToggles.forEach(toggle => {
+                    toggle.textContent = '▼';
+                });
             }
         }
 
@@ -885,6 +1262,14 @@
             };
 
             const shouldHideModifiedZero = () => !!(hideModifiedZeroCheckbox && hideModifiedZeroCheckbox.checked);
+
+            // Add event listener for sort-by-strike checkbox
+            const sortByStrikeCheckbox = document.getElementById('sort-by-strike');
+            if (sortByStrikeCheckbox) {
+                sortByStrikeCheckbox.addEventListener('change', function() {
+                    reRenderUnderlyingGroups();
+                });
+            }
 
             const isNoPositionChangeSummary = (text) => {
                 text = (text || '').trim();
@@ -1189,13 +1574,22 @@
             document.getElementById('log-modal').style.display = 'none';
         }
 
-        // Chart Modal Functions
+        // Chart Modal Functions - Global variables
         let currentChartUnderlying = null;
         let currentChartEvents = [];
+        let selectedPositions = new Set(); // Track selected positions
+        let allChartData = null; // Store loaded chart data
 
         function openChartModal(underlying, events) {
             currentChartUnderlying = underlying;
             currentChartEvents = events;
+            
+            // Extract unique symbols from events and initialize selection
+            const uniqueSymbols = [...new Set(events.map(e => e.symbol))].sort();
+            selectedPositions = new Set(uniqueSymbols); // All selected by default
+            
+            // Populate position filter dropdown
+            populatePositionFilter(uniqueSymbols);
 
             const modal = document.getElementById('chart-modal');
             const title = document.getElementById('chart-modal-title');
@@ -1238,7 +1632,112 @@
 
         function closeChartModal() {
             document.getElementById('chart-modal').style.display = 'none';
+            // Close dropdown if open
+            document.getElementById('chart-filter-dropdown').style.display = 'none';
         }
+
+        function populatePositionFilter(symbols) {
+            const optionsDiv = document.getElementById('chart-filter-options');
+            optionsDiv.innerHTML = '';
+
+            symbols.forEach(symbol => {
+                const label = document.createElement('label');
+                label.style.display = 'block';
+                label.style.padding = '8px';
+                label.style.cursor = 'pointer';
+                label.style.userSelect = 'none';
+                label.style.borderRadius = '4px';
+                label.onmouseover = () => label.style.background = '#f0f0f0';
+                label.onmouseout = () => label.style.background = 'transparent';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = true;
+                checkbox.value = symbol;
+                checkbox.style.marginRight = '8px';
+                checkbox.onchange = () => handlePositionFilterChange();
+
+                const text = document.createTextNode(symbol);
+
+                label.appendChild(checkbox);
+                label.appendChild(text);
+                optionsDiv.appendChild(label);
+            });
+
+            updateFilterLabel();
+        }
+
+        function togglePositionFilter() {
+            const dropdown = document.getElementById('chart-filter-dropdown');
+            dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function toggleSelectAllPositions() {
+            const selectAll = document.getElementById('chart-filter-select-all');
+            const checkboxes = document.querySelectorAll('#chart-filter-options input[type="checkbox"]');
+            
+            checkboxes.forEach(cb => {
+                cb.checked = selectAll.checked;
+            });
+
+            handlePositionFilterChange();
+        }
+
+        function handlePositionFilterChange() {
+            const checkboxes = document.querySelectorAll('#chart-filter-options input[type="checkbox"]');
+            selectedPositions.clear();
+
+            let allChecked = true;
+            checkboxes.forEach(cb => {
+                if (cb.checked) {
+                    selectedPositions.add(cb.value);
+                } else {
+                    allChecked = false;
+                }
+            });
+
+            // Update "Select All" checkbox state
+            const selectAll = document.getElementById('chart-filter-select-all');
+            selectAll.checked = allChecked;
+
+            updateFilterLabel();
+            
+            // Re-render chart with filtered data if chart is already loaded
+            if (allChartData) {
+                renderChart(allChartData, currentChartEvents);
+            }
+        }
+
+        function updateFilterLabel() {
+            const label = document.getElementById('chart-filter-label');
+            const count = document.getElementById('chart-filter-count');
+            const total = currentChartEvents.length > 0 ? [...new Set(currentChartEvents.map(e => e.symbol))].length : 0;
+            const selected = selectedPositions.size;
+
+            if (selected === 0) {
+                label.textContent = 'No Positions Selected';
+                count.textContent = `0 of ${total} positions`;
+                count.style.color = '#dc3545';
+            } else if (selected === total) {
+                label.textContent = 'All Positions Selected';
+                count.textContent = `${selected} of ${total} positions`;
+                count.style.color = '#28a745';
+            } else {
+                label.textContent = `${selected} Position${selected > 1 ? 's' : ''} Selected`;
+                count.textContent = `${selected} of ${total} positions`;
+                count.style.color = '#007bff';
+            }
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('chart-filter-dropdown');
+            const toggle = document.getElementById('chart-filter-toggle');
+            
+            if (dropdown && toggle && !dropdown.contains(event.target) && !toggle.contains(event.target)) {
+                dropdown.style.display = 'none';
+            }
+        });
 
         // Close modal on ESC key
         document.addEventListener('keydown', function(event) {
@@ -1356,6 +1855,9 @@
             const canvasDiv = document.getElementById('chart-canvas');
             canvasDiv.innerHTML = '';
 
+            // Store chart data globally for re-rendering with filters
+            allChartData = candles;
+
             // Prepare data for simple line chart (we'll use Recharts LineChart for simplicity)
             // For candlestick, we'd need a more complex setup, but line chart works well for price action
 
@@ -1369,8 +1871,11 @@
                 volume: c.volume
             }));
 
+            // Filter events based on selected positions
+            const filteredEvents = events.filter(e => selectedPositions.has(e.symbol));
+
             // Prepare trade markers
-            const markers = events.map(e => {
+            const markers = filteredEvents.map(e => {
                 const eventTime = new Date(e.timestamp).getTime();
                 // Find closest candle
                 const closest = chartData.reduce((prev, curr) => {
