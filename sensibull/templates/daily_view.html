@@ -284,6 +284,7 @@
                             <th style="min-width: 140px;" class="num">Avg (Before)</th>
                             <th style="min-width: 140px;" class="num">Avg (After)</th>
                             <th style="min-width: 140px;" class="num">LTP (After)</th>
+                            <th style="min-width: 170px;" class="num">Booked P&L (After)</th>
                             <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
                             <th style="min-width: 240px;">Exit / Fill</th>
                             <th style="width: 70px; text-align:center;">Action</th>
@@ -507,6 +508,16 @@
                     ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>`
                     : `<span style="color:#aaa;" title="No diff record for this snapshot">-</span>`;
 
+                // Format Booked P&L with color coding
+                const bookedPnl = Number(e.after_booked_pnl || 0);
+                const bookedPnlColor = bookedPnl > 0 ? '#28a745' : (bookedPnl < 0 ? '#dc3545' : '#666');
+                const bookedPnlHtml = `<span style="color:${bookedPnlColor}; font-weight:bold;">₹${fmtNum(bookedPnl, 2)}</span>`;
+
+                // Format Unbooked P&L with color coding
+                const unbookedPnl = Number(e.after_unbooked_pnl || 0);
+                const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
+                const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
+
                 tr.innerHTML = `
                     <td>${fmtTimestamp(e.timestamp)}</td>
                     <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
@@ -516,7 +527,8 @@
                     <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
                     <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
                     <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
-                    <td class="num">₹${fmtNum(e.after_unbooked_pnl || 0, 2)}</td>
+                    <td class="num">${bookedPnlHtml}</td>
+                    <td class="num">${unbookedPnlHtml}</td>
                     <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
                     <td style="text-align:center;">${actionHtml}</td>
                 `;
@@ -762,6 +774,7 @@
                                 <th style="min-width: 140px;" class="num">Avg (Before)</th>
                                 <th style="min-width: 140px;" class="num">Avg (After)</th>
                                 <th style="min-width: 140px;" class="num">LTP (After)</th>
+                                <th style="min-width: 170px;" class="num">Booked P&L (After)</th>
                                 <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
                                 <th style="min-width: 240px;">Exit / Fill</th>
                                 <th style="width: 70px; text-align:center;">Action</th>
@@ -799,6 +812,16 @@
                                     ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>`
                                     : `<span style="color:#aaa;" title="No diff record">-</span>`;
 
+                                // Format Booked P&L with color coding
+                                const bookedPnl = Number(e.after_booked_pnl || 0);
+                                const bookedPnlColor = bookedPnl > 0 ? '#28a745' : (bookedPnl < 0 ? '#dc3545' : '#666');
+                                const bookedPnlHtml = `<span style="color:${bookedPnlColor}; font-weight:bold;">₹${fmtNum(bookedPnl, 2)}</span>`;
+
+                                // Format Unbooked P&L with color coding
+                                const unbookedPnl = Number(e.after_unbooked_pnl || 0);
+                                const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
+                                const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
+
                                 return `<tr>
                                     <td>${fmtTimestamp(e.timestamp)}</td>
                                     <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
@@ -808,7 +831,8 @@
                                     <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
                                     <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
                                     <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
-                                    <td class="num">₹${fmtNum(e.after_unbooked_pnl || 0, 2)}</td>
+                                    <td class="num">${bookedPnlHtml}</td>
+                                    <td class="num">${unbookedPnlHtml}</td>
                                     <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
                                     <td style="text-align:center;">${actionHtml}</td>
                                 </tr>`;
@@ -1671,11 +1695,17 @@
                             priceInfo += `<br><span style="color:${fillColor}; font-size:0.85em; font-weight:bold;">Implied Fill (${fillSide}): Qty ${fillQty} @ ₹${fillPrice.toFixed(2)} <span style="color:#666; font-weight:normal;">(approx)</span></span>`;
                         }
                         
-                        // Show exit P&L if there's a reduction (negative diff for long, positive for short)
-                        if ((item.old_quantity > 0 && item.quantity_diff < 0) || (item.old_quantity < 0 && item.quantity_diff > 0)) {
-                            if (item.exit_pnl != 0) {
-                                let exitPnlColor = item.exit_pnl > 0 ? '#28a745' : '#dc3545';
-                                priceInfo += `<br><span style="color:${exitPnlColor}; font-size:0.85em; font-weight:bold;">Exit P&L: ₹${item.exit_pnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} | Exit Price: ₹${(item.exit_price || 0).toFixed(2)}</span>`;
+                        // Show booked P&L when quantity is reduced (position partially or fully closed)
+                        // Detection: long reduction (old_qty > 0 and diff < 0) or short reduction (old_qty < 0 and diff > 0)
+                        // Also show for fully exited positions where final quantity is 0
+                        const isReducing = (item.old_quantity > 0 && item.quantity_diff < 0) || (item.old_quantity < 0 && item.quantity_diff > 0);
+                        const isFullyExited = item.quantity == 0;
+                        if (isReducing || isFullyExited) {
+                            const bookedPnl = parseFloat(item.booked_pnl || 0);
+                            if (bookedPnl != 0) {
+                                let bookedPnlColor = bookedPnl > 0 ? '#28a745' : '#dc3545';
+                                const closedQty = Math.abs(item.quantity_diff);
+                                priceInfo += `<br><span style="color:${bookedPnlColor}; font-size:0.85em; font-weight:bold;">Booked P&L: ₹${bookedPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})} (on ${closedQty} qty @ ₹${fillPrice.toFixed(2)})</span>`;
                             }
                         }
                     } else if (type === 'REMOVED') {
@@ -1782,26 +1812,38 @@
                         <th style="text-align: left;">Symbol</th>
                         <th style="text-align: right;">Qty</th>
                         <th style="text-align: right;">Price</th>
-                        <th style="text-align: right;">P&L</th>
+                        <th style="text-align: right;">Booked P&L</th>
+                        <th style="text-align: right;">Unbooked P&L</th>
+                        <th style="text-align: right;">Total P&L</th>
                     </tr>
                 </thead>
                 <tbody>`;
 
             allTrades.forEach(t => {
-                // Format P&L to 1 decimal
-                let pnl = parseFloat(t.unbooked_pnl || 0).toFixed(1);
+                // Get P&L values
+                let bookedPnl = parseFloat(t.booked_profit_loss || 0);
+                let unbookedPnl = parseFloat(t.unbooked_pnl || 0);
+                let totalPnl = bookedPnl + unbookedPnl;
+                
                 // Format Price to 1 decimal
                 let price = parseFloat(t.average_price || 0).toFixed(1);
 
-                // Optional: Color code P&L
-                // Sensibull uses Green for profit.
-                let pnlStyle = `color: ${pnl >= 0 ? '#28a745' : '#dc3545'}; font-weight: bold;`;
+                // Color code P&L values (green for profit, red for loss)
+                const getPnlStyle = (value) => {
+                    return `color: ${value > 0 ? '#28a745' : (value < 0 ? '#dc3545' : '#666')}; font-weight: bold;`;
+                };
+                
+                let bookedPnlStyle = getPnlStyle(bookedPnl);
+                let unbookedPnlStyle = getPnlStyle(unbookedPnl);
+                let totalPnlStyle = getPnlStyle(totalPnl);
 
                 html += `<tr>
                     <td style="text-align: left;">${t.trading_symbol}</td>
                     <td style="text-align: right;">${t.quantity}</td>
                     <td style="text-align: right;">${price}</td>
-                    <td style="text-align: right; ${pnlStyle}">${pnl}</td>
+                    <td style="text-align: right; ${bookedPnlStyle}">${bookedPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td style="text-align: right; ${unbookedPnlStyle}">${unbookedPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td style="text-align: right; ${totalPnlStyle}">${totalPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                 </tr>`;
             });
 

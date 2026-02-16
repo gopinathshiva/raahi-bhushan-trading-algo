@@ -879,6 +879,7 @@ def api_profile_all_underlyings(slug):
                 
                 after_ltp = (curr_trade or {}).get('last_price', 0) or 0
                 after_unbooked = (curr_trade or {}).get('unbooked_pnl', 0) or 0
+                after_booked = (curr_trade or {}).get('booked_profit_loss', 0) or 0
                 
                 # Exit metrics come from the last snapshot where trade existed
                 exit_pnl = 0
@@ -913,6 +914,7 @@ def api_profile_all_underlyings(slug):
                     'after_average_price': after_avg,
                     'after_last_price': after_ltp,
                     'after_unbooked_pnl': after_unbooked,
+                    'after_booked_pnl': after_booked,
                     'exit_pnl': exit_pnl,
                     'exit_price': exit_price,
                     'implied_fill_side': implied_fill_side,
@@ -1052,6 +1054,7 @@ def api_profile_symbol_lifecycle(slug):
 
                 after_ltp = (curr_trade or {}).get('last_price', 0) or 0
                 after_unbooked = (curr_trade or {}).get('unbooked_pnl', 0) or 0
+                after_booked = (curr_trade or {}).get('booked_profit_loss', 0) or 0
 
                 # Exit metrics come from the last snapshot where trade existed
                 exit_pnl = 0
@@ -1086,6 +1089,7 @@ def api_profile_symbol_lifecycle(slug):
                     'after_average_price': after_avg,
                     'after_last_price': after_ltp,
                     'after_unbooked_pnl': after_unbooked,
+                    'after_booked_pnl': after_booked,
                     'exit_pnl': exit_pnl,
                     'exit_price': exit_price,
                     'implied_fill_side': implied_fill_side,
@@ -1223,7 +1227,12 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
             exit_price = original_last_price or p.get('last_price', 0) or 0
 
             # Prefer booked profit/loss if broker provides it.
+            # NOTE: Some brokers put booked_profit_loss in the current snapshot (when qty=0)
+            # rather than the previous snapshot, so we check curr_map[key] as well
             booked_pnl = p.get('booked_profit_loss', 0) or 0
+            if booked_pnl == 0 and key in curr_map:
+                # Check if current snapshot has booked_profit_loss (common when qty goes to 0)
+                booked_pnl = curr_map[key].get('booked_profit_loss', 0) or 0
 
             # Determine avg price to use.
             avg_price = original_avg_price or p.get('average_price', 0) or 0
@@ -1237,6 +1246,7 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
 
             p['exit_price'] = exit_price
             p['exit_pnl'] = exit_pnl
+            p['booked_pnl'] = exit_pnl  # Add booked_pnl field for consistency
 
             # Update average_price for display if we found it from history
             if original_avg_price and not p.get('average_price'):
@@ -1306,29 +1316,87 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
                     c['implied_fill_qty'] = abs(c.get('quantity_diff', 0) or 0)
                     c['implied_fill_price'] = 0
 
-                # Calculate P&L from the portion that was closed
-                closed_qty = p['quantity'] - c['quantity']
-                if closed_qty > 0:
-                    # P&L from the closed portion = difference in booked P&L
-                    prev_booked = p.get('booked_profit_loss', 0)
-                    curr_booked = c.get('booked_profit_loss', 0)
-                    c['exit_pnl'] = prev_booked - curr_booked
+                # --- Calculate Booked P&L for quantity reductions ---
+                # When position is reduced, calculate the P&L on the closed portion.
+                # This is the actual profit/loss booked by reducing the position size.
+                #
+                # For long positions (qty > 0): reducing means selling some quantity
+                # For short positions (qty < 0): reducing means buying back some quantity
+                #
+                # We detect reduction as:
+                # - Long position: old_qty > 0 and new_qty < old_qty (sold some)
+                # - Short position: old_qty < 0 and new_qty > old_qty (bought back some, i.e., abs(new_qty) < abs(old_qty))
+                
+                q0 = p.get('quantity', 0) or 0
+                q1 = c.get('quantity', 0) or 0
+                is_reducing = (q0 > 0 and q1 < q0) or (q0 < 0 and q1 > q0)
+                
+                if is_reducing:
+                    # First check if broker provided booked_profit_loss directly
+                    # Some brokers provide this field when positions are reduced
+                    broker_booked_pnl = c.get('booked_profit_loss', 0) or 0
                     
-                    # Calculate exit price for the closed portion
-                    avg_price = original_avg_price if original_avg_price else p.get('average_price', 0)
-                    last_price = original_last_price if original_last_price else p.get('last_price', 0)
-                    # Use avg_price if available, otherwise use last_price
-                    price_for_calc = avg_price if avg_price else last_price
-                    
-                    if price_for_calc and closed_qty:
-                        if c['exit_pnl'] >= 0:
-                            c['exit_price'] = price_for_calc + (c['exit_pnl'] / closed_qty)
+                    if broker_booked_pnl != 0:
+                        # Use broker-provided booked P&L (most accurate)
+                        c['booked_pnl'] = broker_booked_pnl
+                        c['exit_pnl'] = broker_booked_pnl
+                        # Calculate exit price from booked P&L if possible
+                        closed_qty = abs(q0 - q1)
+                        entry_price = original_avg_price if original_avg_price not in (None, 0) else (p.get('average_price', 0) or 0)
+                        if closed_qty and entry_price:
+                            if q0 > 0:
+                                # Long: booked_pnl = (exit - entry) * qty
+                                exit_price = (broker_booked_pnl / closed_qty) + entry_price
+                            else:
+                                # Short: booked_pnl = (entry - exit) * qty
+                                exit_price = entry_price - (broker_booked_pnl / closed_qty)
+                            c['exit_price'] = exit_price
+                            c['implied_fill_price'] = exit_price  # Update for consistency
                         else:
-                            c['exit_price'] = price_for_calc - (abs(c['exit_pnl']) / closed_qty)
+                            c['exit_price'] = c.get('implied_fill_price', 0) or 0
                     else:
-                        c['exit_price'] = 0
+                        # Calculate booked P&L using the implied fill price
+                        # Quantity that was closed (always positive for calculation)
+                        closed_qty = abs(q0 - q1)
+                        
+                        # Original entry price (from history or previous snapshot)
+                        entry_price = original_avg_price if original_avg_price not in (None, 0) else (p.get('average_price', 0) or 0)
+                        
+                        # Exit price is the implied fill price
+                        # Special case: If position is fully exited (q1 == 0) and implied fill price is same as entry
+                        # (broker didn't update avg), use LTP as best approximation
+                        exit_price = c.get('implied_fill_price', 0) or 0
+                        
+                        # If fully exited and exit_price equals entry_price (broker didn't update), use LTP
+                        if q1 == 0 and exit_price != 0 and abs(exit_price - entry_price) < 0.01:
+                            # Use LTP as exit price instead
+                            ltp = c.get('last_price', 0) or p.get('last_price', 0) or 0
+                            if ltp > 0:
+                                exit_price = ltp
+                                c['implied_fill_price'] = ltp  # Update for display consistency
+                        
+                        if entry_price and exit_price and closed_qty:
+                            # For long positions (q0 > 0): Booked P&L = (Exit - Entry) * Qty
+                            # For short positions (q0 < 0): Booked P&L = (Entry - Exit) * Qty
+                            # Note: Since q0 is signed, (exit_price - entry_price) * q0 handles both cases
+                            # But we're closing abs(q0-q1) contracts, so we need to be explicit:
+                            if q0 > 0:
+                                # Long position being reduced (selling)
+                                booked_pnl = (exit_price - entry_price) * closed_qty
+                            else:
+                                # Short position being reduced (buying back)
+                                booked_pnl = (entry_price - exit_price) * closed_qty
+                            
+                            c['booked_pnl'] = booked_pnl
+                            c['exit_pnl'] = booked_pnl  # Keep exit_pnl for backward compatibility
+                            c['exit_price'] = exit_price
+                        else:
+                            c['booked_pnl'] = 0
+                            c['exit_pnl'] = 0
+                            c['exit_price'] = 0
                 else:
-                    # Position increased (added more), no exit P&L
+                    # Position increased (added more), no booked P&L
+                    c['booked_pnl'] = 0
                     c['exit_pnl'] = 0
                     c['exit_price'] = 0
                 
