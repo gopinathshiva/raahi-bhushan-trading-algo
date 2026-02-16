@@ -5,7 +5,15 @@ import time
 import os
 import traceback
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from database import get_db, init_db
+
+# IST Timezone constant
+IST = ZoneInfo("Asia/Kolkata")
+
+def now_ist():
+    """Get current datetime in IST timezone"""
+    return datetime.now(IST)
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,10 +55,13 @@ def fetch_data(slug):
 
 def save_snapshot(conn, profile_id, data, timestamp=None):
     c = conn.cursor()
-    # Use provided timestamp (IST) or default to CURRENT_TIMESTAMP (UTC, avoided now)
+    # Store timestamps in ISO format with timezone (e.g., "2026-02-16T10:30:00+05:30")
+    # This makes it explicit that all times are in IST
     if timestamp:
+         # Convert datetime to ISO format string with timezone
+         ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
          c.execute("INSERT INTO snapshots (profile_id, raw_data, created_at_source, timestamp) VALUES (?, ?, ?, ?)", 
-                  (profile_id, json.dumps(data), data.get('created_at'), timestamp))
+                  (profile_id, json.dumps(data), data.get('created_at'), ts_str))
     else:
          c.execute("INSERT INTO snapshots (profile_id, raw_data, created_at_source) VALUES (?, ?, ?)", 
                   (profile_id, json.dumps(data), data.get('created_at')))
@@ -93,7 +104,7 @@ DAYS_TO_KEEP_DATA = 30
 
 def cleanup_old_data(conn):
     """Delete snapshots and changes older than DAYS_TO_KEEP_DATA"""
-    cutoff_date = datetime.now() - timedelta(days=DAYS_TO_KEEP_DATA)
+    cutoff_date = now_ist() - timedelta(days=DAYS_TO_KEEP_DATA)
     c = conn.cursor()
 
     # SQLite datetime comparison works with strings if format is consistent (YYYY-MM-DD...)
@@ -167,8 +178,8 @@ def run_scraper():
             
             # ALWAYS update the latest snapshot for Realtime P&L
             from database import upsert_latest_snapshot
-            now_ist = datetime.now()
-            upsert_latest_snapshot(conn, profile_id, current_data, timestamp=now_ist)
+            current_time_ist = now_ist()
+            upsert_latest_snapshot(conn, profile_id, current_data, timestamp=current_time_ist)
             
         except Exception as e:
             print(f"Error fetching {slug}: {e}")
@@ -177,10 +188,10 @@ def run_scraper():
         # If no last snapshot, save as initial
         if not last_snapshot:
             print(f"-> Initial snapshot for {slug}")
-            snapshot_id = save_snapshot(conn, profile_id, current_data, timestamp=datetime.now())
+            snapshot_id = save_snapshot(conn, profile_id, current_data, timestamp=now_ist())
             # Record explicit 'Initial' change so it shows up in UI
             c.execute("INSERT INTO position_changes (profile_id, snapshot_id, timestamp, diff_summary) VALUES (?, ?, ?, ?)",
-                      (profile_id, snapshot_id, datetime.now(), "Initial Snapshot"))
+                      (profile_id, snapshot_id, now_ist(), "Initial Snapshot"))
             conn.commit()
             continue
             
@@ -190,13 +201,13 @@ def run_scraper():
         
         if diff:
             print(f"-> CHANGE DETECTED for {slug}")
-            snapshot_id = save_snapshot(conn, profile_id, current_data, timestamp=datetime.now())
+            snapshot_id = save_snapshot(conn, profile_id, current_data, timestamp=now_ist())
             
             # Simple diff summary (placeholder, ideally we list added/removed symbols)
             summary = generate_diff_summary(last_data, current_data)
             
             c.execute("INSERT INTO position_changes (profile_id, snapshot_id, timestamp, diff_summary) VALUES (?, ?, ?, ?)",
-                      (profile_id, snapshot_id, datetime.now(), summary))
+                      (profile_id, snapshot_id, now_ist(), summary))
             conn.commit()
         else:
             print(f"-> No change for {slug}")
@@ -261,12 +272,13 @@ def generate_diff_summary(old_data, new_data):
     )
 
 def is_market_open():
-    now = datetime.now()
+    """Check if Indian stock market is open (in IST timezone)"""
+    now = now_ist()
     # Weekday check: 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
     if now.weekday() > 4:
         return False
     
-    # Time check: 09:15 to 15:30
+    # Time check: 09:15 to 15:30 IST
     current_time = now.time()
     start_time = datetime.strptime("09:15", "%H:%M").time()
     end_time = datetime.strptime("15:30", "%H:%M").time()
@@ -282,7 +294,7 @@ if __name__ == '__main__':
     
     while True:
         try:
-            print(f"\n--- Run at {datetime.now()} ---")
+            print(f"\n--- Run at {now_ist()} ---")
             run_scraper()
         except Exception as e:
             print(f"Fatal error: {e}")

@@ -1,7 +1,15 @@
 import sqlite3
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
+
+# IST Timezone constant
+IST = ZoneInfo("Asia/Kolkata")
+
+def now_ist():
+    """Get current datetime in IST timezone"""
+    return datetime.now(IST)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sensibull.db')
 
@@ -86,8 +94,9 @@ def init_db():
 def upsert_latest_snapshot(conn, profile_id, data, timestamp=None):
     c = conn.cursor()
     # SQLite upsert syntax
-    # timestamps are stored as string. If timestamp is provided (datetime), format it.
-    ts_val = timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # timestamps are stored as ISO format strings with timezone (e.g., "2026-02-16T10:30:00+05:30")
+    # This explicitly shows that all times are in IST
+    ts_val = timestamp.isoformat() if timestamp else now_ist().isoformat()
     
     c.execute("""
         INSERT INTO latest_snapshots (profile_id, raw_data, timestamp) 

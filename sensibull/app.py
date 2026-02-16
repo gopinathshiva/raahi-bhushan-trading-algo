@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify
 import sqlite3
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from database import get_db, sync_profiles
 import sys
 import os
@@ -9,6 +10,13 @@ import threading
 import time
 import subprocess
 import signal
+
+# IST Timezone constant
+IST = ZoneInfo("Asia/Kolkata")
+
+def now_ist():
+    """Get current datetime in IST timezone"""
+    return datetime.now(IST)
 
 app = Flask(__name__)
 # Configure standard port or 5010 as per previous context
@@ -23,28 +31,32 @@ LAST_AUTO_RESTART = None
 
 @app.template_filter('to_datetime')
 def to_datetime_filter(value):
-    # Timestamps in DB are now consistently Naive IST (from scraper datetime.now())
-    # So we do NOT add any offset. We just ensure it's a datetime object.
+    # Timestamps in DB are stored in ISO format with IST timezone (e.g., "2026-02-16T10:30:00+05:30")
+    # We parse them and return as timezone-aware datetime objects for accurate calculations
     if isinstance(value, datetime):
         return value
     
     try:
-        return datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
-    except ValueError:
+        # First try ISO format with timezone (new format)
+        dt = datetime.fromisoformat(value)
+        return dt
+    except (ValueError, AttributeError):
         try:
-             # Handle ISO format
-             dt = datetime.fromisoformat(value)
-             return dt.replace(tzinfo=None) # Ensure naive
+            # Fallback to old format without timezone (for backward compatibility)
+            dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+            # Assume it's IST and add timezone info
+            return dt.replace(tzinfo=IST)
         except:
-             return value
+            return value
 
 def is_market_open():
-    now = datetime.now()
+    """Check if Indian stock market is open (in IST timezone)"""
+    now = now_ist()
     # Weekday check: 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
     if now.weekday() > 4:
         return False
     
-    # Time check: 09:15 to 15:30
+    # Time check: 09:15 to 15:30 IST
     current_time = now.time()
     start_time = datetime.strptime("09:15", "%H:%M").time()
     end_time = datetime.strptime("15:30", "%H:%M").time()
@@ -89,7 +101,7 @@ def monitor_scraper():
             
             if last_updated:
                 last_dt = to_datetime_filter(last_updated)
-                time_diff = (datetime.now() - last_dt).total_seconds()
+                time_diff = (now_ist() - last_dt).total_seconds()
                 
                 # If no update for > 5 minutes (300 seconds)
                 if time_diff > 300:
@@ -104,12 +116,12 @@ def monitor_scraper():
                  
             if should_restart:
                 # Check cooldown (don't restart if we just restarted < 1 min ago)
-                if LAST_AUTO_RESTART and (datetime.now() - LAST_AUTO_RESTART).total_seconds() < 60:
+                if LAST_AUTO_RESTART and (now_ist() - LAST_AUTO_RESTART).total_seconds() < 60:
                     print("Monitor: Skipping restart due to cooldown.")
                 else:
                     print("Monitor: Triggering auto-restart.")
                     restart_scraper_internal()
-                    LAST_AUTO_RESTART = datetime.now()
+                    LAST_AUTO_RESTART = now_ist()
                     
         except Exception as e:
             print(f"Monitor error: {e}")
@@ -188,7 +200,7 @@ def index():
         # Check if stuck (no update in last 3 minutes)
         if last_updated:
             last_dt = to_datetime_filter(last_updated)
-            if (datetime.now() - last_dt).total_seconds() > 180:
+            if (now_ist() - last_dt).total_seconds() > 180:
                 scraper_error = "Scraper is stuck or not running! (Last update > 3 mins ago)"
         else:
              scraper_error = "Scraper has no data yet!"
@@ -259,7 +271,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
     # (Or should we always use it if date is TODAY? Yes.)
     # If date is in the past, we must fall back to historical snapshots.
     
-    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_str = now_ist().strftime('%Y-%m-%d')
     use_realtime = (date == today_str) and (latest_realtime is not None)
     
     last_updated = None
@@ -1541,7 +1553,7 @@ def download_master_contract():
                     INSERT OR REPLACE INTO master_contract 
                     (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, last_updated)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, datetime.now()))
+                ''', (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, now_ist()))
                 
                 instruments_count += 1
             except Exception as e:
@@ -1594,7 +1606,7 @@ def scraper_status():
             status['running'] = False
         elif last_updated:
             last_dt = to_datetime_filter(last_updated)
-            time_diff = (datetime.now() - last_dt).total_seconds()
+            time_diff = (now_ist() - last_dt).total_seconds()
             status['time_since_update'] = time_diff
             
             if time_diff <= 180:  # Less than 3 minutes
