@@ -74,6 +74,16 @@
     <div style="display: flex; justify-content: space-between; align-items: center;">
         <div>
             <h1>Sensibull Tracker Dashboard</h1>
+        </div>
+        <div>
+            <a href="/manage-profiles" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; font-weight: 500; display: inline-block;">
+                ➕ Manage Profiles
+            </a>
+        </div>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="visibility: hidden;">
+            <!-- Spacer for flex alignment -->
             {% if last_updated %}
             <div style="color: #666; font-size: 0.9em; margin-top: -10px;">
                 Last Updated: {{ last_updated | to_datetime | attr('strftime')('%H:%M:%S') }}

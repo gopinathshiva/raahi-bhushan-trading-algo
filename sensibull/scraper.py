@@ -21,21 +21,21 @@ URLS_FILE = os.path.join(BASE_DIR, 'urls.txt')
 API_TEMPLATE = "https://oxide.sensibull.com/v1/compute/verified_by_sensibull/live_positions/snapshot/{slug}"
 
 def load_profiles():
-    if not os.path.exists(URLS_FILE):
-        print(f"Error: {URLS_FILE} not found.")
-        return []
-
-    with open(URLS_FILE, 'r') as f:
-        # Filter lines that are empty or start with #
-        slugs = [line.strip().split('/')[-1] for line in f if line.strip() and not line.startswith('#')]
-        # If full URL is given, extract slug, else assume slug
-        clean_slugs = []
-        for s in slugs:
-            if 'sensibull.com' in s:
-                 clean_slugs.append(s.split('/')[-1]) # rudimentary extraction, assumes standard URL ending in slug
-            else:
-                 clean_slugs.append(s)
-        return clean_slugs
+    """Load active profiles from database instead of urls.txt"""
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get all active profiles (is_active = 1)
+    profiles = c.execute("""
+        SELECT slug FROM profiles 
+        WHERE is_active = 1
+        ORDER BY slug
+    """).fetchall()
+    
+    conn.close()
+    
+    slugs = [p['slug'] for p in profiles]
+    return slugs
 
 def fetch_data(slug):
     url = API_TEMPLATE.format(slug=slug)

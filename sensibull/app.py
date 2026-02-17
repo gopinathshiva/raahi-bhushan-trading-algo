@@ -153,6 +153,11 @@ def monitor_scraper():
 def historical_data():
     return render_template('historical_data.html')
 
+@app.route('/manage-profiles')
+def manage_profiles():
+    """Profile management page"""
+    return render_template('manage_profiles.html')
+
 @app.route('/notifications/<slug>')
 def notifications(slug):
     """Notifications page for a profile"""
@@ -2177,6 +2182,172 @@ def signal_handler(sig, frame):
     print('\nShutting down gracefully...')
     cleanup_port()
     sys.exit(0)
+
+@app.route('/api/profiles')
+def api_get_profiles():
+    """Get all profiles with stats"""
+    conn = get_db()
+    c = conn.cursor()
+    
+    profiles = c.execute("""
+        SELECT 
+            p.id,
+            p.slug,
+            p.name,
+            p.source_url,
+            p.is_active,
+            p.added_at,
+            (SELECT MAX(timestamp) FROM snapshots WHERE profile_id = p.id) as last_scraped,
+            (SELECT COUNT(*) FROM snapshots WHERE profile_id = p.id) as snapshot_count,
+            (SELECT COUNT(*) FROM notifications WHERE profile_id = p.id AND is_read = 0) as unread_notifications
+        FROM profiles p
+        ORDER BY p.slug
+    """).fetchall()
+    
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'profiles': [dict(p) for p in profiles]
+    })
+
+
+@app.route('/api/profiles/validate', methods=['POST'])
+def api_validate_profile():
+    """Validate if a profile exists on Sensibull"""
+    data = request.json
+    slug = data.get('slug', '').strip()
+    
+    if not slug:
+        return jsonify({'success': False, 'error': 'Username is required'}), 400
+    
+    # Check if profile already exists in database
+    conn = get_db()
+    c = conn.cursor()
+    existing = c.execute("SELECT id FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    conn.close()
+    
+    if existing:
+        return jsonify({'success': False, 'error': 'Profile already exists'}), 400
+    
+    # Validate on Sensibull
+    import requests
+    url = f"https://web.sensibull.com/portfolio/positions?username={slug}"
+    
+    try:
+        response = requests.head(url, timeout=10, allow_redirects=True)
+        if response.status_code == 200:
+            return jsonify({'success': True, 'message': 'Profile exists', 'url': url})
+        else:
+            return jsonify({'success': False, 'error': 'Profile not found on Sensibull'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Validation failed: {str(e)}'}), 500
+
+
+@app.route('/api/profiles/add', methods=['POST'])
+def api_add_profile():
+    """Add a new profile"""
+    data = request.json
+    slug = data.get('slug', '').strip()
+    
+    if not slug:
+        return jsonify({'success': False, 'error': 'Username is required'}), 400
+    
+    # Validate slug format (alphanumeric and hyphens only)
+    import re
+    if not re.match(r'^[a-z0-9-]+$', slug):
+        return jsonify({'success': False, 'error': 'Invalid username format'}), 400
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    try:
+        # Construct URL
+        url = f"https://web.sensibull.com/portfolio/positions?username={slug}"
+        name = slug.replace('-', ' ').title()
+        
+        c.execute("""
+            INSERT INTO profiles (slug, name, url, source_url, is_active, added_at)
+            VALUES (?, ?, ?, ?, 1, datetime('now'))
+        """, (slug, name, url, url))
+        
+        conn.commit()
+        profile_id = c.lastrowid
+        
+        profile = c.execute("""
+            SELECT id, slug, name, source_url, is_active, added_at
+            FROM profiles WHERE id = ?
+        """, (profile_id,)).fetchone()
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Profile added successfully',
+            'profile': dict(profile)
+        })
+        
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile already exists'}), 400
+    except Exception as e:
+        conn.close()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/<int:profile_id>/toggle', methods=['POST'])
+def api_toggle_profile(profile_id):
+    """Toggle profile active status"""
+    conn = get_db()
+    c = conn.cursor()
+    
+    profile = c.execute("SELECT is_active FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+    
+    new_status = 0 if profile['is_active'] else 1
+    c.execute("UPDATE profiles SET is_active = ? WHERE id = ?", (new_status, profile_id))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Profile ' + ('enabled' if new_status else 'disabled'),
+        'is_active': new_status
+    })
+
+
+@app.route('/api/profiles/<int:profile_id>', methods=['DELETE'])
+def api_delete_profile(profile_id):
+    """Delete profile (soft or hard delete)"""
+    soft = request.args.get('soft', 'false').lower() == 'true'
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    profile = c.execute("SELECT slug FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+    
+    if soft:
+        # Soft delete - just disable
+        c.execute("UPDATE profiles SET is_active = 0 WHERE id = ?", (profile_id,))
+        message = 'Profile disabled'
+    else:
+        # Hard delete - remove completely
+        c.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+        message = 'Profile deleted permanently'
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'message': message
+    })
+
 
 if __name__ == '__main__':
     # Clean up port before starting (in case of unclean shutdown)

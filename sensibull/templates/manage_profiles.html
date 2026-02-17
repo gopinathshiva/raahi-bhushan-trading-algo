@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Profiles</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+        }
+
+        .back-link {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .add-section {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .add-section h2 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 15px;
+        }
+
+        .add-form {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .form-group {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .validation-message {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .validation-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .validation-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .profiles-section {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .profiles-section h2 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 15px;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .stat-item {
+            flex: 1;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            color: #333;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .profiles-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .profiles-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        .profiles-table td {
+            padding: 12px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .profiles-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-badge.active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-badge.inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 5px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover {
+            background: #f8f9fa;
+        }
+
+        .icon-btn[title*="Enable"],
+        .icon-btn[title*="Disable"] {
+            color: #007bff;
+        }
+
+        .icon-btn[title*="Delete"] {
+            color: #dc3545;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            color: #333;
+            font-size: 20px;
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+        }
+
+        .modal-body p {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .delete-option {
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .delete-option:hover {
+            border-color: #007bff;
+            background: #f8f9fa;
+        }
+
+        .delete-option input {
+            margin-right: 10px;
+        }
+
+        .delete-option-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .delete-option-desc {
+            color: #666;
+            font-size: 13px;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 4px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 2000;
+        }
+
+        .toast.show {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .toast.success {
+            background: #28a745;
+        }
+
+        .toast.error {
+            background: #dc3545;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Manage Profiles</h1>
+            <a href="/" class="back-link">← Back to Dashboard</a>
+        </div>
+
+        <!-- Add Profile Section -->
+        <div class="add-section">
+            <h2>➕ Add New Profile</h2>
+            <div class="add-form">
+                <div class="form-group">
+                    <label for="username">Username (slug)</label>
+                    <input type="text" id="username" placeholder="e.g., latered-garage" />
+                </div>
+                <button class="btn btn-primary" onclick="validateProfile()" id="validateBtn">
+                    Validate
+                </button>
+                <button class="btn btn-success" onclick="addProfile()" id="addBtn" disabled>
+                    Add Profile
+                </button>
+            </div>
+            <div id="validationMessage"></div>
+        </div>
+
+        <!-- Profiles List Section -->
+        <div class="profiles-section">
+            <h2>📋 Existing Profiles</h2>
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-label">Total Profiles</div>
+                    <div class="stat-value" id="totalProfiles">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Active</div>
+                    <div class="stat-value" id="activeProfiles">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Inactive</div>
+                    <div class="stat-value" id="inactiveProfiles">-</div>
+                </div>
+            </div>
+            <div id="profilesList">
+                <div class="loading">Loading profiles...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Delete "<span id="deleteProfileName"></span>"?</h3>
+            </div>
+            <div class="modal-body">
+                <p>⚠️ Choose deletion type:</p>
+                
+                <div class="delete-option" onclick="selectDeleteOption('soft')">
+                    <input type="radio" name="deleteType" value="soft" id="deleteSoft">
+                    <label for="deleteSoft">
+                        <div class="delete-option-title">Disable Only (Recommended)</div>
+                        <div class="delete-option-desc">Stops scraping but keeps all historical data</div>
+                    </label>
+                </div>
+                
+                <div class="delete-option" onclick="selectDeleteOption('hard')">
+                    <input type="radio" name="deleteType" value="hard" id="deleteHard">
+                    <label for="deleteHard">
+                        <div class="delete-option-title">Delete Permanently</div>
+                        <div class="delete-option-desc">Removes profile and ALL associated data (snapshots, changes, notifications)</div>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn btn-danger" onclick="confirmDelete()" id="confirmDeleteBtn" disabled>
+                    Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+        let currentDeleteProfileId = null;
+        let validatedSlug = null;
+
+        // Load profiles on page load
+        window.addEventListener('DOMContentLoaded', loadProfiles);
+
+        async function loadProfiles() {
+            try {
+                const response = await fetch('/api/profiles');
+                const data = await response.json();
+                
+                if (data.success) {
+                    renderProfiles(data.profiles);
+                    updateStats(data.profiles);
+                } else {
+                    showToast('Failed to load profiles', 'error');
+                }
+            } catch (error) {
+                console.error('Error loading profiles:', error);
+                showToast('Error loading profiles', 'error');
+            }
+        }
+
+        function updateStats(profiles) {
+            const total = profiles.length;
+            const active = profiles.filter(p => p.is_active).length;
+            const inactive = total - active;
+            
+            document.getElementById('totalProfiles').textContent = total;
+            document.getElementById('activeProfiles').textContent = active;
+            document.getElementById('inactiveProfiles').textContent = inactive;
+        }
+
+        function renderProfiles(profiles) {
+            const container = document.getElementById('profilesList');
+            
+            if (profiles.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div style="font-size: 48px; margin-bottom: 10px;">📭</div>
+                        <p>No profiles yet. Add your first profile above!</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const html = `
+                <table class="profiles-table">
+                    <thead>
+                        <tr>
+                            <th>Profile Name</th>
+                            <th>Status</th>
+                            <th>Last Scraped</th>
+                            <th>Snapshots</th>
+                            <th>Unread Notifications</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${profiles.map(p => `
+                            <tr>
+                                <td>
+                                    <strong>${p.name || p.slug}</strong><br>
+                                    <small style="color: #999;">${p.slug}</small>
+                                </td>
+                                <td>
+                                    <span class="status-badge ${p.is_active ? 'active' : 'inactive'}">
+                                        ${p.is_active ? '✓ Active' : '❌ Disabled'}
+                                    </span>
+                                </td>
+                                <td>${formatTimestamp(p.last_scraped)}</td>
+                                <td>${p.snapshot_count || 0}</td>
+                                <td>${p.unread_notifications || 0}</td>
+                                <td>
+                                    <div class="action-buttons">
+                                        <button class="icon-btn" 
+                                                onclick="toggleProfile(${p.id}, ${p.is_active})"
+                                                title="${p.is_active ? 'Disable' : 'Enable'} scraping">
+                                            ${p.is_active ? '⏸️' : '▶️'}
+                                        </button>
+                                        <button class="icon-btn" 
+                                                onclick="openDeleteModal(${p.id}, '${p.slug}')"
+                                                title="Delete profile">
+                                            🗑️
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+            
+            container.innerHTML = html;
+        }
+
+        function formatTimestamp(ts) {
+            if (!ts) return 'Never';
+            
+            try {
+                const date = new Date(ts);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                
+                if (diffMins < 1) return 'Just now';
+                if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+                
+                const diffHours = Math.floor(diffMins / 60);
+                if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+                
+                const diffDays = Math.floor(diffHours / 24);
+                if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+                
+                return date.toLocaleDateString();
+            } catch (e) {
+                return ts;
+            }
+        }
+
+        async function validateProfile() {
+            const username = document.getElementById('username').value.trim();
+            const validateBtn = document.getElementById('validateBtn');
+            const addBtn = document.getElementById('addBtn');
+            const msgContainer = document.getElementById('validationMessage');
+            
+            if (!username) {
+                msgContainer.innerHTML = '<div class="validation-message error">Please enter a username</div>';
+                return;
+            }
+            
+            validateBtn.disabled = true;
+            validateBtn.textContent = 'Validating...';
+            msgContainer.innerHTML = '';
+            validatedSlug = null;
+            addBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/profiles/validate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ slug: username })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    validatedSlug = username;
+                    addBtn.disabled = false;
+                    msgContainer.innerHTML = `
+                        <div class="validation-message success">
+                            ✓ Profile exists on Sensibull! Click "Add Profile" to add it.
+                        </div>
+                    `;
+                } else {
+                    msgContainer.innerHTML = `
+                        <div class="validation-message error">
+                            ❌ ${data.error || 'Validation failed'}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                msgContainer.innerHTML = `
+                    <div class="validation-message error">
+                        ❌ Error: ${error.message}
+                    </div>
+                `;
+            } finally {
+                validateBtn.disabled = false;
+                validateBtn.textContent = 'Validate';
+            }
+        }
+
+        async function addProfile() {
+            if (!validatedSlug) {
+                showToast('Please validate the profile first', 'error');
+                return;
+            }
+            
+            const addBtn = document.getElementById('addBtn');
+            addBtn.disabled = true;
+            addBtn.textContent = 'Adding...';
+            
+            try {
+                const response = await fetch('/api/profiles/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ slug: validatedSlug })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast('Profile added successfully!', 'success');
+                    document.getElementById('username').value = '';
+                    document.getElementById('validationMessage').innerHTML = '';
+                    validatedSlug = null;
+                    loadProfiles(); // Reload the list
+                } else {
+                    showToast(data.error || 'Failed to add profile', 'error');
+                }
+            } catch (error) {
+                showToast('Error adding profile', 'error');
+            } finally {
+                addBtn.disabled = true;
+                addBtn.textContent = 'Add Profile';
+            }
+        }
+
+        async function toggleProfile(profileId, currentStatus) {
+            try {
+                const response = await fetch(`/api/profiles/${profileId}/toggle`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    loadProfiles(); // Reload
+                } else {
+                    showToast(data.error || 'Failed to toggle profile', 'error');
+                }
+            } catch (error) {
+                showToast('Error toggling profile', 'error');
+            }
+        }
+
+        function openDeleteModal(profileId, slug) {
+            currentDeleteProfileId = profileId;
+            document.getElementById('deleteProfileName').textContent = slug;
+            document.getElementById('deleteModal').classList.add('show');
+            document.getElementById('confirmDeleteBtn').disabled = true;
+            
+            // Reset radio buttons
+            document.querySelectorAll('input[name="deleteType"]').forEach(r => r.checked = false);
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').classList.remove('show');
+            currentDeleteProfileId = null;
+        }
+
+        function selectDeleteOption(type) {
+            document.getElementById(`delete${type.charAt(0).toUpperCase() + type.slice(1)}`).checked = true;
+            document.getElementById('confirmDeleteBtn').disabled = false;
+        }
+
+        async function confirmDelete() {
+            const deleteType = document.querySelector('input[name="deleteType"]:checked')?.value;
+            
+            if (!deleteType || !currentDeleteProfileId) return;
+            
+            const soft = deleteType === 'soft';
+            
+            try {
+                const response = await fetch(`/api/profiles/${currentDeleteProfileId}?soft=${soft}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    closeDeleteModal();
+                    loadProfiles(); // Reload
+                } else {
+                    showToast(data.error || 'Failed to delete profile', 'error');
+                }
+            } catch (error) {
+                showToast('Error deleting profile', 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
