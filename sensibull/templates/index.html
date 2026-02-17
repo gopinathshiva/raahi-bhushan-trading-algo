@@ -7,18 +7,21 @@
     <style>
         body {
             font-family: sans-serif;
-            padding: 20px;
+            padding: 0;
+            margin: 0;
             background: #f4f4f9;
         }
 
         /* Use more of the screen on laptops / high-res displays */
         .container {
-            width: min(1600px, 100%);
-            margin: 0 auto;
+            width: 100%;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
         }
 
         @media (max-width: 600px) {
-            body {
+            .container {
                 padding: 12px;
             }
         }
@@ -86,7 +89,7 @@
             </div>
             {% endif %}
         </div>
-        <div style="display: flex; gap: 10px;">
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
             <button onclick="window.location.href='/historical_data'"
                 style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Historical
                 Data</button>
@@ -223,6 +226,27 @@
             }
         }
 
+        // Load notification counts for all profiles
+        async function loadAllNotificationCounts() {
+            const badges = document.querySelectorAll('.notification-badge');
+            badges.forEach(async (badge) => {
+                const slug = badge.dataset.profileSlug;
+                try {
+                    const response = await fetch(`/api/notifications/unread_count?profile_slug=${slug}`);
+                    const data = await response.json();
+                    if (data.success && data.unread_count > 0) {
+                        badge.textContent = data.unread_count > 99 ? '99+' : data.unread_count;
+                        badge.style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error(`Error loading notification count for ${slug}:`, error);
+                }
+            });
+        }
+
+        // Load notification counts on page load
+        document.addEventListener('DOMContentLoaded', loadAllNotificationCounts);
+
         // Auto-refresh every 60 seconds
         setInterval(() => {
             console.log("Auto-refreshing dashboard...");
@@ -265,7 +289,15 @@
                 <tr>
                     <td
                         style="text-align: left; font-weight: bold; position: sticky; left: 0; background: #fff; z-index: 1; border-right: 2px solid #ddd;">
-                        {{ profile.name }}</td>
+                        {{ profile.name }}
+                        <a href="/notifications/{{ profile.slug }}" style="margin-left: 8px; text-decoration: none; position: relative; display: inline-block; vertical-align: middle;">
+                            <span style="font-size: 1.2em;">🔔</span>
+                            <span class="notification-badge" data-profile-slug="{{ profile.slug }}" 
+                                  style="display: none; position: absolute; top: -8px; right: -8px; background: #dc3545; color: white; 
+                                         border-radius: 10px; padding: 2px 6px; font-size: 0.7em; font-weight: bold; min-width: 16px; 
+                                         text-align: center; line-height: 1;">0</span>
+                        </a>
+                    </td>
                     {% for date in dates %}
                     <td>
                         {% set val = matrix.get((profile.id, date), {'count': 0, 'pnl': 0}) %}

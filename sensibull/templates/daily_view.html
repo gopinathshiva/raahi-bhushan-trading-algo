@@ -7,18 +7,21 @@
     <style>
         body {
             font-family: sans-serif;
-            padding: 20px;
+            padding: 0;
+            margin: 0;
             background: #fafafa;
         }
 
         .container {
-            /* Use more of the available width on laptops / high-res screens */
-            width: min(1400px, 100%);
-            margin: 0 auto;
+            /* Use full width */
+            width: 100%;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
         }
 
         @media (max-width: 600px) {
-            body {
+            .container {
                 padding: 12px;
             }
         }
@@ -129,6 +132,7 @@
             .lifecycle-table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
             .lifecycle-table th, .lifecycle-table td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
             .lifecycle-table th { background: #f2f2f2; position: sticky; top: 0; z-index: 1; }
+            .table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
             .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.85em; font-weight: bold; }
             .pill.entered { background: #d4edda; color: #155724; }
             .pill.modified { background: #fff3cd; color: #856404; }
@@ -152,6 +156,12 @@
             <button class="tab-btn active" id="tab-btn-daily" onclick="switchTab('daily')">Daily Timeline</button>
             <button class="tab-btn" id="tab-btn-search" onclick="switchTab('search')">Symbol Search (Lifecycle)</button>
             <button class="tab-btn" id="tab-btn-underlyings" onclick="switchTab('underlyings')">All Underlying Trades</button>
+            <a href="/notifications/{{ slug }}" style="margin-left: auto; text-decoration: none;">
+                <button class="tab-btn" style="position: relative;">
+                    🔔 Notifications
+                    <span id="notification-badge" style="display: none; position: absolute; top: -5px; right: -5px; background: #f44336; color: white; border-radius: 50%; width: 20px; height: 20px; font-size: 0.75em; font-weight: bold; line-height: 20px; text-align: center;"></span>
+                </button>
+            </a>
         </div>
 
         <div id="tab-panel-daily" class="tab-panel active">
@@ -901,6 +911,9 @@
                 }
 
                 renderLifecycleEvents(data.events || []);
+                
+                // Update subscription indicators after rendering buttons
+                updateSubscriptionIndicators();
             } catch (e) {
                 if (status) status.textContent = 'Search failed: ' + e;
                 renderLifecycleEvents([]);
@@ -968,6 +981,9 @@
                 _cachedUnderlyingsData = { underlyings, events };
                 
                 renderUnderlyingGroups(underlyings, events);
+                
+                // Update subscription indicators after rendering buttons
+                updateSubscriptionIndicators();
             } catch (e) {
                 if (status) status.textContent = 'Failed to load: ' + e;
             }
@@ -976,6 +992,8 @@
         function reRenderUnderlyingGroups() {
             if (_cachedUnderlyingsData) {
                 renderUnderlyingGroups(_cachedUnderlyingsData.underlyings, _cachedUnderlyingsData.events);
+                // Update subscription indicators after re-rendering
+                updateSubscriptionIndicators();
             }
         }
 
@@ -1029,6 +1047,24 @@
                 buttonsDiv.style.gap = '10px';
                 buttonsDiv.style.alignItems = 'center';
 
+                // Subscribe button for underlying
+                const subscribeBtn = document.createElement('button');
+                subscribeBtn.innerHTML = '🔕 Subscribe';
+                subscribeBtn.style.padding = '6px 12px';
+                subscribeBtn.style.background = '#007bff';
+                subscribeBtn.style.color = 'white';
+                subscribeBtn.style.border = 'none';
+                subscribeBtn.style.borderRadius = '4px';
+                subscribeBtn.style.cursor = 'pointer';
+                subscribeBtn.style.fontSize = '0.9em';
+                subscribeBtn.dataset.subscribeBtn = 'true';
+                subscribeBtn.dataset.subscribeType = 'underlying';
+                subscribeBtn.dataset.subscribeUnderlying = underlying;
+                subscribeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleSubscription('underlying', underlying, null, null);
+                };
+
                 const chartBtn = document.createElement('button');
                 chartBtn.innerHTML = '📊 View Trades with Chart';
                 chartBtn.style.padding = '6px 12px';
@@ -1048,6 +1084,7 @@
                 toggleSpan.textContent = '▶';
                 toggleSpan.id = `underlying-toggle-${underlying}`;
 
+                buttonsDiv.appendChild(subscribeBtn);
                 buttonsDiv.appendChild(chartBtn);
                 buttonsDiv.appendChild(toggleSpan);
 
@@ -1098,29 +1135,39 @@
 
                     expiryHtml += `
                         <div class="expiry-section" style="margin-top: 15px; border-left: 3px solid #ddd; padding-left: 15px;">
-                            <div class="expiry-header" onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer; padding: 8px; background: #f8f9fa; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-                                <span style="font-weight: bold; color: #555;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span></span>
-                                <span class="expiry-toggle" id="expiry-toggle-${expiryId}">▶</span>
+                            <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                                <span onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span></span>
+                                <button 
+                                    data-subscribe-btn="true"
+                                    data-subscribe-type="expiry"
+                                    data-subscribe-underlying="${underlying}"
+                                    data-subscribe-expiry="${expiryDateStr}"
+                                    onclick="event.stopPropagation(); toggleSubscription('expiry', '${underlying}', '${expiryDateStr}', null);"
+                                    style="padding: 4px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; margin-right: 10px;">
+                                    🔕 Subscribe
+                                </button>
+                                <span class="expiry-toggle" id="expiry-toggle-${expiryId}" onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer;">▶</span>
                             </div>
                             <div class="expiry-content" id="expiry-content-${expiryId}" style="display: none;">
-                                <table class="lifecycle-table">
-                                    <thead>
-                                        <tr>
-                                            <th style="min-width: 150px;">Time</th>
-                                            <th style="min-width: 110px;">Type</th>
-                                            <th>Symbol</th>
-                                            <th style="min-width: 70px;">Product</th>
-                                            <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
-                                            <th style="min-width: 140px;" class="num">Avg (Before)</th>
-                                            <th style="min-width: 140px;" class="num">Avg (After)</th>
-                                            <th style="min-width: 140px;" class="num">LTP (After)</th>
-                                            <th style="min-width: 170px;" class="num">Booked P&L (After)</th>
-                                            <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
-                                            <th style="min-width: 240px;">Exit / Fill</th>
-                                            <th style="width: 70px; text-align:center;">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
+                                <div class="table-wrapper">
+                                    <table class="lifecycle-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="min-width: 150px;">Time</th>
+                                                <th style="min-width: 110px;">Type</th>
+                                                <th>Symbol</th>
+                                                <th style="min-width: 70px;">Product</th>
+                                                <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
+                                                <th style="min-width: 140px;" class="num">Avg (Before)</th>
+                                                <th style="min-width: 140px;" class="num">Avg (After)</th>
+                                                <th style="min-width: 140px;" class="num">LTP (After)</th>
+                                                <th style="min-width: 170px;" class="num">Booked P&L (After)</th>
+                                                <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
+                                                <th style="min-width: 240px;">Exit / Fill</th>
+                                                <th style="width: 70px; text-align:center;">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
                                         ${sortedEvents.map(e => {
                                             const typeLower = (e.type || '').toLowerCase();
                                             const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
@@ -1147,9 +1194,22 @@
                                                 }
                                             }
 
-                                            const actionHtml = e.change_id
-                                                ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>`
-                                                : `<span style="color:#aaa;" title="No diff record">-</span>`;
+                                            const positionId = JSON.stringify({symbol: e.symbol || '', product: e.product || ''}).replace(/"/g, '&quot;');
+                                            const actionHtml = `
+                                                <div style="display: flex; gap: 5px; align-items: center; justify-content: center;">
+                                                    ${e.change_id ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>` : ''}
+                                                    <button 
+                                                        data-subscribe-btn="true"
+                                                        data-subscribe-type="position"
+                                                        data-subscribe-underlying="${underlying}"
+                                                        data-subscribe-position="${positionId}"
+                                                        onclick="event.stopPropagation(); toggleSubscription('position', '${underlying}', null, {symbol: '${e.symbol || ''}', product: '${e.product || ''}'});"
+                                                        style="padding: 2px 6px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75em;"
+                                                        title="Subscribe to this position">
+                                                        🔕
+                                                    </button>
+                                                </div>
+                                            `;
 
                                             const bookedPnl = Number(e.after_booked_pnl || 0);
                                             const bookedPnlColor = bookedPnl > 0 ? '#28a745' : (bookedPnl < 0 ? '#dc3545' : '#666');
@@ -1174,8 +1234,9 @@
                                                 <td style="text-align:center;">${actionHtml}</td>
                                             </tr>`;
                                         }).join('')}
-                                    </tbody>
-                                </table>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     `;
@@ -2470,6 +2531,250 @@
                 closeModal();
             }
         }
+
+        // ==================== SUBSCRIPTION FUNCTIONALITY ====================
+        const PROFILE_SLUG = '{{ slug }}';
+        let subscriptionsCache = [];
+
+        // Load subscriptions on page load
+        async function loadSubscriptions() {
+            try {
+                const response = await fetch(`/api/subscriptions?profile_slug=${PROFILE_SLUG}`);
+                const data = await response.json();
+                if (data.success) {
+                    subscriptionsCache = data.subscriptions;
+                    updateSubscriptionIndicators();
+                }
+            } catch (error) {
+                console.error('Error loading subscriptions:', error);
+            }
+        }
+
+        // Track last notification count for sound alerts
+        let lastNotificationCount = 0;
+        let notificationCheckInterval = null;
+
+        // Play notification sound
+        function playNotificationSound() {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.frequency.value = 800;
+                oscillator.type = 'sine';
+                
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.5);
+            } catch (error) {
+                console.error('Error playing notification sound:', error);
+            }
+        }
+
+        // Load unread notification count with sound alert
+        async function loadUnreadCount() {
+            try {
+                const response = await fetch(`/api/notifications/unread_count?profile_slug=${PROFILE_SLUG}`);
+                const data = await response.json();
+                if (data.success) {
+                    const currentCount = data.unread_count;
+                    
+                    // Play sound if count increased
+                    if (lastNotificationCount > 0 && currentCount > lastNotificationCount) {
+                        playNotificationSound();
+                        const newCount = currentCount - lastNotificationCount;
+                        showToast(`🔔 ${newCount} new notification(s)!`, 'success');
+                    }
+                    
+                    lastNotificationCount = currentCount;
+                    
+                    if (currentCount > 0) {
+                        const badge = document.getElementById('notification-badge');
+                        if (badge) {
+                            badge.textContent = currentCount > 99 ? '99+' : currentCount;
+                            badge.style.display = 'block';
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading unread count:', error);
+            }
+        }
+
+        // Check if item is subscribed
+        function isSubscribed(type, underlying, expiry, positionId) {
+            return subscriptionsCache.some(sub => {
+                if (sub.subscription_type !== type) return false;
+                if (type === 'underlying') return sub.underlying === underlying;
+                if (type === 'expiry') return sub.underlying === underlying && sub.expiry === expiry;
+                if (type === 'position' && positionId) {
+                    return JSON.stringify(sub.position_identifier) === JSON.stringify(positionId);
+                }
+                return false;
+            });
+        }
+
+        // Get subscription ID
+        function getSubscriptionId(type, underlying, expiry, positionId) {
+            const sub = subscriptionsCache.find(sub => {
+                if (sub.subscription_type !== type) return false;
+                if (type === 'underlying') return sub.underlying === underlying;
+                if (type === 'expiry') return sub.underlying === underlying && sub.expiry === expiry;
+                if (type === 'position' && positionId) {
+                    return JSON.stringify(sub.position_identifier) === JSON.stringify(positionId);
+                }
+                return false;
+            });
+            return sub ? sub.id : null;
+        }
+
+        // Subscribe to an item
+        async function subscribe(type, underlying, expiry, positionId) {
+            try {
+                const payload = {
+                    profile_slug: PROFILE_SLUG,
+                    subscription_type: type,
+                    underlying: underlying,
+                    expiry: expiry || null,
+                    position_identifier: positionId || null
+                };
+
+                const response = await fetch('/api/subscriptions/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showToast('✓ ' + data.message, 'success');
+                    await loadSubscriptions();
+                } else {
+                    showToast('ℹ️ ' + data.message, 'info');
+                }
+            } catch (error) {
+                console.error('Error subscribing:', error);
+                showToast('✗ Failed to subscribe', 'error');
+            }
+        }
+
+        // Unsubscribe from an item
+        async function unsubscribe(type, underlying, expiry, positionId) {
+            const subscriptionId = getSubscriptionId(type, underlying, expiry, positionId);
+            if (!subscriptionId) {
+                showToast('Not subscribed', 'info');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/subscriptions/unsubscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subscription_id: subscriptionId })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showToast('✓ ' + data.message, 'success');
+                    await loadSubscriptions();
+                } else {
+                    showToast('✗ ' + data.message, 'error');
+                }
+            } catch (error) {
+                console.error('Error unsubscribing:', error);
+                showToast('✗ Failed to unsubscribe', 'error');
+            }
+        }
+
+        // Toggle subscription
+        async function toggleSubscription(type, underlying, expiry, positionId) {
+            if (isSubscribed(type, underlying, expiry, positionId)) {
+                await unsubscribe(type, underlying, expiry, positionId);
+            } else {
+                await subscribe(type, underlying, expiry, positionId);
+            }
+        }
+
+        // Update UI indicators
+        function updateSubscriptionIndicators() {
+            // Update underlying group headers, expiry headers, and position buttons
+            document.querySelectorAll('[data-subscribe-btn]').forEach(btn => {
+                const type = btn.dataset.subscribeType;
+                const underlying = btn.dataset.subscribeUnderlying;
+                const expiry = btn.dataset.subscribeExpiry;
+                
+                let positionId = null;
+                if (type === 'position' && btn.dataset.subscribePosition) {
+                    try {
+                        positionId = JSON.parse(btn.dataset.subscribePosition.replace(/&quot;/g, '"'));
+                    } catch(e) {
+                        console.error('Error parsing position ID:', e);
+                    }
+                }
+                
+                const subscribed = isSubscribed(type, underlying, expiry, positionId);
+                
+                // Update button appearance based on type
+                if (type === 'position') {
+                    btn.textContent = subscribed ? '🔔' : '🔕';
+                    btn.style.background = subscribed ? '#4caf50' : '#007bff';
+                    btn.title = subscribed ? 'Subscribed - Click to unsubscribe' : 'Subscribe to this position';
+                } else {
+                    btn.textContent = subscribed ? '🔔 Subscribed' : '🔕 Subscribe';
+                    btn.style.background = subscribed ? '#4caf50' : '#007bff';
+                    btn.title = subscribed ? 'Click to unsubscribe' : 'Click to subscribe for notifications';
+                }
+            });
+        }
+
+        // Show toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: ${type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#2196F3'};
+                color: white;
+                padding: 15px 20px;
+                border-radius: 5px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+                z-index: 10000;
+                animation: slideIn 0.3s;
+            `;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Add CSS animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(100%); }
+                to { transform: translateX(0); }
+            }
+            @keyframes slideOut {
+                from { transform: translateX(0); }
+                to { transform: translateX(100%); }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Initialize on page load
+        loadSubscriptions();
+        loadUnreadCount();
+        setInterval(loadUnreadCount, 10000); // Check every 10 seconds for real-time alerts
     </script>
 </body>
 

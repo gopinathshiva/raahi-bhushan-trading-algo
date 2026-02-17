@@ -131,6 +131,292 @@ def cleanup_old_data(conn):
         print("No old data to clean up.")
 
 
+def cleanup_old_notifications(conn):
+    """Delete notifications older than 30 days"""
+    cutoff_date = now_ist() - timedelta(days=30)
+    c = conn.cursor()
+    
+    c.execute("DELETE FROM notifications WHERE created_at < ?", (cutoff_date.isoformat(),))
+    deleted_notifications = c.rowcount
+    
+    conn.commit()
+    if deleted_notifications > 0:
+        print(f"Deleted {deleted_notifications} old notifications (>30 days).")
+
+def extract_underlying_from_symbol(trading_symbol):
+    """Extract underlying symbol from trading symbol (e.g., 'NIFTY26FEB25000PE' -> 'NIFTY')"""
+    if not trading_symbol:
+        return None
+    
+    # Common patterns:
+    # NIFTY26FEB25000PE, RELIANCE26FEB1200PE, TCS26MAR2440PE, IEX26FEB114PE
+    # The underlying is the alphabetic prefix before the date/strike portion
+    
+    # Find where the first digit appears
+    for i, char in enumerate(trading_symbol):
+        if char.isdigit():
+            return trading_symbol[:i]
+    
+    # If no digits found, return the whole symbol
+    return trading_symbol
+
+def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
+    """Generate notifications based on subscriptions and detected changes"""
+    c = conn.cursor()
+    
+    # Get all subscriptions for this profile
+    subscriptions = c.execute("""
+        SELECT id, subscription_type, underlying, expiry, position_identifier
+        FROM subscriptions
+        WHERE profile_id = ?
+    """, (profile_id,)).fetchall()
+    
+    if not subscriptions:
+        return  # No subscriptions, nothing to do
+    
+    # Parse old and new positions into comparable structures
+    old_positions = {}  # key: (underlying, expiry, symbol, product, strike, option_type) -> trade data
+    new_positions = {}
+    
+    # Build old positions map
+    for pos in old_data.get('data', []):
+        # Use trading_symbol from position level (underlying symbol like "NIFTY", "TCS")
+        # Or extract it from the trade's trading_symbol
+        position_symbol = pos.get('trading_symbol')
+        underlying = pos.get('underlying') or position_symbol
+        for trade in pos.get('trades', []):
+            inst = trade.get('instrument_info') or {}
+            # If underlying is still None, extract from trading_symbol
+            trade_underlying = underlying or extract_underlying_from_symbol(trade.get('trading_symbol'))
+            # Use expiry from instrument_info (not from position level which is None)
+            trade_expiry = inst.get('expiry')
+            key = (
+                trade_underlying,
+                trade_expiry,
+                trade.get('trading_symbol'),
+                trade.get('product'),
+                inst.get('strike'),
+                inst.get('instrument_type')
+            )
+            old_positions[key] = trade
+    
+    # Build new positions map
+    for pos in new_data.get('data', []):
+        # Use trading_symbol from position level (underlying symbol like "NIFTY", "TCS")
+        # Or extract it from the trade's trading_symbol
+        position_symbol = pos.get('trading_symbol')
+        underlying = pos.get('underlying') or position_symbol
+        for trade in pos.get('trades', []):
+            inst = trade.get('instrument_info') or {}
+            # If underlying is still None, extract from trading_symbol
+            trade_underlying = underlying or extract_underlying_from_symbol(trade.get('trading_symbol'))
+            # Use expiry from instrument_info (not from position level which is None)
+            trade_expiry = inst.get('expiry')
+            key = (
+                trade_underlying,
+                trade_expiry,
+                trade.get('trading_symbol'),
+                trade.get('product'),
+                inst.get('strike'),
+                inst.get('instrument_type')
+            )
+            new_positions[key] = trade
+    
+    # Detect changes
+    old_keys = set(old_positions.keys())
+    new_keys = set(new_positions.keys())
+    
+    added_positions = new_keys - old_keys
+    removed_positions = old_keys - new_keys
+    existing_positions = old_keys & new_keys
+    
+    # Process each subscription
+    for sub in subscriptions:
+        sub_id = sub['id']
+        sub_type = sub['subscription_type']
+        sub_underlying = sub['underlying']
+        sub_expiry = sub['expiry']
+        sub_pos_id = json.loads(sub['position_identifier']) if sub['position_identifier'] else None
+        
+        # Check for relevant changes based on subscription type
+        if sub_type == 'underlying':
+            # Notify for any position changes in this underlying
+            for key in added_positions:
+                if key[0] == sub_underlying:  # key[0] is underlying
+                    trade = new_positions[key]
+                    notification_data = {
+                        'underlying': key[0],
+                        'expiry': key[1],
+                        'symbol': key[2],
+                        'product': key[3],
+                        'quantity': trade.get('quantity', 0),
+                        'average_price': trade.get('average_price', 0),
+                        'last_price': trade.get('last_price', 0),
+                        'unbooked_pnl': trade.get('unbooked_pnl', 0)
+                    }
+                    create_notification(conn, profile_id, sub_id, 'new_position', 
+                                      f"New position added in {sub_underlying}", 
+                                      notification_data)
+            
+            for key in removed_positions:
+                if key[0] == sub_underlying:
+                    trade = old_positions[key]
+                    notification_data = {
+                        'underlying': key[0],
+                        'expiry': key[1],
+                        'symbol': key[2],
+                        'product': key[3],
+                        'quantity': trade.get('quantity', 0),
+                        'average_price': trade.get('average_price', 0),
+                        'exit_pnl': trade.get('booked_pnl', 0)
+                    }
+                    create_notification(conn, profile_id, sub_id, 'exited_position',
+                                      f"Position exited in {sub_underlying}",
+                                      notification_data)
+            
+            for key in existing_positions:
+                if key[0] == sub_underlying:
+                    old_trade = old_positions[key]
+                    new_trade = new_positions[key]
+                    old_qty = old_trade.get('quantity', 0)
+                    new_qty = new_trade.get('quantity', 0)
+                    if old_qty != new_qty:
+                        qty_diff = new_qty - old_qty
+                        notification_data = {
+                            'underlying': key[0],
+                            'expiry': key[1],
+                            'symbol': key[2],
+                            'product': key[3],
+                            'old_quantity': old_qty,
+                            'quantity': new_qty,
+                            'quantity_diff': qty_diff,
+                            'old_average_price': old_trade.get('average_price', 0),
+                            'average_price': new_trade.get('average_price', 0),
+                            'last_price': new_trade.get('last_price', 0),
+                            'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
+                            'booked_pnl': new_trade.get('booked_pnl', 0)
+                        }
+                        create_notification(conn, profile_id, sub_id, 'modified_position',
+                                          f"Position modified in {sub_underlying}",
+                                          notification_data)
+        
+        elif sub_type == 'expiry':
+            # Notify for any position changes in this underlying + expiry combination
+            for key in added_positions:
+                if key[0] == sub_underlying and key[1] == sub_expiry:
+                    trade = new_positions[key]
+                    notification_data = {
+                        'underlying': key[0],
+                        'expiry': key[1],
+                        'symbol': key[2],
+                        'product': key[3],
+                        'quantity': trade.get('quantity', 0),
+                        'average_price': trade.get('average_price', 0),
+                        'last_price': trade.get('last_price', 0),
+                        'unbooked_pnl': trade.get('unbooked_pnl', 0)
+                    }
+                    create_notification(conn, profile_id, sub_id, 'new_position',
+                                      f"New position added in {sub_underlying} {sub_expiry}",
+                                      notification_data)
+            
+            for key in removed_positions:
+                if key[0] == sub_underlying and key[1] == sub_expiry:
+                    trade = old_positions[key]
+                    notification_data = {
+                        'underlying': key[0],
+                        'expiry': key[1],
+                        'symbol': key[2],
+                        'product': key[3],
+                        'quantity': trade.get('quantity', 0),
+                        'average_price': trade.get('average_price', 0),
+                        'exit_pnl': trade.get('booked_pnl', 0)
+                    }
+                    create_notification(conn, profile_id, sub_id, 'exited_position',
+                                      f"Position exited in {sub_underlying} {sub_expiry}",
+                                      notification_data)
+            
+            for key in existing_positions:
+                if key[0] == sub_underlying and key[1] == sub_expiry:
+                    old_trade = old_positions[key]
+                    new_trade = new_positions[key]
+                    old_qty = old_trade.get('quantity', 0)
+                    new_qty = new_trade.get('quantity', 0)
+                    if old_qty != new_qty:
+                        qty_diff = new_qty - old_qty
+                        notification_data = {
+                            'underlying': key[0],
+                            'expiry': key[1],
+                            'symbol': key[2],
+                            'product': key[3],
+                            'old_quantity': old_qty,
+                            'quantity': new_qty,
+                            'quantity_diff': qty_diff,
+                            'old_average_price': old_trade.get('average_price', 0),
+                            'average_price': new_trade.get('average_price', 0),
+                            'last_price': new_trade.get('last_price', 0),
+                            'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
+                            'booked_pnl': new_trade.get('booked_pnl', 0)
+                        }
+                        create_notification(conn, profile_id, sub_id, 'modified_position',
+                                          f"Position modified in {sub_underlying} {sub_expiry}",
+                                          notification_data)
+        
+        elif sub_type == 'position' and sub_pos_id:
+            # Notify for changes to this specific position
+            # Match based on symbol, product, strike, option_type
+            matching_key = None
+            for key in old_keys | new_keys:
+                if (key[2] == sub_pos_id.get('symbol') and 
+                    key[3] == sub_pos_id.get('product')):
+                    matching_key = key
+                    break
+            
+            if matching_key:
+                if matching_key in removed_positions:
+                    trade = old_positions[matching_key]
+                    notification_data = {
+                        'symbol': matching_key[2],
+                        'product': matching_key[3],
+                        'quantity': trade.get('quantity', 0),
+                        'average_price': trade.get('average_price', 0),
+                        'exit_pnl': trade.get('booked_pnl', 0)
+                    }
+                    create_notification(conn, profile_id, sub_id, 'exited_position',
+                                      f"Position exited",
+                                      notification_data)
+                elif matching_key in existing_positions:
+                    old_trade = old_positions[matching_key]
+                    new_trade = new_positions[matching_key]
+                    old_qty = old_trade.get('quantity', 0)
+                    new_qty = new_trade.get('quantity', 0)
+                    if old_qty != new_qty:
+                        qty_diff = new_qty - old_qty
+                        notification_data = {
+                            'symbol': matching_key[2],
+                            'product': matching_key[3],
+                            'old_quantity': old_qty,
+                            'quantity': new_qty,
+                            'quantity_diff': qty_diff,
+                            'old_average_price': old_trade.get('average_price', 0),
+                            'average_price': new_trade.get('average_price', 0),
+                            'last_price': new_trade.get('last_price', 0),
+                            'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
+                            'booked_pnl': new_trade.get('booked_pnl', 0)
+                        }
+                        create_notification(conn, profile_id, sub_id, 'quantity_change',
+                                          f"Quantity changed",
+                                          notification_data)
+
+def create_notification(conn, profile_id, subscription_id, notification_type, message, notification_data):
+    """Helper to create a notification"""
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO notifications (profile_id, subscription_id, notification_type, message, notification_data, created_at, is_read)
+        VALUES (?, ?, ?, ?, ?, ?, 0)
+    """, (profile_id, subscription_id, notification_type, message, json.dumps(notification_data), now_ist().isoformat()))
+    conn.commit()
+    print(f"  → Created notification: {message}")
+
 def run_scraper():
     conn = get_db()
     c = conn.cursor()
@@ -146,6 +432,7 @@ def run_scraper():
     # Run cleanup occasionally (simple way: check if hour is 09:15 approx, or just every run is fine given low volume?
     # Let's run it once per loop, it's cheap for SQLite.)
     cleanup_old_data(conn)
+    cleanup_old_notifications(conn)
 
     for slug in slugs:
         print(f"Checking {slug}...")
@@ -209,6 +496,9 @@ def run_scraper():
             c.execute("INSERT INTO position_changes (profile_id, snapshot_id, timestamp, diff_summary) VALUES (?, ?, ?, ?)",
                       (profile_id, snapshot_id, now_ist(), summary))
             conn.commit()
+            
+            # Generate notifications for subscribed items
+            generate_notifications_for_changes(conn, profile_id, last_data, current_data)
         else:
             print(f"-> No change for {slug}")
 

@@ -87,6 +87,50 @@ def init_db():
         )
     ''')
     
+    # Table to store user subscriptions per profile
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            subscription_type TEXT NOT NULL, -- 'underlying', 'expiry', or 'position'
+            underlying TEXT,
+            expiry TEXT,
+            position_identifier TEXT, -- JSON with symbol, product, strike, option_type
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id),
+            UNIQUE(profile_id, subscription_type, underlying, expiry, position_identifier)
+        )
+    ''')
+    
+    # Table to store notifications
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            subscription_id INTEGER,
+            message TEXT NOT NULL,
+            notification_type TEXT NOT NULL, -- 'new_position', 'modified_position', 'exited_position', 'quantity_change'
+            notification_data TEXT, -- JSON with detailed change information
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            is_read INTEGER DEFAULT 0, -- 0 = unread, 1 = read
+            FOREIGN KEY (profile_id) REFERENCES profiles (id),
+            FOREIGN KEY (subscription_id) REFERENCES subscriptions (id)
+        )
+    ''')
+    
+    # Table to store user preferences
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            notification_sound TEXT DEFAULT 'default', -- Sound file name: 'default', 'chime', 'beep', 'bell', 'none'
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id),
+            UNIQUE(profile_id)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     print("Database initialized.")

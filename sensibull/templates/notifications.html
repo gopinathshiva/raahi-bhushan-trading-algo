@@ -1,0 +1,983 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Notifications - {{ slug }}</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 0;
+            margin: 0;
+            background: #fafafa;
+        }
+
+        .container {
+            width: 100%;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.8em;
+        }
+
+        .back-link {
+            color: #007bff;
+            text-decoration: none;
+            font-size: 1em;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .tab-btn {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1em;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+            font-weight: bold;
+        }
+
+        .tab-btn:hover {
+            color: #007bff;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Notifications Tab */
+        .notification-item {
+            background: #fff;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #007bff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            transition: background 0.2s;
+        }
+
+        .notification-item.unread {
+            background: #e3f2fd;
+            border-left-color: #2196F3;
+        }
+
+        .notification-item.read {
+            opacity: 0.7;
+        }
+
+        .notification-content {
+            flex: 1;
+        }
+
+        .notification-message {
+            font-size: 1em;
+            margin-bottom: 5px;
+        }
+
+        .notification-time {
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        .notification-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            margin-left: 10px;
+            font-weight: bold;
+        }
+
+        .notification-type.new_position {
+            background: #4caf50;
+            color: white;
+        }
+
+        .notification-type.exited_position {
+            background: #f44336;
+            color: white;
+        }
+
+        .notification-type.modified_position,
+        .notification-type.quantity_change {
+            background: #ff9800;
+            color: white;
+        }
+
+        .notification-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .notification-actions button {
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            background: white;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 0.85em;
+        }
+
+        .notification-actions button:hover {
+            background: #f0f0f0;
+        }
+
+        /* Subscriptions Tab */
+        .subscription-item {
+            background: #fff;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #4caf50;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .subscription-info {
+            flex: 1;
+        }
+
+        .subscription-type {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            background: #4caf50;
+            color: white;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .subscription-details {
+            font-size: 1em;
+            margin-top: 5px;
+        }
+
+        .subscription-time {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .unsubscribe-btn {
+            padding: 8px 15px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .unsubscribe-btn:hover {
+            background: #d32f2f;
+        }
+
+        /* Notification action buttons */
+        .notification-item button[title="Mark as read"]:hover {
+            transform: scale(1.2);
+            text-shadow: 0 0 5px rgba(40, 167, 69, 0.5);
+        }
+
+        .notification-item button[title="Delete"]:hover {
+            transform: scale(1.2);
+            text-shadow: 0 0 5px rgba(220, 53, 69, 0.5);
+        }
+
+        /* Settings Tab */
+        .settings-section {
+            background: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .setting-item {
+            margin-bottom: 20px;
+        }
+
+        .setting-label {
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        .sound-option {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .sound-option:hover {
+            background: #f0f0f0;
+        }
+
+        .sound-option.selected {
+            border-color: #007bff;
+            background: #e3f2fd;
+        }
+
+        .sound-option input[type="radio"] {
+            margin-right: 10px;
+        }
+
+        .sound-preview-btn {
+            margin-left: auto;
+            padding: 5px 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+
+        .sound-preview-btn:hover {
+            background: #0056b3;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .action-buttons {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-btn {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .action-btn:hover {
+            background: #0056b3;
+        }
+
+        .action-btn.secondary {
+            background: #6c757d;
+        }
+
+        .action-btn.secondary:hover {
+            background: #5a6268;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #323232;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            display: none;
+            animation: slideIn 0.3s;
+        }
+
+        .toast.show {
+            display: block;
+        }
+
+        .toast.success {
+            background: #4caf50;
+        }
+
+        .toast.error {
+            background: #f44336;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔔 Notifications - {{ slug }}</h1>
+            <a href="/profile/{{ slug }}/{{ last_date }}" class="back-link">← Back to Profile</a>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('notifications')">Notifications</button>
+            <button class="tab-btn" onclick="switchTab('subscriptions')">Subscriptions</button>
+            <button class="tab-btn" onclick="switchTab('settings')">Settings</button>
+        </div>
+
+        <!-- Notifications Tab -->
+        <div id="notifications-tab" class="tab-content active">
+            <div class="action-buttons">
+                <button class="action-btn" onclick="markAllAsRead()">Mark All as Read</button>
+                <button class="action-btn secondary" onclick="refreshNotifications()">Refresh</button>
+            </div>
+            <div id="notifications-list">
+                <div class="empty-state">Loading notifications...</div>
+            </div>
+        </div>
+
+        <!-- Subscriptions Tab -->
+        <div id="subscriptions-tab" class="tab-content">
+            <div id="subscriptions-list">
+                <div class="empty-state">Loading subscriptions...</div>
+            </div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content">
+            <div class="settings-section">
+                <div class="setting-item">
+                    <label class="setting-label">Notification Sound</label>
+                    <div id="sound-options">
+                        <div class="sound-option" onclick="selectSound('default')">
+                            <input type="radio" name="sound" value="default" checked>
+                            <span>Default (Gentle Chime)</span>
+                            <button class="sound-preview-btn" onclick="previewSound('default', event)">Preview</button>
+                        </div>
+                        <div class="sound-option" onclick="selectSound('beep')">
+                            <input type="radio" name="sound" value="beep">
+                            <span>Beep</span>
+                            <button class="sound-preview-btn" onclick="previewSound('beep', event)">Preview</button>
+                        </div>
+                        <div class="sound-option" onclick="selectSound('bell')">
+                            <input type="radio" name="sound" value="bell">
+                            <span>Bell</span>
+                            <button class="sound-preview-btn" onclick="previewSound('bell', event)">Preview</button>
+                        </div>
+                        <div class="sound-option" onclick="selectSound('none')">
+                            <input type="radio" name="sound" value="none">
+                            <span>None (Silent)</span>
+                            <button class="sound-preview-btn" onclick="previewSound('none', event)" style="display:none;">Preview</button>
+                        </div>
+                    </div>
+                </div>
+                <button class="action-btn" onclick="saveSettings()">Save Settings</button>
+            </div>
+            
+            <div class="settings-section" style="margin-top: 20px;">
+                <h3 style="margin-bottom: 15px;">🔊 Test Notification Sound</h3>
+                <p style="color: #666; margin-bottom: 15px;">Click the button below to simulate a notification and verify that sound is working correctly.</p>
+                <button class="action-btn secondary" onclick="testNotificationSound()" style="width: 100%;">
+                    🎵 Play Test Sound & Show Alert
+                </button>
+                <div id="test-result" style="margin-top: 15px; padding: 10px; border-radius: 5px; display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const PROFILE_SLUG = '{{ slug }}';
+        let currentSound = 'default';
+        let notificationsData = [];
+        let subscriptionsData = [];
+        let lastNotificationCount = 0;
+        let notificationCheckInterval = null;
+
+        // Tab Switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+
+            if (tabName === 'notifications') {
+                loadNotifications();
+            } else if (tabName === 'subscriptions') {
+                loadSubscriptions();
+            } else if (tabName === 'settings') {
+                loadSettings();
+            }
+        }
+
+        // Load Notifications
+        async function loadNotifications() {
+            try {
+                const response = await fetch(`/api/notifications?profile_slug=${PROFILE_SLUG}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    notificationsData = data.notifications;
+                    renderNotifications();
+                } else {
+                    showToast('Failed to load notifications', 'error');
+                }
+            } catch (error) {
+                console.error('Error loading notifications:', error);
+                showToast('Error loading notifications', 'error');
+            }
+        }
+
+        // Play notification sound (uses currentSound setting)
+        function playNotificationSound() {
+            playNotificationSoundWithType(currentSound);
+        }
+
+        // Check for new notifications periodically
+        async function checkForNewNotifications() {
+            try {
+                const response = await fetch(`/api/notifications/unread_count?profile_slug=${PROFILE_SLUG}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const currentCount = data.unread_count;
+                    
+                    // If count increased, play sound and show alert
+                    if (lastNotificationCount > 0 && currentCount > lastNotificationCount) {
+                        playNotificationSound();
+                        showToast(`${currentCount - lastNotificationCount} new notification(s)!`, 'success');
+                        
+                        // Reload notifications if on notifications tab
+                        const notificationsTab = document.getElementById('notifications-tab');
+                        if (notificationsTab && notificationsTab.style.display !== 'none') {
+                            loadNotifications();
+                        }
+                    }
+                    
+                    lastNotificationCount = currentCount;
+                }
+            } catch (error) {
+                console.error('Error checking for new notifications:', error);
+            }
+        }
+
+        // Start notification checking
+        function startNotificationChecking() {
+            // Initial check
+            checkForNewNotifications();
+            
+            // Check every 10 seconds
+            notificationCheckInterval = setInterval(checkForNewNotifications, 10000);
+        }
+
+        // Stop notification checking
+        function stopNotificationChecking() {
+            if (notificationCheckInterval) {
+                clearInterval(notificationCheckInterval);
+                notificationCheckInterval = null;
+            }
+        }
+
+        function renderNotifications() {
+            const container = document.getElementById('notifications-list');
+            
+            if (notificationsData.length === 0) {
+                container.innerHTML = '<div class="empty-state">No notifications yet. Subscribe to underlyings or positions to get notified!</div>';
+                return;
+            }
+
+            // Group notifications by change_id or date
+            container.innerHTML = notificationsData.map(notif => {
+                const data = notif.notification_data || {};
+                const type = notif.notification_type;
+                
+                // Get date for link
+                const createdDate = new Date(notif.created_at);
+                const dateStr = createdDate.toISOString().split('T')[0];
+                const profileLink = `/profile/${PROFILE_SLUG}/${dateStr}`;
+                
+                // Build table rows based on notification type
+                let tableHtml = '';
+                let headerText = '';
+                let rowColor = '';
+                let typeText = '';
+                
+                if (type === 'new_position') {
+                    headerText = 'New Position Added';
+                    rowColor = '#d4edda';
+                    typeText = 'ADDED';
+                    
+                    const qty = data.quantity || 0;
+                    const avgPrice = parseFloat(data.average_price || 0).toFixed(2);
+                    const ltp = parseFloat(data.last_price || 0).toFixed(2);
+                    
+                    tableHtml = `
+                        <tr style="background-color: ${rowColor};">
+                            <td><b>${typeText}</b></td>
+                            <td>${data.symbol || 'N/A'}</td>
+                            <td>${data.product || 'N/A'}</td>
+                            <td>
+                                Qty: ${qty}<br>
+                                <span style="color:#666; font-size:0.85em;">Avg: ₹${avgPrice} | LTP: ₹${ltp}</span>
+                            </td>
+                        </tr>
+                    `;
+                } else if (type === 'exited_position') {
+                    headerText = 'Position Exited';
+                    rowColor = '#f8d7da';
+                    typeText = 'REMOVED';
+                    
+                    const originalQty = data.quantity || 0;
+                    const avgPrice = parseFloat(data.average_price || 0).toFixed(2);
+                    const exitPnl = parseFloat(data.exit_pnl || 0);
+                    const pnlColor = exitPnl > 0 ? '#28a745' : (exitPnl < 0 ? '#dc3545' : '#666');
+                    
+                    tableHtml = `
+                        <tr style="background-color: ${rowColor};">
+                            <td><b>${typeText}</b></td>
+                            <td>${data.symbol || 'N/A'}</td>
+                            <td>${data.product || 'N/A'}</td>
+                            <td>
+                                Qty: ${originalQty} → 0<br>
+                                <span style="color:${pnlColor}; font-size:0.85em; font-weight:bold;">Avg Price: ₹${avgPrice} | Exit P&L: ₹${exitPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                            </td>
+                        </tr>
+                    `;
+                } else if (type === 'modified_position' || type === 'quantity_change') {
+                    headerText = 'Position Modified';
+                    rowColor = '#fff3cd';
+                    typeText = 'MODIFIED';
+                    
+                    const oldQty = data.old_quantity || 0;
+                    const newQty = data.quantity || 0;
+                    const qtyDiff = data.quantity_diff || (newQty - oldQty);
+                    const sign = qtyDiff > 0 ? '+' : '';
+                    
+                    const oldAvgPrice = parseFloat(data.old_average_price || 0).toFixed(2);
+                    const avgPrice = parseFloat(data.average_price || 0).toFixed(2);
+                    const ltp = parseFloat(data.last_price || 0).toFixed(2);
+                    const unbookedPnl = parseFloat(data.unbooked_pnl || 0);
+                    const pnlColor = unbookedPnl >= 0 ? '#28a745' : '#dc3545';
+                    
+                    tableHtml = `
+                        <tr style="background-color: ${rowColor};">
+                            <td><b>${typeText}</b></td>
+                            <td>${data.symbol || 'N/A'}</td>
+                            <td>${data.product || 'N/A'}</td>
+                            <td>
+                                Qty: ${oldQty} → <b>${newQty}</b> (${sign}${qtyDiff})<br>
+                                <span style="color:#666; font-size:0.85em;">Avg (Before): ₹${oldAvgPrice} | Avg (Current): ₹${avgPrice} | LTP: ₹${ltp} | Unbooked P&L: <span style="color:${pnlColor}">₹${unbookedPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></span>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    headerText = type.replace(/_/g, ' ').toUpperCase();
+                    rowColor = '#fff3cd';
+                    typeText = type.toUpperCase();
+                    tableHtml = `
+                        <tr style="background-color: ${rowColor};">
+                            <td colspan="4">${notif.message}</td>
+                        </tr>
+                    `;
+                }
+                
+                // Format detailed timestamp
+                const createdDt = new Date(notif.created_at);
+                const detailedTime = createdDt.toLocaleString('en-IN', {
+                    timeZone: 'Asia/Kolkata',
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true
+                });
+                
+                return `
+                    <div class="notification-item ${notif.is_read ? 'read' : 'unread'}" style="cursor: pointer; margin-bottom: 15px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative;" onclick="window.location.href='${profileLink}'">
+                        <div class="notification-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <h4 style="margin: 0; color: #333;">${headerText}</h4>
+                            <div class="notification-actions" style="display: flex; gap: 8px;" onclick="event.stopPropagation();">
+                                ${!notif.is_read ? `<button onclick="markAsRead(${notif.id})" style="background: none; border: none; cursor: pointer; padding: 5px 8px; color: #28a745; font-size: 1.4em; line-height: 1;" title="Mark as read">✓</button>` : ''}
+                                <button onclick="deleteNotification(${notif.id})" style="background: none; border: none; cursor: pointer; padding: 5px 8px; color: #dc3545; font-size: 1.4em; line-height: 1;" title="Delete">✕</button>
+                            </div>
+                        </div>
+                        <div style="color: #666; font-size: 0.9em; margin-bottom: 10px; padding: 5px 0; border-bottom: 1px solid #f0f0f0;">
+                            <span style="font-weight: 500;">📅 Modified at:</span> ${detailedTime}
+                        </div>
+                        <table border="1" cellpadding="5" style="border-collapse:collapse; width:100%; font-size: 0.9em;">
+                            <thead>
+                                <tr style="background: #f2f2f2;">
+                                    <th>Type</th>
+                                    <th>Symbol</th>
+                                    <th>Product</th>
+                                    <th>Change</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${tableHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function markAsRead(notificationId) {
+            try {
+                const response = await fetch('/api/notifications/mark_read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notification_id: notificationId })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadNotifications();
+                    showToast('Marked as read', 'success');
+                }
+            } catch (error) {
+                console.error('Error marking as read:', error);
+                showToast('Error marking as read', 'error');
+            }
+        }
+
+        async function markAllAsRead() {
+            try {
+                const response = await fetch('/api/notifications/mark_read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mark_all: true, profile_slug: PROFILE_SLUG })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadNotifications();
+                    showToast('All notifications marked as read', 'success');
+                }
+            } catch (error) {
+                console.error('Error marking all as read:', error);
+                showToast('Error marking all as read', 'error');
+            }
+        }
+
+        async function deleteNotification(notificationId) {
+            if (!confirm('Delete this notification?')) return;
+            
+            try {
+                const response = await fetch('/api/notifications/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notification_id: notificationId })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadNotifications();
+                    showToast('Notification deleted', 'success');
+                }
+            } catch (error) {
+                console.error('Error deleting notification:', error);
+                showToast('Error deleting notification', 'error');
+            }
+        }
+
+        function refreshNotifications() {
+            loadNotifications();
+            showToast('Refreshed', 'success');
+        }
+
+        // Load Subscriptions
+        async function loadSubscriptions() {
+            try {
+                const response = await fetch(`/api/subscriptions?profile_slug=${PROFILE_SLUG}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    subscriptionsData = data.subscriptions;
+                    renderSubscriptions();
+                } else {
+                    showToast('Failed to load subscriptions', 'error');
+                }
+            } catch (error) {
+                console.error('Error loading subscriptions:', error);
+                showToast('Error loading subscriptions', 'error');
+            }
+        }
+
+        function renderSubscriptions() {
+            const container = document.getElementById('subscriptions-list');
+            
+            if (subscriptionsData.length === 0) {
+                container.innerHTML = '<div class="empty-state">No active subscriptions. Go to your profile page to subscribe to underlyings or positions!</div>';
+                return;
+            }
+
+            container.innerHTML = subscriptionsData.map(sub => {
+                let details = '';
+                if (sub.subscription_type === 'underlying') {
+                    details = `Underlying: <strong>${sub.underlying}</strong>`;
+                } else if (sub.subscription_type === 'expiry') {
+                    details = `${sub.underlying} - Expiry: <strong>${sub.expiry}</strong>`;
+                } else if (sub.subscription_type === 'position' && sub.position_identifier) {
+                    details = `Position: <strong>${sub.position_identifier.symbol}</strong> (${sub.position_identifier.product})`;
+                }
+
+                return `
+                    <div class="subscription-item">
+                        <div class="subscription-info">
+                            <div>
+                                <span class="subscription-type">${sub.subscription_type.toUpperCase()}</span>
+                                <span class="subscription-details">${details}</span>
+                            </div>
+                            <div class="subscription-time">Subscribed on ${formatTime(sub.created_at)}</div>
+                        </div>
+                        <button class="unsubscribe-btn" onclick="unsubscribe(${sub.id})">Unsubscribe</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function unsubscribe(subscriptionId) {
+            if (!confirm('Are you sure you want to unsubscribe?')) return;
+            
+            try {
+                const response = await fetch('/api/subscriptions/unsubscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subscription_id: subscriptionId })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    loadSubscriptions();
+                    showToast('Unsubscribed successfully', 'success');
+                } else {
+                    showToast(data.message || 'Failed to unsubscribe', 'error');
+                }
+            } catch (error) {
+                console.error('Error unsubscribing:', error);
+                showToast('Error unsubscribing', 'error');
+            }
+        }
+
+        // Load Settings
+        async function loadSettings() {
+            try {
+                // Try to load from localStorage first
+                const savedSettings = localStorage.getItem(`notification_settings_${PROFILE_SLUG}`);
+                if (savedSettings) {
+                    const settings = JSON.parse(savedSettings);
+                    currentSound = settings.sound || 'default';
+                }
+                
+                // Try to load from backend (optional)
+                try {
+                    const response = await fetch(`/api/preferences?profile_slug=${PROFILE_SLUG}`);
+                    const data = await response.json();
+                    if (data.success && data.preferences && data.preferences.notification_sound) {
+                        currentSound = data.preferences.notification_sound;
+                    }
+                } catch (backendError) {
+                    console.log('Backend preferences API not available');
+                }
+            } catch (error) {
+                console.error('Error loading settings:', error);
+                currentSound = 'default';
+            }
+            
+            // Update UI
+            selectSound(currentSound);
+        }
+
+        function selectSound(soundName) {
+            currentSound = soundName;
+            document.querySelectorAll('.sound-option').forEach(opt => opt.classList.remove('selected'));
+            document.querySelector(`.sound-option input[value="${soundName}"]`).parentElement.classList.add('selected');
+            document.querySelector(`.sound-option input[value="${soundName}"]`).checked = true;
+        }
+
+        function previewSound(soundName, event) {
+            if (event) {
+                event.stopPropagation();
+            }
+            if (soundName === 'none') return;
+            
+            playNotificationSoundWithType(soundName);
+        }
+
+        async function saveSettings() {
+            try {
+                // Save to localStorage
+                const settings = { sound: currentSound };
+                localStorage.setItem(`notification_settings_${PROFILE_SLUG}`, JSON.stringify(settings));
+                
+                showToast(`Settings saved! Sound: ${currentSound}`, 'success');
+                
+                // Also try to save to backend
+                try {
+                    const response = await fetch('/api/preferences/update', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            profile_slug: PROFILE_SLUG,
+                            notification_sound: currentSound
+                        })
+                    });
+                    // Backend save is optional
+                } catch (backendError) {
+                    console.log('Backend API not available, using localStorage only');
+                }
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                showToast('Error saving settings', 'error');
+            }
+        }
+
+        // Notification Sound Player - plays different sounds based on type
+        function playNotificationSoundWithType(soundName) {
+            if (!soundName || soundName === 'none') return;
+            
+            try {
+                // Use Web Audio API to generate simple tones
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Different frequencies for different sounds
+                const sounds = {
+                    'default': [523.25, 659.25], // C5, E5 (gentle chime)
+                    'beep': [800], // Single beep
+                    'bell': [523.25, 659.25, 783.99] // C5, E5, G5 (bell)
+                };
+                
+                const frequencies = sounds[soundName] || sounds['default'];
+                
+                // Play each frequency in sequence
+                frequencies.forEach((freq, index) => {
+                    const oscillator = audioContext.createOscillator();
+                    const gainNode = audioContext.createGain();
+                    
+                    oscillator.connect(gainNode);
+                    gainNode.connect(audioContext.destination);
+                    
+                    oscillator.frequency.value = freq;
+                    oscillator.type = 'sine';
+                    
+                    const startTime = audioContext.currentTime + (index * 0.15);
+                    const duration = 0.15;
+                    
+                    gainNode.gain.setValueAtTime(0.3, startTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+                    
+                    oscillator.start(startTime);
+                    oscillator.stop(startTime + duration);
+                });
+            } catch (error) {
+                console.error('Error playing notification sound:', error);
+            }
+        }
+
+        // Utility Functions
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+            if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+            if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+            
+            return date.toLocaleString();
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Test notification sound
+        function testNotificationSound() {
+            const testResult = document.getElementById('test-result');
+            testResult.style.display = 'block';
+            testResult.style.background = '#fff3cd';
+            testResult.style.border = '1px solid #ffc107';
+            testResult.innerHTML = '🔊 Playing test sound...';
+            
+            try {
+                // Play the notification sound
+                playNotificationSound();
+                
+                // Show toast notification
+                showToast('🔔 This is a test notification!', 'success');
+                
+                setTimeout(() => {
+                    testResult.style.background = '#d4edda';
+                    testResult.style.border = '1px solid #28a745';
+                    testResult.innerHTML = '✅ <strong>Success!</strong> Sound played and notification displayed.<br><small>If you heard a beep sound and saw a green toast message in the bottom-right, notifications are working correctly!</small>';
+                }, 600);
+            } catch (error) {
+                testResult.style.background = '#f8d7da';
+                testResult.style.border = '1px solid #dc3545';
+                testResult.innerHTML = `❌ <strong>Error!</strong> ${error.message}<br><small>Your browser may have blocked audio playback. Try interacting with the page first or check browser permissions.</small>`;
+                console.error('Test notification error:', error);
+            }
+        }
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadNotifications();
+            startNotificationChecking();
+        });
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            stopNotificationChecking();
+        });
+    </script>
+</body>
+</html>

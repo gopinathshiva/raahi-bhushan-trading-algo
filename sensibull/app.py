@@ -153,6 +153,32 @@ def monitor_scraper():
 def historical_data():
     return render_template('historical_data.html')
 
+@app.route('/notifications/<slug>')
+def notifications(slug):
+    """Notifications page for a profile"""
+    conn = get_db()
+    c = conn.cursor()
+    
+    profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return "Profile not found", 404
+    
+    # Get the last snapshot date for this profile
+    last_snapshot = c.execute("""
+        SELECT date(timestamp) as snapshot_date 
+        FROM snapshots 
+        WHERE profile_id = ? 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+    """, (profile['id'],)).fetchone()
+    
+    # Default to today if no snapshots exist
+    last_date = last_snapshot['snapshot_date'] if last_snapshot else now_ist().strftime('%Y-%m-%d')
+    
+    conn.close()
+    return render_template('notifications.html', slug=slug, profile=profile, last_date=last_date)
+
 @app.route('/')
 def index():
     # Sync profiles from file on every refresh
@@ -1766,6 +1792,364 @@ def delete_date(date):
         
     except Exception as e:
         print(f"Error deleting data for {date}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ==================== SUBSCRIPTION API ROUTES ====================
+
+@app.route('/api/subscriptions', methods=['GET'])
+def get_subscriptions():
+    """Get all subscriptions for a profile"""
+    try:
+        profile_slug = request.args.get('profile_slug')
+        if not profile_slug:
+            return jsonify({'error': 'profile_slug is required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get profile_id
+        profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+        if not profile:
+            return jsonify({'error': 'Profile not found'}), 404
+        profile_id = profile['id']
+        
+        # Get all subscriptions
+        subscriptions = c.execute("""
+            SELECT id, subscription_type, underlying, expiry, position_identifier, created_at
+            FROM subscriptions
+            WHERE profile_id = ?
+            ORDER BY created_at DESC
+        """, (profile_id,)).fetchall()
+        
+        conn.close()
+        
+        result = []
+        for sub in subscriptions:
+            result.append({
+                'id': sub['id'],
+                'subscription_type': sub['subscription_type'],
+                'underlying': sub['underlying'],
+                'expiry': sub['expiry'],
+                'position_identifier': json.loads(sub['position_identifier']) if sub['position_identifier'] else None,
+                'created_at': sub['created_at']
+            })
+        
+        return jsonify({'success': True, 'subscriptions': result})
+        
+    except Exception as e:
+        print(f"Error getting subscriptions: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/subscriptions/subscribe', methods=['POST'])
+def subscribe():
+    """Create a new subscription"""
+    try:
+        data = request.get_json()
+        profile_slug = data.get('profile_slug')
+        subscription_type = data.get('subscription_type')  # 'underlying', 'expiry', or 'position'
+        underlying = data.get('underlying')
+        expiry = data.get('expiry')
+        position_identifier = data.get('position_identifier')  # dict with symbol, product, strike, option_type
+        
+        if not profile_slug or not subscription_type:
+            return jsonify({'error': 'profile_slug and subscription_type are required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get profile_id
+        profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+        if not profile:
+            return jsonify({'error': 'Profile not found'}), 404
+        profile_id = profile['id']
+        
+        # Validate subscription type
+        if subscription_type == 'underlying' and not underlying:
+            return jsonify({'error': 'underlying is required for underlying subscription'}), 400
+        elif subscription_type == 'expiry' and (not underlying or not expiry):
+            return jsonify({'error': 'underlying and expiry are required for expiry subscription'}), 400
+        elif subscription_type == 'position' and not position_identifier:
+            return jsonify({'error': 'position_identifier is required for position subscription'}), 400
+        
+        # Convert position_identifier to JSON string
+        position_id_str = json.dumps(position_identifier) if position_identifier else None
+        
+        # Insert subscription (UNIQUE constraint will prevent duplicates)
+        try:
+            c.execute("""
+                INSERT INTO subscriptions (profile_id, subscription_type, underlying, expiry, position_identifier, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (profile_id, subscription_type, underlying, expiry, position_id_str, now_ist().isoformat()))
+            conn.commit()
+            subscription_id = c.lastrowid
+            conn.close()
+            
+            return jsonify({'success': True, 'message': 'Subscription created successfully', 'subscription_id': subscription_id})
+        except sqlite3.IntegrityError:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Already subscribed to this item'})
+        
+    except Exception as e:
+        print(f"Error creating subscription: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/subscriptions/unsubscribe', methods=['POST'])
+def unsubscribe():
+    """Delete a subscription"""
+    try:
+        data = request.get_json()
+        subscription_id = data.get('subscription_id')
+        
+        if not subscription_id:
+            return jsonify({'error': 'subscription_id is required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Delete subscription
+        c.execute("DELETE FROM subscriptions WHERE id = ?", (subscription_id,))
+        deleted = c.rowcount
+        conn.commit()
+        conn.close()
+        
+        if deleted > 0:
+            return jsonify({'success': True, 'message': 'Unsubscribed successfully'})
+        else:
+            return jsonify({'success': False, 'message': 'Subscription not found'})
+        
+    except Exception as e:
+        print(f"Error unsubscribing: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ==================== NOTIFICATION API ROUTES ====================
+
+@app.route('/api/notifications', methods=['GET'])
+def get_notifications():
+    """Get all notifications for a profile"""
+    try:
+        profile_slug = request.args.get('profile_slug')
+        if not profile_slug:
+            return jsonify({'error': 'profile_slug is required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get profile_id
+        profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+        if not profile:
+            return jsonify({'error': 'Profile not found'}), 404
+        profile_id = profile['id']
+        
+        # Get all notifications
+        notifications = c.execute("""
+            SELECT id, subscription_id, message, notification_type, notification_data, created_at, is_read
+            FROM notifications
+            WHERE profile_id = ?
+            ORDER BY created_at DESC
+        """, (profile_id,)).fetchall()
+        
+        conn.close()
+        
+        result = []
+        for notif in notifications:
+            result.append({
+                'id': notif['id'],
+                'subscription_id': notif['subscription_id'],
+                'message': notif['message'],
+                'notification_type': notif['notification_type'],
+                'notification_data': json.loads(notif['notification_data']) if notif['notification_data'] else None,
+                'created_at': notif['created_at'],
+                'is_read': notif['is_read'] == 1
+            })
+        
+        return jsonify({'success': True, 'notifications': result})
+        
+    except Exception as e:
+        print(f"Error getting notifications: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notifications/unread_count', methods=['GET'])
+def get_unread_count():
+    """Get count of unread notifications for a profile"""
+    try:
+        profile_slug = request.args.get('profile_slug')
+        if not profile_slug:
+            return jsonify({'error': 'profile_slug is required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get profile_id
+        profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+        if not profile:
+            return jsonify({'error': 'Profile not found'}), 404
+        profile_id = profile['id']
+        
+        # Get unread count
+        count = c.execute("""
+            SELECT COUNT(*) as count
+            FROM notifications
+            WHERE profile_id = ? AND is_read = 0
+        """, (profile_id,)).fetchone()
+        
+        conn.close()
+        
+        return jsonify({'success': True, 'unread_count': count['count']})
+        
+    except Exception as e:
+        print(f"Error getting unread count: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notifications/mark_read', methods=['POST'])
+def mark_notification_read():
+    """Mark notification(s) as read"""
+    try:
+        data = request.get_json()
+        notification_id = data.get('notification_id')
+        mark_all = data.get('mark_all', False)
+        profile_slug = data.get('profile_slug')
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        if mark_all:
+            if not profile_slug:
+                return jsonify({'error': 'profile_slug is required for mark_all'}), 400
+            
+            # Get profile_id
+            profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+            if not profile:
+                return jsonify({'error': 'Profile not found'}), 404
+            profile_id = profile['id']
+            
+            c.execute("UPDATE notifications SET is_read = 1 WHERE profile_id = ?", (profile_id,))
+        else:
+            if not notification_id:
+                return jsonify({'error': 'notification_id is required'}), 400
+            
+            c.execute("UPDATE notifications SET is_read = 1 WHERE id = ?", (notification_id,))
+        
+        updated = c.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'updated': updated})
+        
+    except Exception as e:
+        print(f"Error marking notification as read: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notifications/delete', methods=['POST'])
+def delete_notification():
+    """Delete notification(s)"""
+    try:
+        data = request.get_json()
+        notification_id = data.get('notification_id')
+        
+        if not notification_id:
+            return jsonify({'error': 'notification_id is required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        c.execute("DELETE FROM notifications WHERE id = ?", (notification_id,))
+        deleted = c.rowcount
+        conn.commit()
+        conn.close()
+        
+        if deleted > 0:
+            return jsonify({'success': True, 'message': 'Notification deleted successfully'})
+        else:
+            return jsonify({'success': False, 'message': 'Notification not found'})
+        
+    except Exception as e:
+        print(f"Error deleting notification: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ==================== USER PREFERENCES API ROUTES ====================
+
+@app.route('/api/preferences', methods=['GET'])
+def get_preferences():
+    """Get user preferences for a profile"""
+    try:
+        profile_slug = request.args.get('profile_slug')
+        if not profile_slug:
+            return jsonify({'error': 'profile_slug is required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get profile_id
+        profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+        if not profile:
+            return jsonify({'error': 'Profile not found'}), 404
+        profile_id = profile['id']
+        
+        # Get preferences
+        prefs = c.execute("""
+            SELECT notification_sound
+            FROM user_preferences
+            WHERE profile_id = ?
+        """, (profile_id,)).fetchone()
+        
+        conn.close()
+        
+        if prefs:
+            return jsonify({
+                'success': True,
+                'preferences': {
+                    'notification_sound': prefs['notification_sound']
+                }
+            })
+        else:
+            # Return default preferences
+            return jsonify({
+                'success': True,
+                'preferences': {
+                    'notification_sound': 'default'
+                }
+            })
+        
+    except Exception as e:
+        print(f"Error getting preferences: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/preferences/update', methods=['POST'])
+def update_preferences():
+    """Update user preferences for a profile"""
+    try:
+        data = request.get_json()
+        profile_slug = data.get('profile_slug')
+        notification_sound = data.get('notification_sound')
+        
+        if not profile_slug:
+            return jsonify({'error': 'profile_slug is required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get profile_id
+        profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+        if not profile:
+            return jsonify({'error': 'Profile not found'}), 404
+        profile_id = profile['id']
+        
+        # Upsert preferences
+        c.execute("""
+            INSERT INTO user_preferences (profile_id, notification_sound, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(profile_id) DO UPDATE SET
+                notification_sound = excluded.notification_sound,
+                updated_at = excluded.updated_at
+        """, (profile_id, notification_sound, now_ist().isoformat(), now_ist().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'Preferences updated successfully'})
+        
+    except Exception as e:
+        print(f"Error updating preferences: {e}")
         return jsonify({'error': str(e)}), 500
 
 def cleanup_port():
