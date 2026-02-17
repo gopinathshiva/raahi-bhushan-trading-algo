@@ -5,7 +5,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from database import get_db, sync_profiles, now_ist
+from database import get_db, sync_profiles, now_ist, init_db
 import sys
 import os
 import threading
@@ -2540,6 +2540,9 @@ def import_upload():
 # ============================================================================
 
 if __name__ == '__main__':
+    # Initialize database (create tables if they don't exist)
+    init_db()
+    
     # Clean up port before starting (in case of unclean shutdown)
     cleanup_port()
     time.sleep(0.5)  # Give OS time to release the port
