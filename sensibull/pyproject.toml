@@ -5,6 +5,7 @@ description = "Sensibull Position Tracker"
 requires-python = ">=3.9,<3.14"
 dependencies = [
     "flask",
+    "flask-login",
     "requests",
     "apscheduler",
     "simplejson",

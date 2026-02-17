@@ -131,6 +131,19 @@ def init_db():
         )
     ''')
     
+    # Table to store admin users for authentication
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS admin_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            email TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_login DATETIME
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     print("Database initialized.")

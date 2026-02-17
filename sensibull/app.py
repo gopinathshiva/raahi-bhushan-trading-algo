@@ -1,9 +1,11 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import check_password_hash
 import sqlite3
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from database import get_db, sync_profiles
+from database import get_db, sync_profiles, now_ist
 import sys
 import os
 import threading
@@ -14,13 +16,50 @@ import signal
 # IST Timezone constant
 IST = ZoneInfo("Asia/Kolkata")
 
-def now_ist():
-    """Get current datetime in IST timezone"""
-    return datetime.now(IST)
-
 app = Flask(__name__)
+# Configure secret key for sessions (generate a secure random key in production)
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-12345')
 # Configure standard port or 5010 as per previous context
 PORT = 6060
+
+# Initialize Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access this page.'
+login_manager.login_message_category = 'info'
+
+# User class for Flask-Login
+class AdminUser(UserMixin):
+    def __init__(self, id, username, email, is_active):
+        self.id = id
+        self.username = username
+        self.email = email
+        self._is_active = is_active
+    
+    def get_id(self):
+        return str(self.id)
+    
+    @property
+    def is_active(self):
+        """Override UserMixin is_active property"""
+        return bool(self._is_active)
+
+@login_manager.user_loader
+def load_user(user_id):
+    """Load user from database"""
+    conn = get_db()
+    c = conn.cursor()
+    user = c.execute("""
+        SELECT id, username, email, is_active 
+        FROM admin_users 
+        WHERE id = ? AND is_active = 1
+    """, (user_id,)).fetchone()
+    conn.close()
+    
+    if user:
+        return AdminUser(user['id'], user['username'], user['email'], user['is_active'])
+    return None
 
 # In-memory cache for symbol suggestions (profile_id -> {ts, symbols})
 SYMBOL_SUGGESTIONS_CACHE = {}
@@ -149,16 +188,75 @@ def monitor_scraper():
             # Sleep a bit to avoid rapid loops on error
             time.sleep(10)
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login page and handler"""
+    # Redirect to index if already logged in
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        remember = request.form.get('remember') == 'yes'
+        
+        if not username or not password:
+            return render_template('login.html', error='Username and password are required')
+        
+        conn = get_db()
+        c = conn.cursor()
+        user = c.execute("""
+            SELECT id, username, password_hash, email, is_active 
+            FROM admin_users 
+            WHERE username = ?
+        """, (username,)).fetchone()
+        
+        if user and user['is_active'] and check_password_hash(user['password_hash'], password):
+            # Update last login
+            c.execute("""
+                UPDATE admin_users 
+                SET last_login = ? 
+                WHERE id = ?
+            """, (now_ist().isoformat(), user['id']))
+            conn.commit()
+            conn.close()
+            
+            # Create user object and login
+            user_obj = AdminUser(user['id'], user['username'], user['email'], user['is_active'])
+            login_user(user_obj, remember=remember, duration=timedelta(days=30))
+            
+            # Redirect to next page or index
+            next_page = request.args.get('next')
+            if next_page and next_page.startswith('/'):
+                return redirect(next_page)
+            return redirect(url_for('index'))
+        else:
+            conn.close()
+            return render_template('login.html', error='Invalid username or password', username=username)
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    """Logout handler"""
+    logout_user()
+    flash('You have been logged out successfully.', 'info')
+    return redirect(url_for('login'))
+
 @app.route('/historical_data')
+@login_required
 def historical_data():
     return render_template('historical_data.html')
 
 @app.route('/manage-profiles')
+@login_required
 def manage_profiles():
     """Profile management page"""
     return render_template('manage_profiles.html')
 
 @app.route('/notifications/<slug>')
+@login_required
 def notifications(slug):
     """Notifications page for a profile"""
     conn = get_db()
@@ -185,6 +283,7 @@ def notifications(slug):
     return render_template('notifications.html', slug=slug, profile=profile, last_date=last_date)
 
 @app.route('/')
+@login_required
 def index():
     # Sync profiles from file on every refresh
     sync_profiles()
@@ -369,6 +468,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
     }
 
 @app.route('/profile/<slug>/<date>')
+@login_required
 def daily_view(slug, date):
     conn = get_db()
     c = conn.cursor()
@@ -396,6 +496,7 @@ def daily_view(slug, date):
                          metrics=metrics)
 
 @app.route('/api/diff/<int:change_id>')
+@login_required
 def api_diff(change_id):
     conn = get_db()
     c = conn.cursor()
@@ -522,6 +623,7 @@ def api_diff(change_id):
     return jsonify(result)
 
 @app.route('/api/daily_log/<slug>/<date>')
+@login_required
 def daily_log(slug, date):
     conn = get_db()
     c = conn.cursor()
@@ -705,6 +807,7 @@ def _compute_implied_fill(prev_trade, curr_trade, original_avg_price=None):
 
 
 @app.route('/api/profile_symbol_suggest/<slug>')
+@login_required
 def api_profile_symbol_suggest(slug):
     q = (request.args.get('q') or '').strip()
     limit = request.args.get('limit')
@@ -774,6 +877,7 @@ def api_profile_symbol_suggest(slug):
 
 
 @app.route('/api/profile_all_underlyings/<slug>')
+@login_required
 def api_profile_all_underlyings(slug):
     """Get all position lifecycle events grouped by underlying symbol from all snapshots."""
     underlying_filter = (request.args.get('underlying') or '').strip().upper()
@@ -976,6 +1080,7 @@ def api_profile_all_underlyings(slug):
 
 
 @app.route('/api/profile_symbol_lifecycle/<slug>')
+@login_required
 def api_profile_symbol_lifecycle(slug):
     symbol = (request.args.get('symbol') or '').strip()
     product_filter = (request.args.get('product') or '').strip()  # optional
@@ -1444,6 +1549,7 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
     }
 
 @app.route('/api/search_instruments')
+@login_required
 def search_instruments():
     """Search instruments from master_contract table for autocomplete"""
     query = request.args.get('q', '').strip().upper()
@@ -1490,6 +1596,7 @@ def search_instruments():
     return jsonify({'results': instruments})
 
 @app.route('/api/get_index_instrument')
+@login_required
 def get_index_instrument():
     """Get instrument token for an underlying index (e.g., NIFTY -> NIFTY 50)"""
     underlying = request.args.get('underlying', '').strip().upper()
@@ -1549,6 +1656,7 @@ def get_index_instrument():
         }), 404
 
 @app.route('/api/fetch_historical_data', methods=['POST'])
+@login_required
 def fetch_historical_data():
     """Fetch historical data from Zerodha using enctoken"""
     try:
@@ -1633,6 +1741,7 @@ def fetch_historical_data():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/download_master_contract', methods=['POST'])
+@login_required
 def download_master_contract():
     """Download Zerodha master contract and save to database"""
     try:
@@ -1703,6 +1812,7 @@ def download_master_contract():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/scraper-status')
+@login_required
 def scraper_status():
     """Get current scraper status - running, stuck, or stopped"""
     try:
@@ -1769,11 +1879,13 @@ def scraper_status():
         }), 500
 
 @app.route('/restart', methods=['POST'])
+@login_required
 def restart_scraper_endpoint():
     threading.Thread(target=restart_scraper_internal).start()
     return "Restarting scraper process... It should resume in a few seconds.", 200
 
 @app.route('/delete_date/<date>', methods=['DELETE', 'POST'])
+@login_required
 def delete_date(date):
     try:
         conn = get_db()
@@ -1802,6 +1914,7 @@ def delete_date(date):
 # ==================== SUBSCRIPTION API ROUTES ====================
 
 @app.route('/api/subscriptions', methods=['GET'])
+@login_required
 def get_subscriptions():
     """Get all subscriptions for a profile"""
     try:
@@ -1846,6 +1959,7 @@ def get_subscriptions():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/subscriptions/subscribe', methods=['POST'])
+@login_required
 def subscribe():
     """Create a new subscription"""
     try:
@@ -1899,6 +2013,7 @@ def subscribe():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/subscriptions/unsubscribe', methods=['POST'])
+@login_required
 def unsubscribe():
     """Delete a subscription"""
     try:
@@ -1929,6 +2044,7 @@ def unsubscribe():
 # ==================== NOTIFICATION API ROUTES ====================
 
 @app.route('/api/notifications', methods=['GET'])
+@login_required
 def get_notifications():
     """Get all notifications for a profile"""
     try:
@@ -1974,6 +2090,7 @@ def get_notifications():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/notifications/unread_count', methods=['GET'])
+@login_required
 def get_unread_count():
     """Get count of unread notifications for a profile"""
     try:
@@ -2006,6 +2123,7 @@ def get_unread_count():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/notifications/mark_read', methods=['POST'])
+@login_required
 def mark_notification_read():
     """Mark notification(s) as read"""
     try:
@@ -2045,6 +2163,7 @@ def mark_notification_read():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/notifications/delete', methods=['POST'])
+@login_required
 def delete_notification():
     """Delete notification(s)"""
     try:
@@ -2074,6 +2193,7 @@ def delete_notification():
 # ==================== USER PREFERENCES API ROUTES ====================
 
 @app.route('/api/preferences', methods=['GET'])
+@login_required
 def get_preferences():
     """Get user preferences for a profile"""
     try:
@@ -2120,6 +2240,7 @@ def get_preferences():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/preferences/update', methods=['POST'])
+@login_required
 def update_preferences():
     """Update user preferences for a profile"""
     try:
@@ -2184,6 +2305,7 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 @app.route('/api/profiles')
+@login_required
 def api_get_profiles():
     """Get all profiles with stats"""
     conn = get_db()
@@ -2213,6 +2335,7 @@ def api_get_profiles():
 
 
 @app.route('/api/profiles/validate', methods=['POST'])
+@login_required
 def api_validate_profile():
     """Validate if a profile exists on Sensibull"""
     data = request.json
@@ -2245,6 +2368,7 @@ def api_validate_profile():
 
 
 @app.route('/api/profiles/add', methods=['POST'])
+@login_required
 def api_add_profile():
     """Add a new profile"""
     data = request.json
@@ -2296,6 +2420,7 @@ def api_add_profile():
 
 
 @app.route('/api/profiles/<int:profile_id>/toggle', methods=['POST'])
+@login_required
 def api_toggle_profile(profile_id):
     """Toggle profile active status"""
     conn = get_db()
@@ -2319,6 +2444,7 @@ def api_toggle_profile(profile_id):
 
 
 @app.route('/api/profiles/<int:profile_id>', methods=['DELETE'])
+@login_required
 def api_delete_profile(profile_id):
     """Delete profile (soft or hard delete)"""
     soft = request.args.get('soft', 'false').lower() == 'true'
