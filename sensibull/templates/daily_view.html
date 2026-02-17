@@ -1636,32 +1636,136 @@
             document.getElementById('chart-filter-dropdown').style.display = 'none';
         }
 
+        function parseSymbolDetails(symbol) {
+            // Parse trading symbol to extract expiry and option type
+            // Example formats: NIFTY26FEB25600PE, BANKNIFTY26FEB53000CE
+            const match = symbol.match(/^([A-Z&-]+)(\d{2}[A-Z]{3}\d{2})(\d+)(PE|CE)$/i);
+            
+            if (match) {
+                const underlying = match[1];
+                const expiryStr = match[2]; // e.g., "26FEB25"
+                const strike = match[3];
+                const optionType = match[4].toUpperCase(); // PE or CE
+                
+                // Parse expiry date
+                const day = expiryStr.substring(0, 2);
+                const monthStr = expiryStr.substring(2, 5);
+                const year = '20' + expiryStr.substring(5, 7);
+                
+                const monthMap = {
+                    'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
+                    'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
+                };
+                
+                const month = monthMap[monthStr.toUpperCase()];
+                const expiryDate = new Date(year, month, day);
+                
+                return {
+                    underlying,
+                    expiry: expiryStr,
+                    expiryDate,
+                    expiryDisplay: `${day} ${monthStr} ${year.substring(2)}`,
+                    strike: parseInt(strike),
+                    optionType,
+                    symbol
+                };
+            }
+            
+            // If parsing fails, return basic info
+            return {
+                underlying: symbol,
+                expiry: 'Unknown',
+                expiryDate: new Date(9999, 0, 1), // Far future for sorting
+                expiryDisplay: 'Unknown',
+                strike: 0,
+                optionType: 'XX',
+                symbol
+            };
+        }
+
         function populatePositionFilter(symbols) {
             const optionsDiv = document.getElementById('chart-filter-options');
             optionsDiv.innerHTML = '';
 
-            symbols.forEach(symbol => {
-                const label = document.createElement('label');
-                label.style.display = 'block';
-                label.style.padding = '8px';
-                label.style.cursor = 'pointer';
-                label.style.userSelect = 'none';
-                label.style.borderRadius = '4px';
-                label.onmouseover = () => label.style.background = '#f0f0f0';
-                label.onmouseout = () => label.style.background = 'transparent';
+            // Parse all symbols and group by expiry
+            const parsed = symbols.map(s => parseSymbolDetails(s));
+            
+            // Group by expiry
+            const grouped = {};
+            parsed.forEach(p => {
+                if (!grouped[p.expiry]) {
+                    grouped[p.expiry] = {
+                        expiryDisplay: p.expiryDisplay,
+                        expiryDate: p.expiryDate,
+                        positions: []
+                    };
+                }
+                grouped[p.expiry].positions.push(p);
+            });
+            
+            // Sort expiry groups by date (earliest first)
+            const sortedExpiries = Object.keys(grouped).sort((a, b) => {
+                return grouped[a].expiryDate - grouped[b].expiryDate;
+            });
+            
+            // Render each expiry group
+            sortedExpiries.forEach(expiry => {
+                const group = grouped[expiry];
+                
+                // Sort positions within group: PE first, then CE, then by strike
+                group.positions.sort((a, b) => {
+                    // First by option type (PE before CE)
+                    if (a.optionType !== b.optionType) {
+                        return a.optionType === 'PE' ? -1 : 1;
+                    }
+                    // Then by strike price
+                    return a.strike - b.strike;
+                });
+                
+                // Create expiry header
+                const header = document.createElement('div');
+                header.style.fontWeight = 'bold';
+                header.style.fontSize = '12px';
+                header.style.color = '#666';
+                header.style.padding = '8px';
+                header.style.borderBottom = '1px solid #e0e0e0';
+                header.style.marginTop = '8px';
+                header.style.background = '#f8f8f8';
+                header.textContent = `Expiry: ${group.expiryDisplay}`;
+                optionsDiv.appendChild(header);
+                
+                // Create checkboxes for positions in this group
+                group.positions.forEach(p => {
+                    const label = document.createElement('label');
+                    label.style.display = 'block';
+                    label.style.padding = '8px';
+                    label.style.paddingLeft = '16px';
+                    label.style.cursor = 'pointer';
+                    label.style.userSelect = 'none';
+                    label.style.borderRadius = '4px';
+                    label.onmouseover = () => label.style.background = '#f0f0f0';
+                    label.onmouseout = () => label.style.background = 'transparent';
 
-                const checkbox = document.createElement('input');
-                checkbox.type = 'checkbox';
-                checkbox.checked = true;
-                checkbox.value = symbol;
-                checkbox.style.marginRight = '8px';
-                checkbox.onchange = () => handlePositionFilterChange();
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.checked = true;
+                    checkbox.value = p.symbol;
+                    checkbox.style.marginRight = '8px';
+                    checkbox.onchange = () => handlePositionFilterChange();
 
-                const text = document.createTextNode(symbol);
+                    // Color code by option type
+                    const text = document.createElement('span');
+                    text.textContent = p.symbol;
+                    if (p.optionType === 'PE') {
+                        text.style.color = '#d32f2f'; // Red for PE
+                    } else if (p.optionType === 'CE') {
+                        text.style.color = '#388e3c'; // Green for CE
+                    }
 
-                label.appendChild(checkbox);
-                label.appendChild(text);
-                optionsDiv.appendChild(label);
+                    label.appendChild(checkbox);
+                    label.appendChild(text);
+                    optionsDiv.appendChild(label);
+                });
             });
 
             updateFilterLabel();
