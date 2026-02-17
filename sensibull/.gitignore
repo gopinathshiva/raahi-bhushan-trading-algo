@@ -1,5 +1,6 @@
 # Database files
 sensibull.db
+sensibull.db.backup
 *.db
 *.sqlite
 *.sqlite3

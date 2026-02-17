@@ -2457,6 +2457,88 @@ def api_delete_profile(profile_id):
     })
 
 
+# ============================================================================
+# EXPORT / IMPORT ROUTES
+# ============================================================================
+
+@app.route('/export')
+@login_required
+def export_page():
+    """Export page - shows UI for database export"""
+    return render_template('export.html')
+
+@app.route('/export/download')
+@login_required
+def export_download():
+    """Download the database file"""
+    from flask import send_file
+    from database import DB_PATH
+    
+    if not os.path.exists(DB_PATH):
+        flash('Database file not found!', 'error')
+        return redirect(url_for('export_page'))
+    
+    return send_file(
+        DB_PATH,
+        as_attachment=True,
+        download_name='sensibull.db',
+        mimetype='application/x-sqlite3'
+    )
+
+@app.route('/import', methods=['GET'])
+def import_page():
+    """Import page - shows UI for database import (NO AUTH)"""
+    return render_template('import.html')
+
+@app.route('/import/upload', methods=['POST'])
+def import_upload():
+    """Handle database file upload and replacement (NO AUTH)"""
+    from werkzeug.utils import secure_filename
+    from database import DB_PATH
+    import shutil
+    
+    if 'database_file' not in request.files:
+        return render_template('import.html', error='No file uploaded')
+    
+    file = request.files['database_file']
+    
+    if file.filename == '':
+        return render_template('import.html', error='No file selected')
+    
+    if not file.filename.endswith('.db'):
+        return render_template('import.html', error='Only .db files are allowed')
+    
+    try:
+        # Save uploaded file to a temporary location
+        temp_path = os.path.join(os.path.dirname(DB_PATH), 'tmp_upload.db')
+        file.save(temp_path)
+        
+        # Verify it's a valid SQLite database
+        try:
+            conn = sqlite3.connect(temp_path)
+            conn.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
+            conn.close()
+        except Exception as e:
+            os.remove(temp_path)
+            return render_template('import.html', error=f'Invalid database file: {str(e)}')
+        
+        # Backup existing database (if it exists)
+        if os.path.exists(DB_PATH):
+            backup_path = DB_PATH + '.backup'
+            shutil.copy2(DB_PATH, backup_path)
+        
+        # Replace the database
+        shutil.move(temp_path, DB_PATH)
+        
+        return render_template('import.html', success=True)
+        
+    except Exception as e:
+        return render_template('import.html', error=f'Import failed: {str(e)}')
+
+# ============================================================================
+# END EXPORT / IMPORT ROUTES
+# ============================================================================
+
 if __name__ == '__main__':
     # Clean up port before starting (in case of unclean shutdown)
     cleanup_port()
