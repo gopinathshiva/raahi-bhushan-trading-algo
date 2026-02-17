@@ -2486,13 +2486,15 @@ def export_download():
     )
 
 @app.route('/import', methods=['GET'])
+@login_required
 def import_page():
-    """Import page - shows UI for database import (NO AUTH)"""
+    """Import page - shows UI for database import"""
     return render_template('import.html')
 
 @app.route('/import/upload', methods=['POST'])
+@login_required
 def import_upload():
-    """Handle database file upload and replacement (NO AUTH)"""
+    """Handle database file upload and replacement"""
     from werkzeug.utils import secure_filename
     from database import DB_PATH
     import shutil
