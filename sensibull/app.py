@@ -285,36 +285,15 @@ def notifications(slug):
 @app.route('/')
 @login_required
 def index():
-    # Sync profiles from file on every refresh
-    sync_profiles()
-    
     conn = get_db()
     c = conn.cursor()
     
-    # Get all profiles
-    profiles_db = c.execute("SELECT * FROM profiles").fetchall()
-    
-    # Get order from urls.txt
-    ordered_slugs = []
-    try:
-        urls_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'urls.txt')
-        if os.path.exists(urls_path):
-            with open(urls_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        slug = line.split('/')[-1] if 'sensibull.com' in line else line
-                        ordered_slugs.append(slug)
-    except Exception as e:
-        print(f"Error reading urls.txt for sorting: {e}")
-
-    # Create a map for sorting
-    # profile_key -> index
-    # We use a large number if not found so they go to the bottom
-    sort_map = {slug: i for i, slug in enumerate(ordered_slugs)}
-    
-    # Sort the DB profiles: those in urls.txt first (in order), others after
-    profiles = sorted(profiles_db, key=lambda p: sort_map.get(p['slug'], 99999))
+    # Get all active profiles, ordered by slug
+    profiles = c.execute("""
+        SELECT * FROM profiles 
+        WHERE is_active = 1 
+        ORDER BY slug
+    """).fetchall()
 
     # Calculate dates (last 30 days)
     
@@ -2371,7 +2350,10 @@ def api_validate_profile():
 @login_required
 def api_add_profile():
     """Add a new profile"""
-    data = request.json
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+    
     slug = data.get('slug', '').strip()
     
     if not slug:
