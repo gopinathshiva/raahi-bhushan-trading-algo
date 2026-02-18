@@ -196,43 +196,96 @@ def login():
         return redirect(url_for('index'))
     
     if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
-        remember = request.form.get('remember') == 'yes'
+        action = request.form.get('action', 'login')
         
-        if not username or not password:
-            return render_template('login.html', error='Username and password are required')
-        
-        conn = get_db()
-        c = conn.cursor()
-        user = c.execute("""
-            SELECT id, username, password_hash, email, is_active 
-            FROM admin_users 
-            WHERE username = ?
-        """, (username,)).fetchone()
-        
-        if user and user['is_active'] and check_password_hash(user['password_hash'], password):
-            # Update last login
-            c.execute("""
-                UPDATE admin_users 
-                SET last_login = ? 
-                WHERE id = ?
-            """, (now_ist().isoformat(), user['id']))
-            conn.commit()
-            conn.close()
+        # Handle Registration
+        if action == 'register':
+            username = request.form.get('username', '').strip()
+            password = request.form.get('password', '')
+            verification_code = request.form.get('verification_code', '').strip()
             
-            # Create user object and login
-            user_obj = AdminUser(user['id'], user['username'], user['email'], user['is_active'])
-            login_user(user_obj, remember=remember, duration=timedelta(days=30))
+            # Validate inputs
+            if not username or not password or not verification_code:
+                return render_template('login.html', error='All fields are required for registration')
             
-            # Redirect to next page or index
-            next_page = request.args.get('next')
-            if next_page and next_page.startswith('/'):
-                return redirect(next_page)
-            return redirect(url_for('index'))
+            # Check verification code
+            if verification_code != '1083':
+                return render_template('login.html', error='Invalid verification code')
+            
+            # Validate password length
+            if len(password) < 6:
+                return render_template('login.html', error='Password must be at least 6 characters long')
+            
+            # Check if username already exists
+            conn = get_db()
+            c = conn.cursor()
+            
+            existing_user = c.execute("""
+                SELECT id FROM admin_users WHERE username = ?
+            """, (username,)).fetchone()
+            
+            if existing_user:
+                conn.close()
+                return render_template('login.html', error=f'Username "{username}" already exists')
+            
+            # Create new admin user
+            try:
+                from werkzeug.security import generate_password_hash
+                password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+                
+                c.execute("""
+                    INSERT INTO admin_users (username, password_hash, email, created_at, is_active)
+                    VALUES (?, ?, ?, ?, 1)
+                """, (username, password_hash, None, now_ist().isoformat()))
+                
+                conn.commit()
+                conn.close()
+                
+                return render_template('login.html', success=f'Admin user "{username}" created successfully! You can now login.')
+            
+            except Exception as e:
+                conn.close()
+                return render_template('login.html', error=f'Error creating admin user: {str(e)}')
+        
+        # Handle Login
         else:
-            conn.close()
-            return render_template('login.html', error='Invalid username or password', username=username)
+            username = request.form.get('username', '').strip()
+            password = request.form.get('password', '')
+            remember = request.form.get('remember') == 'yes'
+            
+            if not username or not password:
+                return render_template('login.html', error='Username and password are required')
+            
+            conn = get_db()
+            c = conn.cursor()
+            user = c.execute("""
+                SELECT id, username, password_hash, email, is_active 
+                FROM admin_users 
+                WHERE username = ?
+            """, (username,)).fetchone()
+            
+            if user and user['is_active'] and check_password_hash(user['password_hash'], password):
+                # Update last login
+                c.execute("""
+                    UPDATE admin_users 
+                    SET last_login = ? 
+                    WHERE id = ?
+                """, (now_ist().isoformat(), user['id']))
+                conn.commit()
+                conn.close()
+                
+                # Create user object and login
+                user_obj = AdminUser(user['id'], user['username'], user['email'], user['is_active'])
+                login_user(user_obj, remember=remember, duration=timedelta(days=30))
+                
+                # Redirect to next page or index
+                next_page = request.args.get('next')
+                if next_page and next_page.startswith('/'):
+                    return redirect(next_page)
+                return redirect(url_for('index'))
+            else:
+                conn.close()
+                return render_template('login.html', error='Invalid username or password', username=username)
     
     return render_template('login.html')
 

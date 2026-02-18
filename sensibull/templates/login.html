@@ -46,6 +46,33 @@
             font-size: 14px;
         }
 
+        .mode-toggle {
+            display: flex;
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 4px;
+            margin-bottom: 24px;
+        }
+
+        .mode-toggle button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: transparent;
+            color: #666;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+
+        .mode-toggle button.active {
+            background: white;
+            color: #667eea;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
         .form-group {
             margin-bottom: 24px;
         }
@@ -134,6 +161,12 @@
             border-left: 4px solid #0066cc;
         }
 
+        .alert-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+        }
+
         .login-footer {
             text-align: center;
             margin-top: 24px;
@@ -154,14 +187,28 @@
             margin: 0 auto 20px;
             font-size: 28px;
         }
+
+        .form-container {
+            display: none;
+        }
+
+        .form-container.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div class="login-container">
         <div class="login-header">
             <div class="lock-icon">🔒</div>
-            <h1>Admin Login</h1>
+            <h1 id="header-title">Admin Login</h1>
             <p>Sensibull Position Tracker</p>
+        </div>
+
+        <!-- Mode Toggle -->
+        <div class="mode-toggle">
+            <button type="button" id="btn-login-mode" class="active" onclick="switchMode('login')">Login</button>
+            <button type="button" id="btn-register-mode" onclick="switchMode('register')">Register Admin</button>
         </div>
 
         {% if error %}
@@ -176,30 +223,97 @@
         </div>
         {% endif %}
 
-        <form method="POST" action="{{ url_for('login') }}">
-            <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username" required autofocus 
-                       placeholder="Enter your username" value="{{ request.form.username or '' }}">
-            </div>
+        {% if success %}
+        <div class="alert alert-success">
+            {{ success }}
+        </div>
+        {% endif %}
 
-            <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" id="password" name="password" required 
-                       placeholder="Enter your password">
-            </div>
+        <!-- Login Form -->
+        <div id="login-form" class="form-container active">
+            <form method="POST" action="{{ url_for('login') }}">
+                <input type="hidden" name="action" value="login">
+                <div class="form-group">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" name="username" required autofocus 
+                           placeholder="Enter your username" value="{{ request.form.username if request.form.action == 'login' else '' }}">
+                </div>
 
-            <div class="remember-me">
-                <input type="checkbox" id="remember" name="remember" value="yes">
-                <label for="remember">Remember me for 30 days</label>
-            </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" name="password" required 
+                           placeholder="Enter your password">
+                </div>
 
-            <button type="submit" class="btn-login">Sign In</button>
-        </form>
+                <div class="remember-me">
+                    <input type="checkbox" id="remember" name="remember" value="yes">
+                    <label for="remember">Remember me for 30 days</label>
+                </div>
+
+                <button type="submit" class="btn-login">Sign In</button>
+            </form>
+        </div>
+
+        <!-- Register Form -->
+        <div id="register-form" class="form-container">
+            <form method="POST" action="{{ url_for('login') }}">
+                <input type="hidden" name="action" value="register">
+                <div class="form-group">
+                    <label for="register-username">Username</label>
+                    <input type="text" id="register-username" name="username" required 
+                           placeholder="Choose a username" value="{{ request.form.username if request.form.action == 'register' else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" name="password" required 
+                           placeholder="Choose a password (min 6 characters)">
+                </div>
+
+                <div class="form-group">
+                    <label for="verification-code">Verification Code</label>
+                    <input type="text" id="verification-code" name="verification_code" required 
+                           placeholder="Enter verification code" value="{{ request.form.verification_code if request.form.action == 'register' else '' }}">
+                </div>
+
+                <button type="submit" class="btn-login">Register Admin</button>
+            </form>
+        </div>
 
         <div class="login-footer">
             <p>🔐 Secure admin access only</p>
         </div>
     </div>
+
+    <script>
+        function switchMode(mode) {
+            const loginBtn = document.getElementById('btn-login-mode');
+            const registerBtn = document.getElementById('btn-register-mode');
+            const loginForm = document.getElementById('login-form');
+            const registerForm = document.getElementById('register-form');
+            const headerTitle = document.getElementById('header-title');
+
+            if (mode === 'login') {
+                loginBtn.classList.add('active');
+                registerBtn.classList.remove('active');
+                loginForm.classList.add('active');
+                registerForm.classList.remove('active');
+                headerTitle.textContent = 'Admin Login';
+            } else {
+                loginBtn.classList.remove('active');
+                registerBtn.classList.add('active');
+                loginForm.classList.remove('active');
+                registerForm.classList.add('active');
+                headerTitle.textContent = 'Register Admin';
+            }
+        }
+
+        // Auto-switch to register mode if there was a registration error
+        {% if request.form.action == 'register' %}
+        window.addEventListener('DOMContentLoaded', function() {
+            switchMode('register');
+        });
+        {% endif %}
+    </script>
 </body>
 </html>
