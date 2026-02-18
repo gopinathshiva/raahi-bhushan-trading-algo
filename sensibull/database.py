@@ -28,7 +28,10 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             slug TEXT UNIQUE NOT NULL,
             name TEXT,
-            url TEXT
+            url TEXT,
+            source_url TEXT,
+            is_active INTEGER DEFAULT 1,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -147,6 +150,14 @@ def init_db():
     conn.commit()
     conn.close()
     print("Database initialized.")
+    
+    # Run migrations to add missing columns to existing tables
+    try:
+        from migrate_db import migrate_database
+        migrate_database()
+    except ImportError:
+        # migrate_db.py might not exist yet in some deployments
+        print("Warning: migrate_db.py not found, skipping migrations.")
 
 def upsert_latest_snapshot(conn, profile_id, data, timestamp=None):
     c = conn.cursor()
