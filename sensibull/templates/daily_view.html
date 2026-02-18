@@ -1700,6 +1700,25 @@
         function parseSymbolDetails(symbol) {
             // Parse trading symbol to extract expiry and option type
             // Example formats: NIFTY26FEB25600PE, BANKNIFTY26FEB53000CE
+            
+            // First, try to get expiry date using the enhanced function
+            const expiryDate = getExpiryDateFromSymbolEnhanced(symbol);
+            
+            // Format expiry display from the parsed date
+            let expiryDisplay = 'Unknown';
+            if (expiryDate) {
+                const day = String(expiryDate.getDate()).padStart(2, '0');
+                const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+                                    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+                const monthStr = monthNames[expiryDate.getMonth()];
+                const year = String(expiryDate.getFullYear()).substring(2);
+                expiryDisplay = `${day} ${monthStr} ${year}`;
+            } else {
+                // Log a warning if expiry couldn't be parsed
+                console.warn('Could not parse expiry date for symbol:', symbol);
+            }
+            
+            // Now parse the rest of the symbol details
             const match = symbol.match(/^([A-Z&-]+)(\d{2}[A-Z]{3}\d{2})(\d+)(PE|CE)$/i);
             
             if (match) {
@@ -1708,38 +1727,28 @@
                 const strike = match[3];
                 const optionType = match[4].toUpperCase(); // PE or CE
                 
-                // Parse expiry date
-                const day = expiryStr.substring(0, 2);
-                const monthStr = expiryStr.substring(2, 5);
-                const year = '20' + expiryStr.substring(5, 7);
-                
-                const monthMap = {
-                    'JAN': 0, 'FEB': 1, 'MAR': 2, 'APR': 3, 'MAY': 4, 'JUN': 5,
-                    'JUL': 6, 'AUG': 7, 'SEP': 8, 'OCT': 9, 'NOV': 10, 'DEC': 11
-                };
-                
-                const month = monthMap[monthStr.toUpperCase()];
-                const expiryDate = new Date(year, month, day);
-                
                 return {
                     underlying,
                     expiry: expiryStr,
-                    expiryDate,
-                    expiryDisplay: `${day} ${monthStr} ${year.substring(2)}`,
+                    expiryDate: expiryDate || new Date(9999, 0, 1), // Far future for sorting if null
+                    expiryDisplay,
                     strike: parseInt(strike),
                     optionType,
                     symbol
                 };
             }
             
-            // If parsing fails, return basic info
+            // If regex parsing fails, try to extract what we can
+            const optionType = getOptionType(symbol);
+            const strike = getStrikePrice(symbol);
+            
             return {
-                underlying: symbol,
+                underlying: symbol.replace(/\d+[CP]E$/i, '').replace(/\d{2}[A-Z]{3}\d{2}/, '').trim() || symbol,
                 expiry: 'Unknown',
-                expiryDate: new Date(9999, 0, 1), // Far future for sorting
-                expiryDisplay: 'Unknown',
-                strike: 0,
-                optionType: 'XX',
+                expiryDate: expiryDate || new Date(9999, 0, 1), // Far future for sorting
+                expiryDisplay,
+                strike: strike || 0,
+                optionType: optionType || 'XX',
                 symbol
             };
         }
@@ -1751,22 +1760,25 @@
             // Parse all symbols and group by expiry
             const parsed = symbols.map(s => parseSymbolDetails(s));
             
-            // Group by expiry
+            // Group by expiry date timestamp (not the string) to avoid duplicates
             const grouped = {};
             parsed.forEach(p => {
-                if (!grouped[p.expiry]) {
-                    grouped[p.expiry] = {
+                // Use the actual date timestamp as the key for proper grouping
+                const groupKey = p.expiryDate.getTime();
+                
+                if (!grouped[groupKey]) {
+                    grouped[groupKey] = {
                         expiryDisplay: p.expiryDisplay,
                         expiryDate: p.expiryDate,
                         positions: []
                     };
                 }
-                grouped[p.expiry].positions.push(p);
+                grouped[groupKey].positions.push(p);
             });
             
             // Sort expiry groups by date (earliest first)
             const sortedExpiries = Object.keys(grouped).sort((a, b) => {
-                return grouped[a].expiryDate - grouped[b].expiryDate;
+                return parseInt(a) - parseInt(b);
             });
             
             // Render each expiry group
