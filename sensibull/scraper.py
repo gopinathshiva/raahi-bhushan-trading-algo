@@ -160,6 +160,24 @@ def extract_underlying_from_symbol(trading_symbol):
     # If no digits found, return the whole symbol
     return trading_symbol
 
+def _compute_implied_fill(old_qty, new_qty, old_avg_price, new_avg_price):
+    """Compute implied fill side, quantity, and price from a quantity change."""
+    dq = new_qty - old_qty
+    if dq == 0:
+        return '', 0, 0
+    side = 'BUY' if dq > 0 else 'SELL'
+    fill_qty = abs(dq)
+    try:
+        if old_avg_price and new_avg_price:
+            v0 = old_avg_price * old_qty
+            v1 = new_avg_price * new_qty
+            price = abs((v1 - v0) / dq)
+        else:
+            price = 0
+    except Exception:
+        price = 0
+    return side, fill_qty, price
+
 def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
     """Generate notifications based on subscriptions and detected changes"""
     c = conn.cursor()
@@ -282,6 +300,11 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                     new_qty = new_trade.get('quantity', 0)
                     if old_qty != new_qty:
                         qty_diff = new_qty - old_qty
+                        _if_side, _if_qty, _if_price = _compute_implied_fill(
+                            old_qty, new_qty,
+                            old_trade.get('average_price', 0),
+                            new_trade.get('average_price', 0)
+                        )
                         notification_data = {
                             'underlying': key[0],
                             'expiry': key[1],
@@ -294,7 +317,10 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                             'average_price': new_trade.get('average_price', 0),
                             'last_price': new_trade.get('last_price', 0),
                             'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
-                            'booked_pnl': new_trade.get('booked_pnl', 0)
+                            'booked_pnl': new_trade.get('booked_pnl', 0),
+                            'implied_fill_side': _if_side,
+                            'implied_fill_qty': _if_qty,
+                            'implied_fill_price': _if_price
                         }
                         create_notification(conn, profile_id, sub_id, 'modified_position',
                                           f"Position modified in {sub_underlying}",
@@ -343,6 +369,11 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                     new_qty = new_trade.get('quantity', 0)
                     if old_qty != new_qty:
                         qty_diff = new_qty - old_qty
+                        _if_side, _if_qty, _if_price = _compute_implied_fill(
+                            old_qty, new_qty,
+                            old_trade.get('average_price', 0),
+                            new_trade.get('average_price', 0)
+                        )
                         notification_data = {
                             'underlying': key[0],
                             'expiry': key[1],
@@ -355,7 +386,10 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                             'average_price': new_trade.get('average_price', 0),
                             'last_price': new_trade.get('last_price', 0),
                             'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
-                            'booked_pnl': new_trade.get('booked_pnl', 0)
+                            'booked_pnl': new_trade.get('booked_pnl', 0),
+                            'implied_fill_side': _if_side,
+                            'implied_fill_qty': _if_qty,
+                            'implied_fill_price': _if_price
                         }
                         create_notification(conn, profile_id, sub_id, 'modified_position',
                                           f"Position modified in {sub_underlying} {sub_expiry}",
@@ -391,6 +425,11 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                     new_qty = new_trade.get('quantity', 0)
                     if old_qty != new_qty:
                         qty_diff = new_qty - old_qty
+                        _if_side, _if_qty, _if_price = _compute_implied_fill(
+                            old_qty, new_qty,
+                            old_trade.get('average_price', 0),
+                            new_trade.get('average_price', 0)
+                        )
                         notification_data = {
                             'symbol': matching_key[2],
                             'product': matching_key[3],
@@ -401,7 +440,10 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                             'average_price': new_trade.get('average_price', 0),
                             'last_price': new_trade.get('last_price', 0),
                             'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
-                            'booked_pnl': new_trade.get('booked_pnl', 0)
+                            'booked_pnl': new_trade.get('booked_pnl', 0),
+                            'implied_fill_side': _if_side,
+                            'implied_fill_qty': _if_qty,
+                            'implied_fill_price': _if_price
                         }
                         create_notification(conn, profile_id, sub_id, 'quantity_change',
                                           f"Quantity changed",
