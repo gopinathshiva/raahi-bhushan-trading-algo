@@ -605,12 +605,12 @@
                     // Build implied fill row (only if we have the data)
                     let impliedFillHtml = '';
                     if (ifSide && ifQty && ifPrice) {
-                        const bookedPnlFormatted = bookedPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
                         const ifPriceFormatted = ifPrice.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                        impliedFillHtml = `
-                            <br><span style="color:#555; font-size:0.85em;">Implied Fill (${ifSide}): Qty ${ifQty} @ ₹${ifPriceFormatted} (approx)</span>
-                            <br><span style="color:${bookedPnlColor}; font-size:0.85em; font-weight:bold;">Booked P&L: ₹${bookedPnlFormatted} (on ${ifQty} qty @ ₹${ifPriceFormatted})</span>
-                        `;
+                        impliedFillHtml = `<br><span style="color:#555; font-size:0.85em;">Implied Fill (${ifSide}): Qty ${ifQty} @ ₹${ifPriceFormatted} (approx)</span>`;
+                        if (bookedPnl !== 0) {
+                            const bookedPnlFormatted = bookedPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                            impliedFillHtml += `<br><span style="color:${bookedPnlColor}; font-size:0.85em; font-weight:bold;">Booked P&L: ₹${bookedPnlFormatted} (on ${ifQty} qty @ ₹${ifPriceFormatted})</span>`;
+                        }
                     }
                     
                     tableHtml = `

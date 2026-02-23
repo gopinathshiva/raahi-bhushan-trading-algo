@@ -178,6 +178,39 @@ def _compute_implied_fill(old_qty, new_qty, old_avg_price, new_avg_price):
         price = 0
     return side, fill_qty, price
 
+
+def _compute_booked_pnl(old_qty, new_qty, old_avg_price, implied_fill_price, broker_booked_pnl):
+    """Compute booked P&L for a reducing position modification.
+
+    Mirrors the same decision tree used in app.py calculate_diff():
+      1. If broker provides booked_profit_loss (non-zero), use it directly.
+      2. Otherwise compute from implied fill price:
+           Long  (old_qty > 0): (exit_price - entry_price) * closed_qty
+           Short (old_qty < 0): (entry_price - exit_price) * closed_qty
+    Returns 0 if position is not reducing or data is insufficient.
+    """
+    # Only compute for reducing positions
+    is_reducing = (old_qty > 0 and new_qty < old_qty) or (old_qty < 0 and new_qty > old_qty)
+    if not is_reducing:
+        return 0
+
+    closed_qty = abs(old_qty - new_qty)
+
+    # Path 1: broker provided the value directly
+    if broker_booked_pnl and broker_booked_pnl != 0:
+        return broker_booked_pnl
+
+    # Path 2: compute from implied fill price
+    entry_price = old_avg_price or 0
+    exit_price = implied_fill_price or 0
+    if not entry_price or not exit_price or not closed_qty:
+        return 0
+
+    if old_qty > 0:
+        return (exit_price - entry_price) * closed_qty   # Long position
+    else:
+        return (entry_price - exit_price) * closed_qty   # Short position
+
 def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
     """Generate notifications based on subscriptions and detected changes"""
     c = conn.cursor()
@@ -317,7 +350,12 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                             'average_price': new_trade.get('average_price', 0),
                             'last_price': new_trade.get('last_price', 0),
                             'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
-                            'booked_pnl': new_trade.get('booked_pnl', 0),
+                            'booked_pnl': _compute_booked_pnl(
+                                old_qty, new_qty,
+                                old_trade.get('average_price', 0),
+                                _if_price,
+                                new_trade.get('booked_profit_loss', 0)
+                            ),
                             'implied_fill_side': _if_side,
                             'implied_fill_qty': _if_qty,
                             'implied_fill_price': _if_price
@@ -386,7 +424,12 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                             'average_price': new_trade.get('average_price', 0),
                             'last_price': new_trade.get('last_price', 0),
                             'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
-                            'booked_pnl': new_trade.get('booked_pnl', 0),
+                            'booked_pnl': _compute_booked_pnl(
+                                old_qty, new_qty,
+                                old_trade.get('average_price', 0),
+                                _if_price,
+                                new_trade.get('booked_profit_loss', 0)
+                            ),
                             'implied_fill_side': _if_side,
                             'implied_fill_qty': _if_qty,
                             'implied_fill_price': _if_price
@@ -440,7 +483,12 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                             'average_price': new_trade.get('average_price', 0),
                             'last_price': new_trade.get('last_price', 0),
                             'unbooked_pnl': new_trade.get('unbooked_pnl', 0),
-                            'booked_pnl': new_trade.get('booked_pnl', 0),
+                            'booked_pnl': _compute_booked_pnl(
+                                old_qty, new_qty,
+                                old_trade.get('average_price', 0),
+                                _if_price,
+                                new_trade.get('booked_profit_loss', 0)
+                            ),
                             'implied_fill_side': _if_side,
                             'implied_fill_qty': _if_qty,
                             'implied_fill_price': _if_price
