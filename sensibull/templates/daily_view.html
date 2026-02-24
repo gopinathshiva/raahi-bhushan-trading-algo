@@ -310,10 +310,16 @@
                 <select id="underlying-filter">
                     <option value="">All Underlyings</option>
                 </select>
-                <button onclick="loadUnderlyingTrades()">Load / Refresh</button>
+                <button onclick="loadUnderlyingTrades(true)">Refresh</button>
                 <span class="search-help">Showing all historical positions grouped by underlying</span>
             </div>
             <div style="margin-top: 10px; margin-bottom: 10px;">
+                <label style="cursor:pointer; user-select:none;">
+                    <input type="checkbox" id="exclude-expired" checked style="margin-right:6px;" />
+                    Exclude Expired Trades
+                </label>
+            </div>
+            <div style="margin-top: 6px; margin-bottom: 10px;">
                 <label style="cursor:pointer; user-select:none;">
                     <input type="checkbox" id="sort-by-strike" style="margin-right:6px;" />
                     Sort by Strike Price (PE first, then CE)
@@ -924,9 +930,9 @@
         let _underlyingTradesLoaded = false;
         let _cachedUnderlyingsData = null;
 
-        async function loadUnderlyingTrades() {
-            // Only auto-load once
-            if (_underlyingTradesLoaded) return;
+        async function loadUnderlyingTrades(forceReload = false) {
+            // Only auto-load once; manual refresh (forceReload=true) always proceeds
+            if (_underlyingTradesLoaded && !forceReload) return;
             _underlyingTradesLoaded = true;
 
             const status = document.getElementById('underlying-status');
@@ -1096,9 +1102,17 @@
                 contentDiv.id = `underlying-content-${underlying}`;
 
                 // Create expiry sections
+                const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
                 let expiryHtml = '';
                 sortedExpiryKeys.forEach(expiryKey => {
                     const expiryData = eventsByExpiry[expiryKey];
+
+                    // Skip expired expiries if the checkbox is checked
+                    if (excludeExpired && expiryData.date && expiryData.date < today) return;
+
                     const expiryDateStr = expiryData.date ? formatExpiryDate(expiryData.date) : 'Unknown Expiry';
                     const expiryEvents = expiryData.events;
 
@@ -1244,6 +1258,9 @@
 
                 contentDiv.innerHTML = expiryHtml;
 
+                // Skip underlying group entirely if all expiries were filtered out
+                if (!expiryHtml.trim()) return;
+
                 groupDiv.appendChild(headerDiv);
                 groupDiv.appendChild(contentDiv);
                 container.appendChild(groupDiv);
@@ -1323,6 +1340,14 @@
             };
 
             const shouldHideModifiedZero = () => !!(hideModifiedZeroCheckbox && hideModifiedZeroCheckbox.checked);
+
+            // Add event listener for exclude-expired checkbox
+            const excludeExpiredCheckbox = document.getElementById('exclude-expired');
+            if (excludeExpiredCheckbox) {
+                excludeExpiredCheckbox.addEventListener('change', function() {
+                    reRenderUnderlyingGroups();
+                });
+            }
 
             // Add event listener for sort-by-strike checkbox
             const sortByStrikeCheckbox = document.getElementById('sort-by-strike');

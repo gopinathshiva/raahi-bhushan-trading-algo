@@ -322,6 +322,9 @@
             z-index: 1000;
             display: none;
             animation: slideIn 0.3s;
+            max-width: 360px;
+            min-width: 260px;
+            line-height: 1.5;
         }
 
         .toast.show {
@@ -334,6 +337,20 @@
 
         .toast.error {
             background: #f44336;
+        }
+
+        /* Notification-type specific toast colours */
+        .toast.new_position {
+            background: #1976d2;   /* blue — new entry */
+        }
+
+        .toast.exited_position {
+            background: #e53935;   /* red — exited */
+        }
+
+        .toast.modified_position,
+        .toast.quantity_change {
+            background: #f57c00;   /* orange — modified */
         }
 
         @keyframes slideIn {
@@ -429,6 +446,37 @@
         let lastNotificationCount = 0;
         let notificationCheckInterval = null;
 
+        // Toast queue: one toast at a time, minimum 5s gap between toasts
+        let toastQueue = [];
+        let toastBusy = false;
+
+        function enqueueToast(message, type = 'success') {
+            toastQueue.push({ message, type });
+            processToastQueue();
+        }
+
+        function processToastQueue() {
+            if (toastBusy || toastQueue.length === 0) return;
+            toastBusy = true;
+            const { message, type } = toastQueue.shift();
+            _showToast(message, type);
+        }
+
+        function _showToast(message, type) {
+            const toast = document.getElementById('toast');
+            toast.innerHTML = message;
+            // type can be 'success', 'error', 'new_position', 'exited_position', 'modified_position'
+            toast.className = `toast ${type} show`;
+            // Show for 5s, then hide and immediately process next in queue
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toastBusy = false;
+                    processToastQueue();
+                }, 400); // short pause for hide animation before next toast
+            }, 5000); // 5s display duration
+        }
+
         // Tab Switching
         function switchTab(tabName) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -469,29 +517,103 @@
             playNotificationSoundWithType(currentSound);
         }
 
+        // Build a human-readable toast line from a single notification object.
+        // Returns { message, toastType } so the caller can apply the right colour.
+        function buildNotificationToast(notif) {
+            const data = notif.notification_data || {};
+            const type = notif.notification_type;
+            const symbol = data.symbol || 'Unknown';
+            const product = data.product ? ` (${data.product})` : '';
+
+            let typeLabel = '';
+            let detail = '';
+            let toastType = type; // maps directly to CSS class
+
+            if (type === 'new_position') {
+                typeLabel = '🟢 New Position';
+                const qty = data.quantity || 0;
+                detail = `${symbol}${product} | Qty: ${qty}`;
+            } else if (type === 'exited_position') {
+                typeLabel = '🔴 Exited';
+                const exitPnl = parseFloat(data.exit_pnl || 0);
+                const pnlStr = exitPnl !== 0
+                    ? ` | P&L: ₹${exitPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
+                    : '';
+                detail = `${symbol}${product}${pnlStr}`;
+            } else if (type === 'modified_position' || type === 'quantity_change') {
+                typeLabel = '🟡 Modified';
+                toastType = 'modified_position'; // normalise quantity_change → same colour
+                const oldQty = data.old_quantity || 0;
+                const newQty = data.quantity || 0;
+                const diff = newQty - oldQty;
+                const sign = diff > 0 ? '+' : '';
+                detail = `${symbol}${product} | Qty: ${oldQty} → ${newQty} (${sign}${diff})`;
+            } else {
+                typeLabel = '🔔 Notification';
+                toastType = 'success';
+                detail = notif.message || type;
+            }
+
+            return {
+                message: `<strong>[${PROFILE_SLUG}]</strong> ${typeLabel}<br><small>${detail}</small>`,
+                toastType
+            };
+        }
+
         // Check for new notifications periodically
         async function checkForNewNotifications() {
             try {
-                const response = await fetch(`/api/notifications/unread_count?profile_slug=${PROFILE_SLUG}`);
-                const data = await response.json();
-                
-                if (data.success) {
-                    const currentCount = data.unread_count;
-                    
-                    // If count increased, play sound and show alert
-                    if (lastNotificationCount > 0 && currentCount > lastNotificationCount) {
-                        playNotificationSound();
-                        showToast(`${currentCount - lastNotificationCount} new notification(s)!`, 'success');
-                        
-                        // Reload notifications if on notifications tab
-                        const notificationsTab = document.getElementById('notifications-tab');
-                        if (notificationsTab && notificationsTab.style.display !== 'none') {
-                            loadNotifications();
+                const countResponse = await fetch(`/api/notifications/unread_count?profile_slug=${PROFILE_SLUG}`);
+                const countData = await countResponse.json();
+
+                if (!countData.success) return;
+
+                const currentCount = countData.unread_count;
+
+                if (lastNotificationCount > 0 && currentCount > lastNotificationCount) {
+                    const newCount = currentCount - lastNotificationCount;
+
+                    // Fetch full notifications to get details for the toast(s)
+                    try {
+                        const notifsResponse = await fetch(`/api/notifications?profile_slug=${PROFILE_SLUG}`);
+                        const notifsData = await notifsResponse.json();
+
+                        if (notifsData.success && notifsData.notifications.length > 0) {
+                            // The API returns newest first; take the first `newCount` unread ones
+                            const newNotifs = notifsData.notifications
+                                .filter(n => !n.is_read)
+                                .slice(0, newCount);
+
+                            if (newNotifs.length > 0) {
+                                playNotificationSound();
+                                newNotifs.forEach(notif => {
+                                    const { message, toastType } = buildNotificationToast(notif);
+                                    enqueueToast(message, toastType);
+                                });
+                            } else {
+                                // Fallback: count-only toast
+                                playNotificationSound();
+                                enqueueToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new notification(s)`, 'success');
+                            }
+                        } else {
+                            // Fallback if fetch fails
+                            playNotificationSound();
+                            enqueueToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new notification(s)`, 'success');
                         }
+                    } catch (fetchErr) {
+                        console.error('Error fetching notification details:', fetchErr);
+                        playNotificationSound();
+                        enqueueToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new notification(s)`, 'success');
                     }
-                    
-                    lastNotificationCount = currentCount;
+
+                    // Reload notifications list if tab is visible
+                    const notificationsTab = document.getElementById('notifications-tab');
+                    if (notificationsTab && notificationsTab.classList.contains('active')) {
+                        loadNotifications();
+                    }
                 }
+
+                lastNotificationCount = currentCount;
             } catch (error) {
                 console.error('Error checking for new notifications:', error);
             }
@@ -949,13 +1071,8 @@
         }
 
         function showToast(message, type = 'success') {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.className = `toast ${type} show`;
-            
-            setTimeout(() => {
-                toast.classList.remove('show');
-            }, 3000);
+            // Route all toasts through the queue for consistent behaviour
+            enqueueToast(message, type);
         }
 
         // Test notification sound
@@ -970,13 +1087,30 @@
                 // Play the notification sound
                 playNotificationSound();
                 
-                // Show toast notification
-                showToast('🔔 This is a test notification!', 'success');
+                // Simulate three enriched toasts (one per type) to preview real format
+                const fakeNotifs = [
+                    {
+                        notification_type: 'new_position',
+                        notification_data: { symbol: 'NIFTY25FEB25600CE', product: 'NRML', quantity: 50 }
+                    },
+                    {
+                        notification_type: 'exited_position',
+                        notification_data: { symbol: 'BANKNIFTY25FEB48000PE', product: 'NRML', exit_pnl: 2500 }
+                    },
+                    {
+                        notification_type: 'modified_position',
+                        notification_data: { symbol: 'NIFTY25FEB25500CE', product: 'NRML', old_quantity: 50, quantity: 100 }
+                    }
+                ];
+                fakeNotifs.forEach(n => {
+                    const { message, toastType } = buildNotificationToast(n);
+                    enqueueToast(message, toastType);
+                });
                 
                 setTimeout(() => {
                     testResult.style.background = '#d4edda';
                     testResult.style.border = '1px solid #28a745';
-                    testResult.innerHTML = '✅ <strong>Success!</strong> Sound played and notification displayed.<br><small>If you heard a beep sound and saw a green toast message in the bottom-right, notifications are working correctly!</small>';
+                    testResult.innerHTML = '✅ <strong>Success!</strong> Sound played and 3 sample toasts queued (one per notification type).<br><small>Watch the bottom-right corner — toasts appear one at a time with a 5s gap.</small>';
                 }, 600);
             } catch (error) {
                 testResult.style.background = '#f8d7da';
