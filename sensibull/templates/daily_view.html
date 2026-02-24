@@ -1617,15 +1617,30 @@
         let currentChartEvents = [];
         let selectedPositions = new Set(); // Track selected positions
         let allChartData = null; // Store loaded chart data
+        let visibleChartSymbols = []; // Symbols shown in filter dropdown (may exclude expired)
 
         function openChartModal(underlying, events) {
             currentChartUnderlying = underlying;
             currentChartEvents = events;
-            
-            // Extract unique symbols from events and initialize selection
-            const uniqueSymbols = [...new Set(events.map(e => e.symbol))].sort();
-            selectedPositions = new Set(uniqueSymbols); // All selected by default
-            
+
+            // Determine if expired positions should be hidden
+            const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // Extract unique symbols from events, optionally filtering out expired ones
+            const allSymbols = [...new Set(events.map(e => e.symbol))].sort();
+            const uniqueSymbols = excludeExpired
+                ? allSymbols.filter(sym => {
+                    const details = parseSymbolDetails(sym);
+                    // Keep symbol if expiry is today or in the future (or unknown)
+                    return !details.expiryDate || details.expiryDate >= today;
+                })
+                : allSymbols;
+
+            selectedPositions = new Set(uniqueSymbols); // All (non-expired) selected by default
+            visibleChartSymbols = uniqueSymbols; // Track for label count
+
             // Populate position filter dropdown
             populatePositionFilter(uniqueSymbols);
 
@@ -1772,18 +1787,79 @@
                     return a.strike - b.strike;
                 });
                 
-                // Create expiry header
+                // Create expiry header with "Select All for this expiry" checkbox
+                const expiryGroupId = `expiry-group-${expiry}`;
+
+                // --- Header row ---
                 const header = document.createElement('div');
                 header.style.fontWeight = 'bold';
                 header.style.fontSize = '12px';
-                header.style.color = '#666';
+                header.style.color = '#555';
                 header.style.padding = '8px';
                 header.style.borderBottom = '1px solid #e0e0e0';
                 header.style.marginTop = '8px';
-                header.style.background = '#f8f8f8';
-                header.textContent = `Expiry: ${group.expiryDisplay}`;
+                header.style.background = '#eef2ff';
+                header.style.display = 'flex';
+                header.style.alignItems = 'center';
+                header.style.gap = '8px';
+                header.style.userSelect = 'none';
+
+                // Select-all checkbox for this expiry
+                const expirySelectAllCb = document.createElement('input');
+                expirySelectAllCb.type = 'checkbox';
+                expirySelectAllCb.checked = true;
+                expirySelectAllCb.title = `Select / deselect all for ${group.expiryDisplay}`;
+                expirySelectAllCb.dataset.expiryGroup = expiryGroupId;
+                expirySelectAllCb.style.cursor = 'pointer';
+                expirySelectAllCb.style.accentColor = '#007bff';
+                expirySelectAllCb.style.flexShrink = '0';
+                expirySelectAllCb.onchange = function() {
+                    const checked = this.checked;
+                    const groupCheckboxes = optionsDiv.querySelectorAll(`input[data-expiry="${expiryGroupId}"]`);
+                    groupCheckboxes.forEach(cb => { cb.checked = checked; });
+                    handlePositionFilterChange();
+                };
+
+                // Stop click on checkbox propagating to header (which toggles collapse)
+                expirySelectAllCb.addEventListener('click', e => e.stopPropagation());
+
+                // Label
+                const expiryLabelSpan = document.createElement('span');
+                expiryLabelSpan.textContent = `Expiry: ${group.expiryDisplay}`;
+                expiryLabelSpan.style.flex = '1';
+
+                // Collapse/expand arrow
+                const arrow = document.createElement('span');
+                arrow.textContent = '▾';
+                arrow.style.fontSize = '14px';
+                arrow.style.transition = 'transform 0.2s';
+                arrow.style.display = 'inline-block';
+
+                header.appendChild(expirySelectAllCb);
+                header.appendChild(expiryLabelSpan);
+                header.appendChild(arrow);
                 optionsDiv.appendChild(header);
-                
+
+                // --- Collapsible container for position rows ---
+                const groupBody = document.createElement('div');
+                groupBody.dataset.expiryBody = expiryGroupId;
+                groupBody.style.overflow = 'hidden';
+                groupBody.style.transition = 'max-height 0.25s ease';
+                groupBody.style.maxHeight = '1000px'; // expanded by default
+
+                // Toggle collapse on header click
+                header.style.cursor = 'pointer';
+                header.addEventListener('click', () => {
+                    const collapsed = groupBody.style.maxHeight === '0px';
+                    if (collapsed) {
+                        groupBody.style.maxHeight = groupBody.scrollHeight + 'px';
+                        arrow.style.transform = 'rotate(0deg)';
+                    } else {
+                        groupBody.style.maxHeight = '0px';
+                        arrow.style.transform = 'rotate(-90deg)';
+                    }
+                });
+
                 // Create checkboxes for positions in this group
                 group.positions.forEach(p => {
                     const label = document.createElement('label');
@@ -1800,6 +1876,7 @@
                     checkbox.type = 'checkbox';
                     checkbox.checked = true;
                     checkbox.value = p.symbol;
+                    checkbox.dataset.expiry = expiryGroupId;
                     checkbox.style.marginRight = '8px';
                     checkbox.onchange = () => handlePositionFilterChange();
 
@@ -1814,8 +1891,10 @@
 
                     label.appendChild(checkbox);
                     label.appendChild(text);
-                    optionsDiv.appendChild(label);
+                    groupBody.appendChild(label);
                 });
+
+                optionsDiv.appendChild(groupBody);
             });
 
             updateFilterLabel();
@@ -1828,31 +1907,65 @@
 
         function toggleSelectAllPositions() {
             const selectAll = document.getElementById('chart-filter-select-all');
-            const checkboxes = document.querySelectorAll('#chart-filter-options input[type="checkbox"]');
-            
-            checkboxes.forEach(cb => {
-                cb.checked = selectAll.checked;
+            selectAll.indeterminate = false;
+            const checked = selectAll.checked;
+
+            const optionsDiv = document.getElementById('chart-filter-options');
+            // Toggle all position checkboxes (data-expiry) and all expiry-group checkboxes
+            optionsDiv.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.checked = checked;
+                cb.indeterminate = false;
             });
 
             handlePositionFilterChange();
         }
 
         function handlePositionFilterChange() {
-            const checkboxes = document.querySelectorAll('#chart-filter-options input[type="checkbox"]');
+            const optionsDiv = document.getElementById('chart-filter-options');
+            const checkboxes = optionsDiv.querySelectorAll('input[type="checkbox"][data-expiry]');
             selectedPositions.clear();
 
             let allChecked = true;
+            let anyChecked = false;
             checkboxes.forEach(cb => {
                 if (cb.checked) {
                     selectedPositions.add(cb.value);
+                    anyChecked = true;
                 } else {
                     allChecked = false;
                 }
             });
 
-            // Update "Select All" checkbox state
+            // Sync per-expiry group checkboxes (checked / indeterminate)
+            const expiryGroupCbs = optionsDiv.querySelectorAll('input[data-expiry-group]');
+            expiryGroupCbs.forEach(groupCb => {
+                const groupId = groupCb.dataset.expiryGroup;
+                const groupItems = optionsDiv.querySelectorAll(`input[data-expiry="${groupId}"]`);
+                const groupCheckedCount = [...groupItems].filter(cb => cb.checked).length;
+                if (groupCheckedCount === 0) {
+                    groupCb.checked = false;
+                    groupCb.indeterminate = false;
+                } else if (groupCheckedCount === groupItems.length) {
+                    groupCb.checked = true;
+                    groupCb.indeterminate = false;
+                } else {
+                    groupCb.checked = false;
+                    groupCb.indeterminate = true;
+                }
+            });
+
+            // Update global "Select All" checkbox state
             const selectAll = document.getElementById('chart-filter-select-all');
-            selectAll.checked = allChecked;
+            if (allChecked) {
+                selectAll.checked = true;
+                selectAll.indeterminate = false;
+            } else if (anyChecked) {
+                selectAll.checked = false;
+                selectAll.indeterminate = true;
+            } else {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            }
 
             updateFilterLabel();
             
@@ -1865,7 +1978,7 @@
         function updateFilterLabel() {
             const label = document.getElementById('chart-filter-label');
             const count = document.getElementById('chart-filter-count');
-            const total = currentChartEvents.length > 0 ? [...new Set(currentChartEvents.map(e => e.symbol))].length : 0;
+            const total = visibleChartSymbols.length;
             const selected = selectedPositions.size;
 
             if (selected === 0) {
@@ -2015,15 +2128,27 @@
             // Prepare data for simple line chart (we'll use Recharts LineChart for simplicity)
             // For candlestick, we'd need a more complex setup, but line chart works well for price action
 
-            const chartData = candles.map(c => ({
-                time: new Date(c.date).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-                timestamp: new Date(c.date).getTime(),
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close,
-                volume: c.volume
-            }));
+            // Determine if all candles span a single calendar day
+            const candleDates = candles.map(c => new Date(c.date));
+            const minDay = new Date(Math.min(...candleDates)).toDateString();
+            const maxDay = new Date(Math.max(...candleDates)).toDateString();
+            const isSingleDay = minDay === maxDay;
+
+            const chartData = candles.map(c => {
+                const d = new Date(c.date);
+                const timeLabel = isSingleDay
+                    ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
+                    : d.toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                return {
+                    time: timeLabel,
+                    timestamp: d.getTime(),
+                    open: c.open,
+                    high: c.high,
+                    low: c.low,
+                    close: c.close,
+                    volume: c.volume
+                };
+            });
 
             // Filter events based on selected positions
             const filteredEvents = events.filter(e => selectedPositions.has(e.symbol));
@@ -2231,7 +2356,7 @@
                 text.setAttribute('text-anchor', 'middle');
                 text.setAttribute('font-size', '11');
                 text.setAttribute('fill', '#666');
-                text.textContent = data[i].time.split(',')[0]; // Just date part
+                text.textContent = data[i].time; // time label (time-only for single day, date+time otherwise)
                 svg.appendChild(text);
             }
 
