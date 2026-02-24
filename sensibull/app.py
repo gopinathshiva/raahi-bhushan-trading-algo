@@ -71,6 +71,9 @@ LAST_AUTO_RESTART = None
 APP_START_TIME = None
 SCRAPER_AUTO_START_DELAY = 30  # seconds
 
+# Global flag to track if the daily master contract download failed
+MASTER_CONTRACT_DOWNLOAD_FAILED = False
+
 @app.template_filter('to_datetime')
 def to_datetime_filter(value):
     # Timestamps in DB are stored in ISO format with IST timezone (e.g., "2026-02-16T10:30:00+05:30")
@@ -111,6 +114,67 @@ def is_market_open():
     
     return start_time <= current_time <= end_time
 
+def _do_download_master_contract():
+    """Download Zerodha master contract and save to DB. Returns (success, message)."""
+    global MASTER_CONTRACT_DOWNLOAD_FAILED
+    try:
+        import requests
+        import csv
+        import io
+
+        url = 'https://api.kite.trade/instruments'
+        print(f"[MasterContract] Downloading from {url}...")
+
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+
+        csv_content = response.text
+        csv_reader = csv.DictReader(io.StringIO(csv_content))
+
+        conn = get_db()
+        c = conn.cursor()
+
+        c.execute("DELETE FROM master_contract")
+
+        instruments_count = 0
+        for row in csv_reader:
+            try:
+                instrument_token = int(row.get('instrument_token', 0))
+                if instrument_token == 0:
+                    continue
+
+                trading_symbol = row.get('tradingsymbol', '') or row.get('trading_symbol', '')
+                exchange = row.get('exchange', '')
+                name = row.get('name', '')
+                expiry = row.get('expiry', '')
+                strike = float(row.get('strike', 0) or 0)
+                lot_size = int(row.get('lot_size', 0) or 0)
+                instrument_type = row.get('instrument_type', '')
+
+                c.execute('''
+                    INSERT OR REPLACE INTO master_contract
+                    (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, now_ist()))
+
+                instruments_count += 1
+            except Exception as e:
+                print(f"[MasterContract] Error processing row: {e}")
+                continue
+
+        conn.commit()
+        conn.close()
+
+        print(f"[MasterContract] Successfully downloaded {instruments_count} instruments.")
+        MASTER_CONTRACT_DOWNLOAD_FAILED = False
+        return True, f"Successfully downloaded {instruments_count} instruments"
+
+    except Exception as e:
+        print(f"[MasterContract] Download failed: {e}")
+        MASTER_CONTRACT_DOWNLOAD_FAILED = True
+        return False, str(e)
+
+
 def restart_scraper_internal():
     print("Restarting scraper process...")
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -127,12 +191,33 @@ def restart_scraper_internal():
 def monitor_scraper():
     """Background thread to monitor scraper and restart if stuck"""
     global LAST_AUTO_RESTART
+
     print("Scraper monitor thread started.")
-    
+
+    # --- Daily master contract download (at startup, before scraper starts) ---
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        row = c.execute("SELECT MAX(last_updated) as last_dl FROM master_contract").fetchone()
+        conn.close()
+        last_dl = row['last_dl'] if row else None
+
+        today_str = now_ist().strftime('%Y-%m-%d')
+        already_downloaded_today = last_dl and last_dl[:10] == today_str
+
+        if already_downloaded_today:
+            print(f"[MasterContract] Already downloaded today ({today_str}), skipping.")
+        else:
+            print(f"[MasterContract] Not downloaded today, starting download...")
+            _do_download_master_contract()
+    except Exception as e:
+        print(f"[MasterContract] Error during startup download check: {e}")
+        MASTER_CONTRACT_DOWNLOAD_FAILED = True
+
     # Wait for auto-start delay before first check
     print(f"Waiting {SCRAPER_AUTO_START_DELAY} seconds before auto-starting scraper...")
     time.sleep(SCRAPER_AUTO_START_DELAY)
-    
+
     # Auto-start scraper on first run
     print("Auto-starting scraper...")
     restart_scraper_internal()
@@ -1776,72 +1861,23 @@ def fetch_historical_data():
 @login_required
 def download_master_contract():
     """Download Zerodha master contract and save to database"""
-    try:
-        import requests
-        import csv
-        import io
-        
-        # Download instruments CSV from Zerodha
-        url = 'https://api.kite.trade/instruments'
-        print(f"Downloading master contract from {url}...")
-        
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        
-        # Parse CSV
-        csv_content = response.text
-        csv_reader = csv.DictReader(io.StringIO(csv_content))
-        
+    success, message = _do_download_master_contract()
+    if success:
+        # Re-query count for the response
         conn = get_db()
         c = conn.cursor()
-        
-        # Clear existing data
-        c.execute("DELETE FROM master_contract")
-        
-        instruments_count = 0
-        for row in csv_reader:
-            try:
-                # Extract fields with safe defaults
-                instrument_token = int(row.get('instrument_token', 0))
-                if instrument_token == 0:
-                    continue
-                    
-                trading_symbol = row.get('tradingsymbol', '') or row.get('trading_symbol', '')
-                exchange = row.get('exchange', '')
-                name = row.get('name', '')
-                expiry = row.get('expiry', '')
-                strike = float(row.get('strike', 0) or 0)
-                lot_size = int(row.get('lot_size', 0) or 0)
-                instrument_type = row.get('instrument_type', '')
-                
-                # Insert into database
-                c.execute('''
-                    INSERT OR REPLACE INTO master_contract 
-                    (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, last_updated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, now_ist()))
-                
-                instruments_count += 1
-            except Exception as e:
-                print(f"Error processing row: {e}, row: {row}")
-                continue
-        
-        conn.commit()
+        count = c.execute("SELECT COUNT(*) FROM master_contract").fetchone()[0]
         conn.close()
-        
-        print(f"Successfully downloaded and saved {instruments_count} instruments")
-        return jsonify({
-            'success': True,
-            'message': f'Successfully downloaded {instruments_count} instruments',
-            'count': instruments_count
-        })
-        
-    except requests.exceptions.RequestException as e:
-        print(f"Network error downloading master contract: {e}")
-        return jsonify({'success': False, 'error': f'Network error: {str(e)}'}), 500
-    except Exception as e:
-        print(f"Error downloading master contract: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': True, 'message': message, 'count': count})
+    else:
+        return jsonify({'success': False, 'error': message}), 500
+
+
+@app.route('/api/master-contract-status')
+@login_required
+def master_contract_status():
+    """Return whether the daily master contract download failed at startup"""
+    return jsonify({'failed': MASTER_CONTRACT_DOWNLOAD_FAILED})
 
 @app.route('/api/scraper-status')
 @login_required

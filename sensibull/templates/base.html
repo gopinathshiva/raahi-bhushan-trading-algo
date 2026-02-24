@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Sensibull Tracker{% endblock %}</title>
+    <style>
+        /* ===================== RESET & BASE ===================== */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f4f4f9;
+            color: #333;
+        }
+
+        /* ===================== NAVBAR ===================== */
+        .nav {
+            background: #1a1a2e;
+            color: #fff;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        }
+
+        .nav-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            height: 56px;
+            max-width: 100%;
+        }
+
+        /* Brand */
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: #fff;
+            font-size: 1.1rem;
+            font-weight: 700;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .nav-brand:hover { color: #7eb8f7; }
+
+        /* Hamburger toggle — hidden on desktop */
+        .nav-toggle {
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            cursor: pointer;
+            padding: 6px;
+            border: none;
+            background: none;
+            flex-shrink: 0;
+        }
+
+        .nav-toggle span {
+            display: block;
+            width: 24px;
+            height: 2px;
+            background: #fff;
+            border-radius: 2px;
+            transition: all 0.25s;
+        }
+
+        /* Toggle → X animation */
+        .nav-toggle.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+        .nav-toggle.open span:nth-child(2) { opacity: 0; }
+        .nav-toggle.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+        /* Nav links container */
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .nav-links a {
+            display: block;
+            padding: 8px 12px;
+            color: #ccc;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .nav-links a:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+        .nav-links a.active {
+            background: #007bff;
+            color: #fff;
+        }
+
+        /* Divider between main links and user section */
+        .nav-divider {
+            width: 1px;
+            height: 28px;
+            background: rgba(255,255,255,0.2);
+            margin: 0 6px;
+            flex-shrink: 0;
+        }
+
+        .nav-user {
+            font-size: 0.85rem;
+            color: #aaa;
+            padding: 8px 10px;
+            white-space: nowrap;
+        }
+
+        .nav-logout {
+            color: #ff7b7b !important;
+        }
+
+        .nav-logout:hover {
+            background: rgba(255, 80, 80, 0.15) !important;
+            color: #ff9999 !important;
+        }
+
+        /* ===================== BREADCRUMB ===================== */
+        .breadcrumb-bar {
+            background: #fff;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 0 20px;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            list-style: none;
+            margin: 0;
+            padding: 10px 0;
+            font-size: 0.85rem;
+            flex-wrap: wrap;
+        }
+
+        .breadcrumb li { display: flex; align-items: center; }
+
+        .breadcrumb li + li::before {
+            content: "›";
+            margin: 0 8px;
+            color: #aaa;
+            font-size: 1.1em;
+            line-height: 1;
+        }
+
+        .breadcrumb a {
+            color: #007bff;
+            text-decoration: none;
+        }
+
+        .breadcrumb a:hover { text-decoration: underline; }
+
+        .breadcrumb .current {
+            color: #555;
+            font-weight: 600;
+        }
+
+        /* ===================== PAGE CONTENT ===================== */
+        .page-content {
+            /* Pages manage their own padding / width */
+        }
+
+        /* ===================== RESPONSIVE ===================== */
+        @media (max-width: 768px) {
+            .nav-toggle { display: flex; }
+
+            .nav-links {
+                display: none;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0;
+                position: absolute;
+                top: 56px;
+                left: 0;
+                right: 0;
+                background: #1a1a2e;
+                padding: 8px 12px 12px;
+                border-top: 1px solid rgba(255,255,255,0.1);
+                box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+            }
+
+            .nav-links.open { display: flex; }
+
+            .nav-links a {
+                padding: 10px 12px;
+                font-size: 1rem;
+            }
+
+            .nav-divider {
+                width: 100%;
+                height: 1px;
+                margin: 6px 0;
+            }
+
+            .nav-user {
+                padding: 10px 12px;
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+<!-- ===== NAVBAR ===== -->
+<nav class="nav">
+    <div class="nav-inner">
+        <a href="{{ url_for('index') }}" class="nav-brand">
+            📊 Sensibull Tracker
+        </a>
+
+        <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" onclick="toggleNav()">
+            <span></span><span></span><span></span>
+        </button>
+
+        <ul class="nav-links" id="navLinks">
+            <li>
+                <a href="{{ url_for('index') }}"
+                   class="{{ 'active' if request.endpoint == 'index' else '' }}">
+                    🏠 Dashboard
+                </a>
+            </li>
+            <li>
+                <a href="{{ url_for('manage_profiles') }}"
+                   class="{{ 'active' if request.endpoint == 'manage_profiles' else '' }}">
+                    👤 Profiles
+                </a>
+            </li>
+            <li>
+                <a href="{{ url_for('historical_data') }}"
+                   class="{{ 'active' if request.endpoint == 'historical_data' else '' }}">
+                    📈 Historical Data
+                </a>
+            </li>
+            <li>
+                <a href="{{ url_for('export_page') }}"
+                   class="{{ 'active' if request.endpoint == 'export_page' else '' }}">
+                    ⬇ Export
+                </a>
+            </li>
+            <li>
+                <a href="{{ url_for('import_page') }}"
+                   class="{{ 'active' if request.endpoint == 'import_page' else '' }}">
+                    ⬆ Import
+                </a>
+            </li>
+
+            <li class="nav-divider" role="separator"></li>
+
+            {% if current_user.is_authenticated %}
+            <li>
+                <span class="nav-user">👤 {{ current_user.username }}</span>
+            </li>
+            <li>
+                <a href="{{ url_for('logout') }}" class="nav-logout">🚪 Logout</a>
+            </li>
+            {% endif %}
+        </ul>
+    </div>
+</nav>
+
+<!-- ===== BREADCRUMB ===== -->
+{% block breadcrumb_bar %}
+<div class="breadcrumb-bar">
+    <ol class="breadcrumb">
+        <li><a href="{{ url_for('index') }}">Dashboard</a></li>
+        {% block breadcrumb %}{% endblock %}
+    </ol>
+</div>
+{% endblock %}
+
+<!-- ===== MAIN CONTENT ===== -->
+<div class="page-content">
+    {% block content %}{% endblock %}
+</div>
+
+<script>
+    function toggleNav() {
+        const toggle = document.getElementById('navToggle');
+        const links  = document.getElementById('navLinks');
+        toggle.classList.toggle('open');
+        links.classList.toggle('open');
+    }
+
+    // Close menu when a link is clicked (mobile)
+    document.querySelectorAll('.nav-links a').forEach(function(a) {
+        a.addEventListener('click', function() {
+            document.getElementById('navToggle').classList.remove('open');
+            document.getElementById('navLinks').classList.remove('open');
+        });
+    });
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

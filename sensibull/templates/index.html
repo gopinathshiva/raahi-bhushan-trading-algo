@@ -1,285 +1,116 @@
-<!doctype html>
-<html lang="en">
+{% extends 'base.html' %}
 
-<head>
-    <meta charset="utf-8">
-    <title>Sensibull Position Tracker</title>
-    <style>
-        body {
-            font-family: sans-serif;
-            padding: 0;
-            margin: 0;
-            background: #f4f4f9;
-        }
+{% block title %}Dashboard — Sensibull Tracker{% endblock %}
 
-        /* Use more of the screen on laptops / high-res displays */
-        .container {
-            width: 100%;
-            margin: 0;
-            padding: 20px;
-            box-sizing: border-box;
-        }
+{% block breadcrumb %}
+<li><span class="current">Dashboard</span></li>
+{% endblock %}
 
-        @media (max-width: 600px) {
-            .container {
-                padding: 12px;
-            }
-        }
+{% block head %}
+<style>
+    .container {
+        width: 100%;
+        margin: 0;
+        padding: 20px;
+        box-sizing: border-box;
+    }
 
-        h1 {
-            color: #333;
-        }
+    @media (max-width: 600px) {
+        .container { padding: 12px; }
+    }
 
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            background: #fff;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        }
+    h1 { color: #333; }
 
-        th,
-        td {
-            padding: 12px;
-            text-align: center;
-            border-bottom: 1px solid #ddd;
-        }
+    table {
+        border-collapse: collapse;
+        width: 100%;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
 
-        th {
-            background: #eee;
-        }
+    th, td {
+        padding: 12px;
+        text-align: center;
+        border-bottom: 1px solid #ddd;
+    }
 
-        tr:hover {
-            background: #f1f1f1;
-        }
+    th { background: #eee; }
+    tr:hover { background: #f1f1f1; }
 
-        a {
-            text-decoration: none;
-            color: #007bff;
-            font-weight: bold;
-        }
+    a {
+        text-decoration: none;
+        color: #007bff;
+        font-weight: bold;
+    }
 
-        a:hover {
-            text-decoration: underline;
-        }
+    a:hover { text-decoration: underline; }
 
-        .zero {
-            color: #ccc;
-            font-weight: normal;
-        }
-    </style>
-</head>
+    .zero { color: #ccc; font-weight: normal; }
 
-<body>
-    <div class="container">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-            <h1>Sensibull Tracker Dashboard</h1>
-        </div>
-        <div>
-            <a href="/manage-profiles" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; font-weight: 500; display: inline-block;">
-                ➕ Manage Profiles
-            </a>
-        </div>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div style="visibility: hidden;">
-            <!-- Spacer for flex alignment -->
-            {% if last_updated %}
-            <div style="color: #666; font-size: 0.9em; margin-top: -10px;">
-                Last Updated: {{ last_updated | to_datetime | attr('strftime')('%H:%M:%S') }}
-                {% if scraper_error %}
-                <span style="color: red; font-weight: bold; margin-left: 10px;">
-                    ⚠ {{ scraper_error }}
-                </span>
-                {% else %}
-                <span style="color: green; font-weight: bold; margin-left: 10px;">
-                    Scrapper Running
-                </span>
-                {% endif %}
-            </div>
-            {% endif %}
-        </div>
+    .toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #333;
+        color: white;
+        padding: 15px 20px;
+        border-radius: 4px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        display: none;
+        z-index: 2000;
+        max-width: 360px;
+        font-size: 14px;
+    }
+
+    .toast.show {
+        display: block;
+        animation: toastSlideIn 0.3s ease-out;
+    }
+
+    .toast.error  { background: #dc3545; }
+    .toast.success { background: #28a745; }
+
+    @keyframes toastSlideIn {
+        from { transform: translateX(400px); opacity: 0; }
+        to   { transform: translateX(0);    opacity: 1; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <h1 style="margin: 0;">Sensibull Tracker Dashboard</h1>
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <button onclick="window.location.href='/historical_data'"
-                style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Historical
-                Data</button>
             <button onclick="fetchScraperStatus()"
-                style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Scraper
-                Status</button>
+                style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 15px;">
+                Scraper Status
+            </button>
             <button onclick="downloadMasterContract()"
-                style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Download
-                Master Contract</button>
+                style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 15px;">
+                Download Master Contract
+            </button>
             <button onclick="restartApp()"
-                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Restart
-                Scraper</button>
+                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 15px;">
+                Restart Scraper
+            </button>
         </div>
     </div>
-    <script>
-        function fetchScraperStatus() {
-            fetch('/api/scraper-status')
-                .then(response => response.json())
-                .then(data => {
-                    showScraperStatusModal(data);
-                })
-                .catch(err => {
-                    alert("Error fetching scraper status: " + err);
-                });
-        }
 
-        function showScraperStatusModal(status) {
-            const modalHTML = `
-                <div id="statusModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
-                    <div style="background: white; padding: 30px; border-radius: 10px; max-width: 600px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                        <h2 style="margin-top: 0; color: #333;">Scraper Status</h2>
-                        <div style="margin: 20px 0;">
-                            <div style="display: flex; align-items: center; margin-bottom: 15px;">
-                                <strong style="min-width: 180px;">Status:</strong>
-                                <span style="padding: 5px 15px; border-radius: 5px; background: ${status.running ? '#28a745' : '#dc3545'}; color: white; font-weight: bold;">
-                                    ${status.running ? '✓ Running' : '✗ Not Running'}
-                                </span>
-                            </div>
-                            <div style="display: flex; align-items: center; margin-bottom: 15px;">
-                                <strong style="min-width: 180px;">Market:</strong>
-                                <span style="padding: 5px 15px; border-radius: 5px; background: ${status.market_open ? '#28a745' : '#ffc107'}; color: ${status.market_open ? 'white' : '#000'}; font-weight: bold;">
-                                    ${status.market_open ? 'Open' : 'Closed'}
-                                </span>
-                            </div>
-                            <div style="display: flex; align-items: start; margin-bottom: 15px;">
-                                <strong style="min-width: 180px;">Status Text:</strong>
-                                <span style="color: #555;">${status.status_text}</span>
-                            </div>
-                            ${status.last_updated ? `
-                                <div style="display: flex; align-items: start; margin-bottom: 15px;">
-                                    <strong style="min-width: 180px;">Last Updated:</strong>
-                                    <span style="color: #555;">${new Date(status.last_updated).toLocaleString()}</span>
-                                </div>
-                            ` : ''}
-                            ${status.time_since_update !== null && status.time_since_update !== undefined ? `
-                                <div style="display: flex; align-items: start; margin-bottom: 15px;">
-                                    <strong style="min-width: 180px;">Time Since Update:</strong>
-                                    <span style="color: #555;">${formatTimeDiff(status.time_since_update)}</span>
-                                </div>
-                            ` : ''}
-                        </div>
-                        <div style="margin-top: 20px; text-align: right;">
-                            <button onclick="closeStatusModal()" 
-                                style="padding: 10px 30px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">
-                                Close
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            document.body.insertAdjacentHTML('beforeend', modalHTML);
-        }
+    {% if last_updated %}
+    <div style="color: #666; font-size: 0.9em; margin-top: 8px;">
+        Last Updated: {{ last_updated | to_datetime | attr('strftime')('%H:%M:%S') }}
+        {% if scraper_error %}
+        <span style="color: red; font-weight: bold; margin-left: 10px;">⚠ {{ scraper_error }}</span>
+        {% else %}
+        <span style="color: green; font-weight: bold; margin-left: 10px;">● Scraper Running</span>
+        {% endif %}
+    </div>
+    {% endif %}
 
-        function formatTimeDiff(seconds) {
-            if (seconds < 60) {
-                return Math.floor(seconds) + ' seconds';
-            } else if (seconds < 3600) {
-                return Math.floor(seconds / 60) + ' minutes';
-            } else {
-                const hours = Math.floor(seconds / 3600);
-                const mins = Math.floor((seconds % 3600) / 60);
-                return hours + ' hours ' + mins + ' minutes';
-            }
-        }
+    <div id="toast" class="toast"></div>
 
-        function closeStatusModal() {
-            const modal = document.getElementById('statusModal');
-            if (modal) {
-                modal.remove();
-            }
-        }
-
-        function downloadMasterContract() {
-            if (confirm("Download Zerodha Master Contract? This will update the instrument database.")) {
-                // Show loading state
-                const btn = event.target;
-                const originalText = btn.innerHTML;
-                btn.disabled = true;
-                btn.innerHTML = 'Downloading...';
-                btn.style.background = '#6c757d';
-                
-                fetch('/api/download_master_contract', { method: 'POST' })
-                    .then(response => response.json())
-                    .then(data => {
-                        btn.disabled = false;
-                        btn.innerHTML = originalText;
-                        btn.style.background = '#28a745';
-                        
-                        if (data.success) {
-                            alert(data.message + '\n\nTotal instruments: ' + data.count);
-                        } else {
-                            alert('Error: ' + (data.error || 'Unknown error'));
-                        }
-                    })
-                    .catch(err => {
-                        btn.disabled = false;
-                        btn.innerHTML = originalText;
-                        btn.style.background = '#28a745';
-                        alert("Error downloading master contract: " + err);
-                    });
-            }
-        }
-
-        function restartApp() {
-            if (confirm("Are you sure you want to restart the scraper?")) {
-                fetch('/restart', { method: 'POST' })
-                    .then(response => response.text())
-                    .then(text => {
-                        alert(text);
-                        setTimeout(() => location.reload(), 3000);
-                    })
-                    .catch(err => alert("Error restarting: " + err));
-            }
-        }
-
-        // Load notification counts for all profiles
-        async function loadAllNotificationCounts() {
-            const badges = document.querySelectorAll('.notification-badge');
-            badges.forEach(async (badge) => {
-                const slug = badge.dataset.profileSlug;
-                try {
-                    const response = await fetch(`/api/notifications/unread_count?profile_slug=${slug}`);
-                    const data = await response.json();
-                    if (data.success && data.unread_count > 0) {
-                        badge.textContent = data.unread_count > 99 ? '99+' : data.unread_count;
-                        badge.style.display = 'block';
-                    }
-                } catch (error) {
-                    console.error(`Error loading notification count for ${slug}:`, error);
-                }
-            });
-        }
-
-        // Load notification counts on page load
-        document.addEventListener('DOMContentLoaded', loadAllNotificationCounts);
-
-        // Auto-refresh every 60 seconds
-        setInterval(() => {
-            console.log("Auto-refreshing dashboard...");
-            location.reload();
-        }, 60000);
-
-        function deleteDate(date) {
-            if (confirm("Are you sure you want to delete ALL data for " + date + "? This cannot be undone.")) {
-                fetch('/delete_date/' + date, { method: 'DELETE' })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            alert(data.message);
-                            location.reload();
-                        } else {
-                            alert("Error: " + (data.error || "Unknown error"));
-                        }
-                    })
-                    .catch(err => alert("Error deleting: " + err));
-            }
-        }
-    </script>
-    <div style="overflow-x: auto; width: 100%;">
+    <div style="overflow-x: auto; width: 100%; margin-top: 20px;">
         <table>
             <thead>
                 <tr>
@@ -297,14 +128,13 @@
             <tbody>
                 {% for profile in profiles %}
                 <tr>
-                    <td
-                        style="text-align: left; font-weight: bold; position: sticky; left: 0; background: #fff; z-index: 1; border-right: 2px solid #ddd;">
+                    <td style="text-align: left; font-weight: bold; position: sticky; left: 0; background: #fff; z-index: 1; border-right: 2px solid #ddd;">
                         {{ profile.name }}
                         <a href="/notifications/{{ profile.slug }}" style="margin-left: 8px; text-decoration: none; position: relative; display: inline-block; vertical-align: middle;">
                             <span style="font-size: 1.2em;">🔔</span>
-                            <span class="notification-badge" data-profile-slug="{{ profile.slug }}" 
-                                  style="display: none; position: absolute; top: -8px; right: -8px; background: #dc3545; color: white; 
-                                         border-radius: 10px; padding: 2px 6px; font-size: 0.7em; font-weight: bold; min-width: 16px; 
+                            <span class="notification-badge" data-profile-slug="{{ profile.slug }}"
+                                  style="display: none; position: absolute; top: -8px; right: -8px; background: #dc3545; color: white;
+                                         border-radius: 10px; padding: 2px 6px; font-size: 0.7em; font-weight: bold; min-width: 16px;
                                          text-align: center; line-height: 1;">0</span>
                         </a>
                     </td>
@@ -312,10 +142,8 @@
                     <td>
                         {% set val = matrix.get((profile.id, date), {'count': 0, 'pnl': 0}) %}
                         {% if val.count > 0 %}
-                        <a href="{{ url_for('daily_view', slug=profile.slug, date=date) }}" target="_blank">{{ val.count
-                            }}</a>
-                        <div
-                            style="font-size: 0.85em; margin-top: 4px; font-weight: bold; color: {{ '#28a745' if val.pnl > 0 else '#dc3545' if val.pnl < 0 else '#666' }};">
+                        <a href="{{ url_for('daily_view', slug=profile.slug, date=date) }}" target="_blank">{{ val.count }}</a>
+                        <div style="font-size: 0.85em; margin-top: 4px; font-weight: bold; color: {{ '#28a745' if val.pnl > 0 else '#dc3545' if val.pnl < 0 else '#666' }};">
                             {{ "{:,.1f}".format(val.pnl) }}
                         </div>
                         {% else %}
@@ -328,7 +156,155 @@
             </tbody>
         </table>
     </div>
-    </div>
-</body>
+</div>
+{% endblock %}
 
-</html>
+{% block scripts %}
+<script>
+    function fetchScraperStatus() {
+        fetch('/api/scraper-status')
+            .then(r => r.json())
+            .then(data => showScraperStatusModal(data))
+            .catch(err => alert("Error fetching scraper status: " + err));
+    }
+
+    function showScraperStatusModal(status) {
+        const modalHTML = `
+            <div id="statusModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;">
+                <div style="background:white;padding:30px;border-radius:10px;max-width:600px;width:90%;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+                    <h2 style="margin-top:0;color:#333;">Scraper Status</h2>
+                    <div style="margin:20px 0;">
+                        <div style="display:flex;align-items:center;margin-bottom:15px;">
+                            <strong style="min-width:180px;">Status:</strong>
+                            <span style="padding:5px 15px;border-radius:5px;background:${status.running?'#28a745':'#dc3545'};color:white;font-weight:bold;">
+                                ${status.running ? '✓ Running' : '✗ Not Running'}
+                            </span>
+                        </div>
+                        <div style="display:flex;align-items:center;margin-bottom:15px;">
+                            <strong style="min-width:180px;">Market:</strong>
+                            <span style="padding:5px 15px;border-radius:5px;background:${status.market_open?'#28a745':'#ffc107'};color:${status.market_open?'white':'#000'};font-weight:bold;">
+                                ${status.market_open ? 'Open' : 'Closed'}
+                            </span>
+                        </div>
+                        <div style="display:flex;align-items:start;margin-bottom:15px;">
+                            <strong style="min-width:180px;">Status Text:</strong>
+                            <span style="color:#555;">${status.status_text}</span>
+                        </div>
+                        ${status.last_updated ? `
+                        <div style="display:flex;align-items:start;margin-bottom:15px;">
+                            <strong style="min-width:180px;">Last Updated:</strong>
+                            <span style="color:#555;">${new Date(status.last_updated).toLocaleString()}</span>
+                        </div>` : ''}
+                        ${status.time_since_update !== null && status.time_since_update !== undefined ? `
+                        <div style="display:flex;align-items:start;margin-bottom:15px;">
+                            <strong style="min-width:180px;">Time Since Update:</strong>
+                            <span style="color:#555;">${formatTimeDiff(status.time_since_update)}</span>
+                        </div>` : ''}
+                    </div>
+                    <div style="margin-top:20px;text-align:right;">
+                        <button onclick="closeStatusModal()" style="padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px;cursor:pointer;font-size:16px;">Close</button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+    }
+
+    function formatTimeDiff(seconds) {
+        if (seconds < 60) return Math.floor(seconds) + ' seconds';
+        if (seconds < 3600) return Math.floor(seconds / 60) + ' minutes';
+        const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+        return h + ' hours ' + m + ' minutes';
+    }
+
+    function closeStatusModal() {
+        const modal = document.getElementById('statusModal');
+        if (modal) modal.remove();
+    }
+
+    function downloadMasterContract() {
+        if (confirm("Download Zerodha Master Contract? This will update the instrument database.")) {
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = 'Downloading...';
+            btn.style.background = '#6c757d';
+
+            fetch('/api/download_master_contract', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                    btn.style.background = '#28a745';
+                    if (data.success) {
+                        alert(data.message + '\n\nTotal instruments: ' + data.count);
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                    btn.style.background = '#28a745';
+                    alert("Error downloading master contract: " + err);
+                });
+        }
+    }
+
+    function restartApp() {
+        if (confirm("Are you sure you want to restart the scraper?")) {
+            fetch('/restart', { method: 'POST' })
+                .then(r => r.text())
+                .then(text => { alert(text); setTimeout(() => location.reload(), 3000); })
+                .catch(err => alert("Error restarting: " + err));
+        }
+    }
+
+    async function loadAllNotificationCounts() {
+        document.querySelectorAll('.notification-badge').forEach(async badge => {
+            const slug = badge.dataset.profileSlug;
+            try {
+                const r = await fetch(`/api/notifications/unread_count?profile_slug=${slug}`);
+                const data = await r.json();
+                if (data.success && data.unread_count > 0) {
+                    badge.textContent = data.unread_count > 99 ? '99+' : data.unread_count;
+                    badge.style.display = 'block';
+                }
+            } catch (e) { /* ignore */ }
+        });
+    }
+
+    function showToast(message, type = 'error') {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.className = `toast ${type} show`;
+        setTimeout(() => toast.classList.remove('show'), 6000);
+    }
+
+    async function checkMasterContractStatus() {
+        try {
+            const r = await fetch('/api/master-contract-status');
+            const data = await r.json();
+            if (data.failed) showToast('⚠ Failed to download Zerodha Master Contract', 'error');
+        } catch (e) { /* ignore */ }
+    }
+
+    function deleteDate(date) {
+        if (confirm("Are you sure you want to delete ALL data for " + date + "? This cannot be undone.")) {
+            fetch('/delete_date/' + date, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) { alert(data.message); location.reload(); }
+                    else alert("Error: " + (data.error || "Unknown error"));
+                })
+                .catch(err => alert("Error deleting: " + err));
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadAllNotificationCounts();
+        checkMasterContractStatus();
+    });
+
+    setInterval(() => { location.reload(); }, 60000);
+</script>
+{% endblock %}
