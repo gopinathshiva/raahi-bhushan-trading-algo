@@ -2691,6 +2691,51 @@
             }
         }
 
+        // Build a human-readable toast message from a single notification object.
+        // Returns { message, toastType } so the caller can apply the right colour.
+        function buildNotificationToast(notif) {
+            const data = notif.notification_data || {};
+            const type = notif.notification_type;
+            const symbol = data.symbol || 'Unknown';
+            const product = data.product ? ` (${data.product})` : '';
+
+            let typeLabel = '';
+            let detail = '';
+            let toastType = type;
+
+            if (type === 'new_position') {
+                typeLabel = '🟢 New Position';
+                const qty = data.quantity || 0;
+                detail = `${symbol}${product} | Qty: ${qty}`;
+                toastType = 'success';
+            } else if (type === 'exited_position') {
+                typeLabel = '🔴 Exited';
+                const exitPnl = parseFloat(data.exit_pnl || 0);
+                const pnlStr = exitPnl !== 0
+                    ? ` | P&L: ₹${exitPnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : '';
+                detail = `${symbol}${product}${pnlStr}`;
+                toastType = 'error';
+            } else if (type === 'modified_position' || type === 'quantity_change') {
+                typeLabel = '🟡 Modified';
+                const oldQty = data.old_quantity || 0;
+                const newQty = data.quantity || 0;
+                const diff = newQty - oldQty;
+                const sign = diff > 0 ? '+' : '';
+                detail = `${symbol}${product} | Qty: ${oldQty} → ${newQty} (${sign}${diff})`;
+                toastType = 'info';
+            } else {
+                typeLabel = '🔔 Notification';
+                detail = notif.message || type;
+                toastType = 'success';
+            }
+
+            return {
+                message: `<strong>[${PROFILE_SLUG}]</strong> ${typeLabel}<br><small>${detail}</small>`,
+                toastType
+            };
+        }
+
         // Load unread notification count with sound alert
         async function loadUnreadCount() {
             try {
@@ -2698,16 +2743,42 @@
                 const data = await response.json();
                 if (data.success) {
                     const currentCount = data.unread_count;
-                    
-                    // Play sound if count increased
+
+                    // Play sound and show detailed toasts if count increased
                     if (lastNotificationCount > 0 && currentCount > lastNotificationCount) {
                         playNotificationSound();
                         const newCount = currentCount - lastNotificationCount;
-                        showToast(`🔔 ${newCount} new notification(s)!`, 'success');
+
+                        try {
+                            const notifsResponse = await fetch(`/api/notifications?profile_slug=${PROFILE_SLUG}`);
+                            const notifsData = await notifsResponse.json();
+
+                            if (notifsData.success && notifsData.notifications.length > 0) {
+                                // API returns newest first; take the first `newCount` unread ones
+                                const newNotifs = notifsData.notifications
+                                    .filter(n => !n.is_read)
+                                    .slice(0, newCount);
+
+                                if (newNotifs.length > 0) {
+                                    newNotifs.forEach(notif => {
+                                        const { message, toastType } = buildNotificationToast(notif);
+                                        showToast(message, toastType);
+                                    });
+                                } else {
+                                    // Already marked read before we could fetch details
+                                    showToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new position change(s) — check Notifications tab`, 'success');
+                                }
+                            } else {
+                                showToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new position change(s) — could not load details`, 'success');
+                            }
+                        } catch (fetchErr) {
+                            console.error('Error fetching notification details:', fetchErr);
+                            showToast(`⚠️ <strong>[${PROFILE_SLUG}]</strong> ${newCount} new position change(s) — tap to refresh`, 'error');
+                        }
                     }
-                    
+
                     lastNotificationCount = currentCount;
-                    
+
                     if (currentCount > 0) {
                         const badge = document.getElementById('notification-badge');
                         if (badge) {
@@ -2862,7 +2933,7 @@
                 z-index: 10000;
                 animation: slideIn 0.3s;
             `;
-            toast.textContent = message;
+            toast.innerHTML = message;
             document.body.appendChild(toast);
 
             setTimeout(() => {

@@ -599,19 +599,20 @@
                                     enqueueToast(message, toastType);
                                 });
                             } else {
-                                // Fallback: count-only toast
+                                // Notifications were marked read before we could fetch details
                                 playNotificationSound();
-                                enqueueToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new notification(s)`, 'success');
+                                enqueueToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new position change(s) — check Notifications tab`, 'success');
                             }
                         } else {
-                            // Fallback if fetch fails
+                            // API returned failure or empty list unexpectedly
                             playNotificationSound();
-                            enqueueToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new notification(s)`, 'success');
+                            enqueueToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new position change(s) — could not load details`, 'success');
                         }
                     } catch (fetchErr) {
+                        // Network or parse error while fetching notification details
                         console.error('Error fetching notification details:', fetchErr);
                         playNotificationSound();
-                        enqueueToast(`🔔 <strong>[${PROFILE_SLUG}]</strong> ${newCount} new notification(s)`, 'success');
+                        enqueueToast(`⚠️ <strong>[${PROFILE_SLUG}]</strong> ${newCount} new position change(s) — tap to refresh`, 'error');
                     }
 
                     // Reload notifications list if tab is visible
