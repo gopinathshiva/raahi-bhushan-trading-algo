@@ -902,7 +902,7 @@ def _compute_exit_metrics(before_trade, closed_qty=None, exit_price_override=Non
         if booked_pnl != 0:
             return booked_pnl, exit_price
 
-    qty_for_pnl = closed_qty if closed_qty is not None else qty
+    qty_for_pnl = abs(closed_qty if closed_qty is not None else qty)
 
     if avg_price and exit_price and qty_for_pnl:
         if qty > 0:
@@ -1210,12 +1210,31 @@ def api_profile_all_underlyings(slug):
     # Sort events by timestamp (latest first) for each underlying
     for underlying in underlying_events:
         underlying_events[underlying].sort(key=lambda e: e['timestamp'], reverse=True)
-    
+
     # Sort underlyings alphabetically
     sorted_underlyings = sorted(underlyings_seen)
-    
+
+    # Bulk-lookup lot sizes from master_contract and inject into each event
+    all_symbols = set(
+        evt['symbol']
+        for evts in underlying_events.values()
+        for evt in evts
+    )
+    lot_size_map = {}
+    if all_symbols:
+        placeholders = ','.join('?' * len(all_symbols))
+        rows = c.execute(
+            f"SELECT trading_symbol, lot_size FROM master_contract WHERE trading_symbol IN ({placeholders})",
+            list(all_symbols),
+        ).fetchall()
+        for row in rows:
+            lot_size_map[row['trading_symbol']] = row['lot_size']
+    for evts in underlying_events.values():
+        for evt in evts:
+            evt['lot_size'] = lot_size_map.get(evt['symbol'], 0)
+
     conn.close()
-    
+
     return jsonify({
         'profile': {'id': profile['id'], 'slug': profile['slug'], 'name': profile['name']},
         'underlyings': sorted_underlyings,

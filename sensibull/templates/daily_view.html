@@ -1297,13 +1297,24 @@
                 headerDiv.className = 'underlying-header';
                 headerDiv.onclick = () => toggleUnderlyingGroup(underlying);
 
-                const underlyingStats = computeGroupStats(eventList);
+                const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                const visibleEventList = excludeExpired
+                    ? eventList.filter(e => {
+                        const expiryDate = getExpiryDateFromSymbolEnhanced(e.symbol || '');
+                        return !expiryDate || expiryDate >= today;
+                    })
+                    : eventList;
+
+                const underlyingStats = computeGroupStats(visibleEventList);
                 const titleSpan = document.createElement('span');
                 titleSpan.style.display = 'flex';
                 titleSpan.style.alignItems = 'center';
                 titleSpan.style.flexWrap = 'wrap';
                 titleSpan.style.gap = '4px';
-                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span><span class="underlying-count">(${eventList.length} events)</span>${renderStatsBadge(underlyingStats, false)}`;
+                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span><span class="underlying-count">(${visibleEventList.length} events)</span>${renderStatsBadge(underlyingStats, false)}`;
 
                 const buttonsDiv = document.createElement('div');
                 buttonsDiv.style.display = 'flex';
@@ -1359,10 +1370,6 @@
                 contentDiv.id = `underlying-content-${underlying}`;
 
                 // Create expiry sections
-                const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-
                 let expiryHtml = '';
                 sortedExpiryKeys.forEach(expiryKey => {
                     const expiryData = eventsByExpiry[expiryKey];
@@ -2561,7 +2568,7 @@
             svg.setAttribute('height', height);
             svg.style.background = '#fff';
 
-            const chartPadding = { top: 40, right: 60, bottom: 60, left: 60 };
+            const chartPadding = { top: 80, right: 80, bottom: 60, left: 60 };
             const chartWidth = width - chartPadding.left - chartPadding.right;
             const chartHeight = height - chartPadding.top - chartPadding.bottom;
 
@@ -2622,6 +2629,182 @@
                 svg.appendChild(body);
             });
 
+            // ── Marker label helpers ─────────────────────────────────────────
+            function getMarkerLabelInfo(marker) {
+                const evt = marker.event;
+                const sym = evt.symbol || '';
+                const lotSize = evt.lot_size || 0;
+                const type = marker.type;
+                const qtyDiff = evt.quantity_diff || 0;
+
+                // --- sign & qty of the fill transaction ---
+                let sign = '+';
+                let fillQty = 0;
+                if (type === 'ENTERED') {
+                    if (evt.implied_fill_side === 'BUY') sign = '+';
+                    else if (evt.implied_fill_side === 'SELL') sign = '-';
+                    else sign = (evt.after_quantity >= 0) ? '+' : '-';
+                    fillQty = Math.abs(evt.after_quantity || 0);
+                } else if (type === 'MODIFIED') {
+                    if (evt.implied_fill_side === 'BUY') sign = '+';
+                    else if (evt.implied_fill_side === 'SELL') sign = '-';
+                    else sign = (qtyDiff >= 0) ? '+' : '-';
+                    fillQty = Math.abs(evt.implied_fill_qty || Math.abs(qtyDiff));
+                } else { // EXITED
+                    if (evt.implied_fill_side === 'BUY') sign = '+';
+                    else if (evt.implied_fill_side === 'SELL') sign = '-';
+                    else sign = (evt.before_quantity > 0) ? '-' : '+';
+                    fillQty = Math.abs(evt.before_quantity || 0);
+                }
+                const lots = lotSize > 0 ? (fillQty / lotSize) : fillQty;
+                const lotsStr = `${sign}${lots % 1 === 0 ? lots : lots.toFixed(1)}L`;
+
+                // --- OTM/ITM distance ---
+                const strike = getStrikePrice(sym);
+                const optType = getOptionType(sym);
+                const spot = marker.price;
+                let distStr = '';
+                if (strike !== null && optType && spot) {
+                    const dist = Math.abs(spot - strike);
+                    const distPct = (dist / spot * 100).toFixed(1);
+                    let label;
+                    if (optType === 'CE') label = (spot < strike) ? 'OTM' : 'ITM';
+                    else                  label = (spot > strike) ? 'OTM' : 'ITM';
+                    distStr = `${label} ${dist.toFixed(1)} (${distPct}%)`;
+                }
+
+                // --- DTE ---
+                let dteStr = '';
+                const expiryDate = getExpiryDateFromSymbolEnhanced(sym);
+                if (expiryDate) {
+                    const eventDay = new Date(evt.timestamp);
+                    eventDay.setHours(0, 0, 0, 0);
+                    const expDay = new Date(expiryDate);
+                    expDay.setHours(0, 0, 0, 0);
+                    const dte = Math.max(0, Math.ceil((expDay - eventDay) / 86400000));
+                    dteStr = `D${dte}`;
+                }
+
+                // --- Premium ---
+                let premium = 0;
+                const isReduce = (type === 'MODIFIED' && qtyDiff < 0) || type === 'EXITED';
+                if (isReduce) {
+                    premium = evt.exit_price || evt.implied_fill_price || 0;
+                } else {
+                    premium = evt.implied_fill_price || evt.after_average_price || 0;
+                }
+                const premStr = premium ? `₹${premium.toFixed(2)}` : '';
+
+                // --- P&L with % (only for exits / partial exits) ---
+                let pnlStr = '';
+                if (isReduce && evt.exit_pnl) {
+                    const pnl = evt.exit_pnl;
+                    const closedQty = (type === 'EXITED')
+                        ? Math.abs(evt.before_quantity || 0)
+                        : Math.abs(evt.quantity_diff || 0);
+                    const costBasis = (evt.before_average_price || 0) * closedQty;
+                    const pctStr = costBasis !== 0
+                        ? ` (${pnl >= 0 ? '+' : ''}${(pnl / Math.abs(costBasis) * 100).toFixed(1)}%)`
+                        : '';
+                    pnlStr = `P&L ${pnl >= 0 ? '+' : ''}₹${pnl.toFixed(0)}${pctStr}`;
+                }
+
+                // Two display lines (symbol always first so stacked labels are identifiable)
+                const parts = [sym, lotsStr];
+                if (distStr) parts.push(distStr);
+                if (dteStr) parts.push(dteStr);
+                if (premStr) parts.push(premStr);
+                return { line1: parts.join(' | '), line2: pnlStr, isReduce };
+            }
+
+            // Draw a label box with an optional P&L second line and a dashed
+            // connector to the marker circle.  labelPlacements is mutated in-place
+            // to record the bounding box of each placed label (collision avoidance).
+            function drawLabel(svg, x, markerY, labelInfo, color, labelPlacements, chartBounds) {
+                const FONT = 10;
+                const LINE_H = 14;
+                const PAD = 4;
+                const CHAR_W = 6.2;  // monospace estimate
+                const GAP = 14;      // gap between circle edge and label box
+
+                const lines = [labelInfo.line1];
+                if (labelInfo.line2) lines.push(labelInfo.line2);
+                const boxW = Math.ceil(Math.max(...lines.map(l => l.length)) * CHAR_W + PAD * 2);
+                const boxH = lines.length * LINE_H + PAD * 2;
+
+                // Default side: entries/adds above marker, exits/reduces below
+                const preferAbove = !labelInfo.isReduce;
+                const step = boxH + 4;
+
+                // Try placing label without collision, shifting further in preferred direction
+                let labelTopY = preferAbove ? markerY - GAP - boxH : markerY + GAP;
+                for (let attempt = 0; attempt < 12; attempt++) {
+                    // Clamp horizontally so label stays within chart area
+                    let labelLeftX = Math.max(chartBounds.left, Math.min(x - boxW / 2, chartBounds.right - boxW));
+
+                    const newBox = { x: labelLeftX, y: labelTopY, w: boxW, h: boxH };
+                    const collides = labelPlacements.some(p =>
+                        newBox.x < p.x + p.w && newBox.x + newBox.w > p.x &&
+                        newBox.y < p.y + p.h && newBox.y + newBox.h > p.y
+                    );
+                    if (!collides) {
+                        labelPlacements.push(newBox);
+
+                        // Connector line (behind everything — insert before first child)
+                        const connY1 = preferAbove ? labelTopY + boxH : labelTopY;
+                        const conn = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                        conn.setAttribute('x1', x); conn.setAttribute('y1', connY1);
+                        conn.setAttribute('x2', x); conn.setAttribute('y2', markerY);
+                        conn.setAttribute('stroke', color);
+                        conn.setAttribute('stroke-width', '1');
+                        conn.setAttribute('stroke-dasharray', '3,2');
+                        conn.setAttribute('stroke-opacity', '0.5');
+                        svg.insertBefore(conn, svg.firstChild);
+
+                        // Background rect
+                        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                        rect.setAttribute('x', labelLeftX); rect.setAttribute('y', labelTopY);
+                        rect.setAttribute('width', boxW); rect.setAttribute('height', boxH);
+                        rect.setAttribute('fill', 'white'); rect.setAttribute('fill-opacity', '0.88');
+                        rect.setAttribute('stroke', color); rect.setAttribute('stroke-width', '1');
+                        rect.setAttribute('rx', '3');
+                        svg.appendChild(rect);
+
+                        // Text lines
+                        lines.forEach((line, i) => {
+                            const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                            txt.setAttribute('x', labelLeftX + PAD);
+                            txt.setAttribute('y', labelTopY + PAD + FONT + i * LINE_H);
+                            txt.setAttribute('font-size', FONT);
+                            txt.setAttribute('font-family', 'monospace');
+                            // P&L line gets its own colour: red if loss (starts with "P&L -"), else green
+                            if (i === 1 && labelInfo.line2) {
+                                txt.setAttribute('fill', labelInfo.line2.startsWith('P&L -') ? '#dc3545' : '#28a745');
+                            } else {
+                                txt.setAttribute('fill', color);
+                            }
+                            txt.setAttribute('font-weight', 'bold');
+                            txt.textContent = line;
+                            svg.appendChild(txt);
+                        });
+                        return;
+                    }
+                    // Shift further in preferred direction
+                    labelTopY += preferAbove ? -step : step;
+                }
+                // If all attempts failed, draw without collision check (rare edge case)
+                labelPlacements.push({ x: x - boxW / 2, y: labelTopY, w: boxW, h: boxH });
+            }
+            // ── End label helpers ────────────────────────────────────────────
+
+            const chartBounds = {
+                left: chartPadding.left,
+                right: chartPadding.left + chartWidth,
+                top: chartPadding.top,
+                bottom: chartPadding.top + chartHeight,
+            };
+            const labelPlacements = []; // tracks placed label boxes for collision avoidance
+
             // Draw trade markers
             markers.forEach(marker => {
                 const dataIndex = data.findIndex(d => d.timestamp === marker.timestamp);
@@ -2630,18 +2813,15 @@
                 const x = xScale(dataIndex);
                 const y = yScale(marker.price);
 
-                let markerColor, markerSymbol, markerSize;
+                let markerColor, markerSize;
                 if (marker.type === 'ENTERED') {
                     markerColor = '#28a745';
-                    markerSymbol = '●';
                     markerSize = 8;
                 } else if (marker.type === 'MODIFIED') {
                     markerColor = '#ffc107';
-                    markerSymbol = '▲';
                     markerSize = 8;
                 } else if (marker.type === 'EXITED') {
                     markerColor = '#dc3545';
-                    markerSymbol = '✕';
                     markerSize = 10;
                 }
 
@@ -2653,59 +2833,40 @@
                 circle.setAttribute('stroke', '#fff');
                 circle.setAttribute('stroke-width', '2');
                 circle.style.cursor = 'pointer';
-                
-                // Enhanced Tooltip with full trade details
+
+                // Tooltip (hover)
                 const evt = marker.event;
                 let tooltipLines = [];
-                
                 tooltipLines.push(`${marker.type}: ${marker.symbol}`);
                 tooltipLines.push(`Time: ${new Date(evt.timestamp).toLocaleString('en-IN')}`);
                 tooltipLines.push(`Product: ${evt.product || 'N/A'}`);
                 tooltipLines.push('');
-                
                 if (marker.type === 'ENTERED') {
                     tooltipLines.push(`Entered Qty: ${evt.after_quantity}`);
-                    tooltipLines.push(`Entry Price: ₹${evt.after_average_price.toFixed(2)}`);
-                    tooltipLines.push(`LTP: ₹${evt.after_last_price.toFixed(2)}`);
-                    if (evt.after_unbooked_pnl !== 0) {
-                        tooltipLines.push(`Unbooked P&L: ₹${evt.after_unbooked_pnl.toFixed(2)}`);
-                    }
+                    tooltipLines.push(`Entry Price: ₹${(evt.after_average_price||0).toFixed(2)}`);
+                    tooltipLines.push(`LTP: ₹${(evt.after_last_price||0).toFixed(2)}`);
+                    if (evt.after_unbooked_pnl) tooltipLines.push(`Unbooked P&L: ₹${evt.after_unbooked_pnl.toFixed(2)}`);
                 } else if (marker.type === 'MODIFIED') {
-                    const qtyChange = evt.quantity_diff;
-                    const sign = qtyChange > 0 ? '+' : '';
-                    tooltipLines.push(`Qty Change: ${evt.before_quantity} → ${evt.after_quantity} (${sign}${qtyChange})`);
-                    
-                    if (evt.implied_fill_side) {
-                        tooltipLines.push(`Fill: ${evt.implied_fill_side} ${evt.implied_fill_qty} @ ₹${evt.implied_fill_price.toFixed(2)}`);
-                    }
-                    
-                    tooltipLines.push(`Avg Price: ₹${evt.before_average_price.toFixed(2)} → ₹${evt.after_average_price.toFixed(2)}`);
-                    tooltipLines.push(`LTP: ₹${evt.after_last_price.toFixed(2)}`);
-                    
-                    if (evt.exit_pnl !== 0) {
-                        tooltipLines.push(`Exit P&L: ₹${evt.exit_pnl.toFixed(2)}`);
-                        tooltipLines.push(`Exit Price: ₹${evt.exit_price.toFixed(2)}`);
-                    }
-                    
-                    if (evt.after_unbooked_pnl !== 0) {
-                        tooltipLines.push(`Unbooked P&L: ₹${evt.after_unbooked_pnl.toFixed(2)}`);
-                    }
+                    const sign = (evt.quantity_diff||0) > 0 ? '+' : '';
+                    tooltipLines.push(`Qty Change: ${evt.before_quantity} → ${evt.after_quantity} (${sign}${evt.quantity_diff})`);
+                    if (evt.implied_fill_side) tooltipLines.push(`Fill: ${evt.implied_fill_side} ${evt.implied_fill_qty} @ ₹${(evt.implied_fill_price||0).toFixed(2)}`);
+                    tooltipLines.push(`Avg Price: ₹${(evt.before_average_price||0).toFixed(2)} → ₹${(evt.after_average_price||0).toFixed(2)}`);
+                    tooltipLines.push(`LTP: ₹${(evt.after_last_price||0).toFixed(2)}`);
+                    if (evt.exit_pnl) { tooltipLines.push(`Exit P&L: ₹${evt.exit_pnl.toFixed(2)}`); tooltipLines.push(`Exit Price: ₹${(evt.exit_price||0).toFixed(2)}`); }
+                    if (evt.after_unbooked_pnl) tooltipLines.push(`Unbooked P&L: ₹${evt.after_unbooked_pnl.toFixed(2)}`);
                 } else if (marker.type === 'EXITED') {
                     tooltipLines.push(`Exited Qty: ${evt.before_quantity}`);
-                    tooltipLines.push(`Entry Price: ₹${evt.before_average_price.toFixed(2)}`);
-                    
-                    if (evt.exit_pnl !== 0) {
-                        const pnlColor = evt.exit_pnl > 0 ? 'Profit' : 'Loss';
-                        tooltipLines.push(`Exit P&L: ₹${evt.exit_pnl.toFixed(2)} (${pnlColor})`);
-                        tooltipLines.push(`Exit Price: ₹${evt.exit_price.toFixed(2)}`);
-                    }
+                    tooltipLines.push(`Entry Price: ₹${(evt.before_average_price||0).toFixed(2)}`);
+                    if (evt.exit_pnl) { tooltipLines.push(`Exit P&L: ₹${evt.exit_pnl.toFixed(2)} (${evt.exit_pnl > 0 ? 'Profit' : 'Loss'})`); tooltipLines.push(`Exit Price: ₹${(evt.exit_price||0).toFixed(2)}`); }
                 }
-                
                 const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
                 title.textContent = tooltipLines.join('\n');
                 circle.appendChild(title);
-                
                 svg.appendChild(circle);
+
+                // Inline label
+                const labelInfo = getMarkerLabelInfo(marker);
+                drawLabel(svg, x, y, labelInfo, markerColor, labelPlacements, chartBounds);
             });
 
             // X-axis labels (show every nth label to avoid crowding)
