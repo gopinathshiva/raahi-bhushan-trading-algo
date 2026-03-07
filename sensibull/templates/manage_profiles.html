@@ -118,35 +118,240 @@
 
     .loading     { text-align: center; padding: 40px; color: #666; }
     .empty-state { text-align: center; padding: 60px 20px; color: #999; font-size: 1.1em; }
+
+    /* Tabs */
+    .tab-bar {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #dee2e6;
+    }
+    .tab-btn {
+        padding: 10px 24px;
+        border: none;
+        background: none;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 500;
+        color: #666;
+        border-bottom: 3px solid transparent;
+        margin-bottom: -2px;
+        transition: all 0.2s;
+    }
+    .tab-btn:hover { color: #007bff; }
+    .tab-btn.active { color: #007bff; border-bottom-color: #007bff; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* View Profiles tab */
+    .vp-input-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        color: #666;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    .tooltip-wrap { position: relative; display: inline-flex; }
+    .tooltip-icon {
+        width: 18px; height: 18px; border-radius: 50%;
+        background: #007bff; color: white;
+        font-size: 11px; font-weight: bold;
+        display: inline-flex; align-items: center; justify-content: center;
+        cursor: pointer; flex-shrink: 0; user-select: none;
+    }
+    .tooltip-box {
+        display: none;
+        position: absolute;
+        left: 26px; top: -8px;
+        background: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        padding: 16px 18px;
+        width: 460px;
+        z-index: 500;
+        font-size: 13px;
+        color: #333;
+        line-height: 1.6;
+    }
+    .tooltip-box.visible { display: block; }
+    .tooltip-box h4 { margin: 0 0 10px; font-size: 14px; color: #007bff; }
+    .tooltip-box ol { margin: 0 0 12px; padding-left: 18px; }
+    .tooltip-box li { margin-bottom: 4px; }
+    .tooltip-box pre {
+        background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px;
+        padding: 10px; font-size: 11px; overflow-x: auto; white-space: pre-wrap;
+        margin: 0;
+    }
+    #vpIdsInput {
+        width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;
+        font-size: 13px; font-family: monospace; resize: vertical;
+        box-sizing: border-box;
+    }
+    #vpIdsInput:focus { outline: none; border-color: #007bff; }
+    .vp-controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    .vp-filter-bar {
+        display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+        margin-bottom: 14px;
+    }
+    .vp-filter-bar input {
+        padding: 7px 10px; border: 1px solid #ddd; border-radius: 4px;
+        font-size: 13px; width: 220px;
+    }
+    .vp-filter-bar input:focus { outline: none; border-color: #007bff; }
+    .vp-filter-bar label { font-size: 13px; color: #666; }
+    .vp-table-wrap { overflow-x: auto; }
+    .vp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .vp-table th {
+        background: #f8f9fa; padding: 10px 12px; text-align: left;
+        font-weight: 600; color: #333; border-bottom: 2px solid #dee2e6;
+        cursor: pointer; white-space: nowrap; user-select: none;
+    }
+    .vp-table th:last-child { cursor: default; }
+    .vp-table th:hover:not(:last-child) { background: #e9ecef; }
+    .vp-table th .sort-icon { margin-left: 4px; font-size: 11px; opacity: 0.4; }
+    .vp-table th.sort-asc .sort-icon,
+    .vp-table th.sort-desc .sort-icon { opacity: 1; }
+    .vp-table td { padding: 10px 12px; border-bottom: 1px solid #dee2e6; }
+    .vp-table tr:hover { background: #f8f9fa; }
+    .vp-table .err-row td { color: #dc3545; background: #fff5f5; }
+    .profit-pos { color: #28a745; font-weight: 600; }
+    .profit-neg { color: #dc3545; font-weight: 600; }
+    #vpStatus { font-size: 13px; color: #666; }
+    .vp-id-link { color: #007bff; text-decoration: none; font-weight: 500; }
+    .vp-id-link:hover { text-decoration: underline; }
+    .vp-add-btn {
+        background: #28a745; color: white; border: none; border-radius: 4px;
+        width: 28px; height: 28px; font-size: 18px; line-height: 1;
+        cursor: pointer; transition: background 0.2s;
+    }
+    .vp-add-btn:hover { background: #218838; }
+    .vp-add-btn:disabled { background: #aaa; cursor: not-allowed; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container">
-    <!-- Add Profile Section -->
-    <div class="section">
-        <h2>➕ Add New Profile</h2>
-        <div class="add-form">
-            <div class="form-group">
-                <label for="username">Username (slug)</label>
-                <input type="text" id="username" placeholder="e.g., latered-garage" />
-            </div>
-            <button class="btn btn-primary" onclick="validateProfile()" id="validateBtn">Validate</button>
-            <button class="btn btn-success" onclick="addProfile()" id="addBtn" disabled>Add Profile</button>
-        </div>
-        <div id="validationMessage"></div>
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('manage')">⚙️ Manage Profiles</button>
+        <button class="tab-btn"        onclick="switchTab('view')">👁️ View Profiles</button>
     </div>
 
-    <!-- Profiles List Section -->
-    <div class="section">
-        <h2>📋 Existing Profiles</h2>
-        <div class="stats">
-            <div class="stat-item"><div class="stat-label">Total Profiles</div><div class="stat-value" id="totalProfiles">-</div></div>
-            <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value" id="activeProfiles">-</div></div>
-            <div class="stat-item"><div class="stat-label">Inactive</div><div class="stat-value" id="inactiveProfiles">-</div></div>
+    <!-- ── Tab: Manage Profiles ── -->
+    <div id="tab-manage" class="tab-panel active">
+
+        <!-- Add Profile Section -->
+        <div class="section">
+            <h2>➕ Add New Profile</h2>
+            <div class="add-form">
+                <div class="form-group">
+                    <label for="username">Username (slug)</label>
+                    <input type="text" id="username" placeholder="e.g., latered-garage" />
+                </div>
+                <button class="btn btn-primary" onclick="validateProfile()" id="validateBtn">Validate</button>
+                <button class="btn btn-success" onclick="addProfile()" id="addBtn" disabled>Add Profile</button>
+            </div>
+            <div id="validationMessage"></div>
         </div>
-        <div id="profilesList"><div class="loading">Loading profiles...</div></div>
+
+        <!-- Profiles List Section -->
+        <div class="section">
+            <h2>📋 Existing Profiles</h2>
+            <div class="stats">
+                <div class="stat-item"><div class="stat-label">Total Profiles</div><div class="stat-value" id="totalProfiles">-</div></div>
+                <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value" id="activeProfiles">-</div></div>
+                <div class="stat-item"><div class="stat-label">Inactive</div><div class="stat-value" id="inactiveProfiles">-</div></div>
+            </div>
+            <div id="profilesList"><div class="loading">Loading profiles...</div></div>
+        </div>
+
     </div>
+
+    <!-- ── Tab: View Profiles ── -->
+    <div id="tab-view" class="tab-panel">
+
+        <div class="section">
+            <h2>👁️ View Live Profiles</h2>
+
+            <div class="vp-input-label">
+                <span>Sensibull IDs (comma-separated or JSON array)</span>
+                <div class="tooltip-wrap">
+                    <span class="tooltip-icon">?</span>
+                    <div class="tooltip-box">
+                        <h4>How to get the IDs</h4>
+                        <ol>
+                            <li>Go to the Hall of Fame page on Sensibull<br>
+                                <small style="color:#666;">(live positions, sorted by P&amp;L desc)</small></li>
+                            <li>Wait for the table to fully load</li>
+                            <li>Open DevTools → <strong>Console</strong> tab (F12)</li>
+                            <li>Paste and run the script below</li>
+                            <li>IDs are auto-copied to clipboard — paste here</li>
+                        </ol>
+                        <pre>// Run on:
+// https://web.sensibull.com/verified-pnl/hall-of-fame
+// ?live_page=1&live_sort_by=pl_desc&category=live_positions
+
+const ids = [];
+const rows = document.querySelectorAll(
+  '#tabpanel-live_positions div div:first-child table tbody tr'
+);
+rows.forEach(row => {
+  const cell = row.querySelector('td:nth-child(2)');
+  if (cell) {
+    const text = cell.innerText.trim();
+    if (text) ids.push(text);
+  }
+});
+
+console.log("Sensibull IDs found:", ids.length);
+copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
+                    </div>
+                </div>
+            </div>
+
+            <textarea id="vpIdsInput" rows="4"
+                placeholder='Paste IDs here, e.g.:  id-one, id-two, id-three  — or paste the JSON array from the script above'></textarea>
+
+            <div class="vp-controls">
+                <button class="btn btn-primary" onclick="vpFetchSummary()" id="vpSubmitBtn">Get Summary</button>
+                <span id="vpStatus"></span>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div class="section" id="vpResultsSection" style="display:none;">
+            <h2>📊 Results</h2>
+            <div class="vp-filter-bar">
+                <label>Filter by underlying:</label>
+                <input type="text" id="vpUnderlyingFilter" placeholder="e.g. NIFTY, BANKNIFTY" oninput="vpApplyFilter()" />
+                <label style="margin-left:12px;">Search ID:</label>
+                <input type="text" id="vpIdFilter" placeholder="profile id" oninput="vpApplyFilter()" />
+            </div>
+            <div class="vp-table-wrap">
+                <table class="vp-table" id="vpTable">
+                    <thead>
+                        <tr>
+                            <th onclick="vpSort('id')"           data-col="id">ID <span class="sort-icon"></span></th>
+                            <th onclick="vpSort('total_profit')" data-col="total_profit">Total Profit <span class="sort-icon"></span></th>
+                            <th onclick="vpSort('roi')"          data-col="roi">ROI <span class="sort-icon"></span></th>
+                            <th onclick="vpSort('capital')"      data-col="capital">Capital <span class="sort-icon"></span></th>
+                            <th onclick="vpSort('live_since')"   data-col="live_since">Live Since <span class="sort-icon"></span></th>
+                            <th data-col="underlyings">Underlyings</th>
+                            <th data-col="actions" style="cursor:default;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vpTableBody"></tbody>
+                </table>
+            </div>
+            <div id="vpRowCount" style="margin-top:10px; font-size:13px; color:#666;"></div>
+        </div>
+
+    </div>
+
 </div>
 
 <!-- Delete Confirmation Modal -->
@@ -185,6 +390,210 @@
     let currentDeleteProfileId = null;
     let validatedSlug = null;
 
+    // ── Tooltip toggle ─────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        const icon = document.querySelector('.tooltip-icon');
+        const box  = document.querySelector('.tooltip-box');
+        icon.addEventListener('click', e => {
+            e.stopPropagation();
+            box.classList.toggle('visible');
+        });
+        document.addEventListener('click', () => box.classList.remove('visible'));
+    });
+
+    // ── Tab switching ──────────────────────────────────────────────
+    function switchTab(name) {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + name).classList.add('active');
+        document.querySelectorAll('.tab-btn')[name === 'manage' ? 0 : 1].classList.add('active');
+    }
+
+    // ── View Profiles ──────────────────────────────────────────────
+    const VP_BASE = "/api/sensibull/snapshot/";
+    let vpAllRows = [];   // full dataset after fetch
+    let vpSortCol = 'total_profit';
+    let vpSortDir = 'desc';
+
+    function vpParseIds(raw) {
+        raw = raw.trim();
+        // Try JSON array first
+        if (raw.startsWith('[')) {
+            try {
+                const arr = JSON.parse(raw);
+                return arr.map(s => String(s).trim()).filter(Boolean);
+            } catch(e) {}
+        }
+        // Comma-separated
+        return raw.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    async function vpFetchSummary() {
+        const raw = document.getElementById('vpIdsInput').value;
+        const ids = vpParseIds(raw);
+        if (!ids.length) {
+            document.getElementById('vpStatus').textContent = 'Please enter at least one ID.';
+            return;
+        }
+
+        const btn = document.getElementById('vpSubmitBtn');
+        btn.disabled = true;
+        document.getElementById('vpStatus').textContent = `Fetching ${ids.length} profile(s)…`;
+        document.getElementById('vpResultsSection').style.display = 'none';
+
+        const fetches = ids.map(id =>
+            fetch(VP_BASE + id)
+                .then(r => r.json())
+                .then(data => {
+                    const snap = data?.payload?.position_snapshot_data;
+                    const tw   = data?.payload?.twitter_data;
+                    const profit = snap?.total_profit ?? null;
+                    const roiRaw = snap?.roi ?? null;
+                    return {
+                        id,
+                        total_profit: profit !== null ? parseFloat(profit.toFixed(2)) : null,
+                        roi:          roiRaw  !== null ? parseFloat((roiRaw * 100).toFixed(2)) : null,
+                        capital:      snap?.total_capital != null ? Math.round(snap.total_capital) : null,
+                        live_since:   tw?.live_since ? tw.live_since.slice(0, 10) : null,
+                        underlyings:  snap?.data?.map(d => d.trading_symbol).join(', ') || '',
+                        error:        null
+                    };
+                })
+                .catch(() => ({ id, total_profit: null, roi: null, capital: null, live_since: null, underlyings: '', error: 'failed' }))
+        );
+
+        vpAllRows = await Promise.all(fetches);
+
+        // Default sort: profit desc
+        vpSortCol = 'total_profit';
+        vpSortDir = 'desc';
+
+        document.getElementById('vpUnderlyingFilter').value = '';
+        document.getElementById('vpIdFilter').value = '';
+        vpUpdateSortHeaders();
+        vpApplyFilter();
+
+        document.getElementById('vpResultsSection').style.display = 'block';
+        document.getElementById('vpStatus').textContent = `Done — ${ids.length} profile(s) loaded.`;
+        btn.disabled = false;
+    }
+
+    function vpApplyFilter() {
+        const uFilter = document.getElementById('vpUnderlyingFilter').value.trim().toLowerCase();
+        const idFilter = document.getElementById('vpIdFilter').value.trim().toLowerCase();
+
+        let rows = vpAllRows.filter(r => {
+            const matchU  = !uFilter  || r.underlyings.toLowerCase().includes(uFilter);
+            const matchId = !idFilter || r.id.toLowerCase().includes(idFilter);
+            return matchU && matchId;
+        });
+
+        rows = vpSortRows(rows);
+        vpRenderTable(rows);
+    }
+
+    function vpSortRows(rows) {
+        return [...rows].sort((a, b) => {
+            let av = a[vpSortCol], bv = b[vpSortCol];
+            // errors always go last
+            if (a.error && !b.error) return 1;
+            if (!a.error && b.error) return -1;
+            if (av === null && bv === null) return 0;
+            if (av === null) return 1;
+            if (bv === null) return -1;
+            if (typeof av === 'string') av = av.toLowerCase();
+            if (typeof bv === 'string') bv = bv.toLowerCase();
+            if (av < bv) return vpSortDir === 'asc' ? -1 : 1;
+            if (av > bv) return vpSortDir === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+
+    function vpSort(col) {
+        if (vpSortCol === col) {
+            vpSortDir = vpSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+            vpSortCol = col;
+            vpSortDir = col === 'total_profit' || col === 'roi' || col === 'capital' ? 'desc' : 'asc';
+        }
+        vpUpdateSortHeaders();
+        vpApplyFilter();
+    }
+
+    function vpUpdateSortHeaders() {
+        document.querySelectorAll('#vpTable th').forEach(th => {
+            th.classList.remove('sort-asc', 'sort-desc');
+            const icon = th.querySelector('.sort-icon');
+            if (!icon) return;
+            if (th.dataset.col === vpSortCol) {
+                th.classList.add('sort-' + vpSortDir);
+                icon.textContent = vpSortDir === 'asc' ? ' ▲' : ' ▼';
+            } else {
+                icon.textContent = ' ⇅';
+            }
+        });
+    }
+
+    function vpRenderTable(rows) {
+        const tbody = document.getElementById('vpTableBody');
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;padding:30px;">No results match the filter.</td></tr>';
+            document.getElementById('vpRowCount').textContent = '';
+            return;
+        }
+        tbody.innerHTML = rows.map(r => {
+            const profileUrl = `https://web.sensibull.com/verified-pnl/${r.id}/live-positions`;
+            if (r.error) {
+                return `<tr class="err-row">
+                    <td><a href="${profileUrl}" target="_blank" rel="noopener" class="vp-id-link">${r.id}</a></td>
+                    <td colspan="5">⚠️ Failed to fetch</td>
+                    <td></td>
+                </tr>`;
+            }
+            const profitClass = r.total_profit >= 0 ? 'profit-pos' : 'profit-neg';
+            const profitStr   = r.total_profit !== null ? r.total_profit.toLocaleString('en-IN', {minimumFractionDigits:2}) : '—';
+            const roiStr      = r.roi !== null ? r.roi.toFixed(2) + '%' : '—';
+            const capitalStr  = r.capital !== null ? r.capital.toLocaleString('en-IN') : '—';
+            return `<tr>
+                <td><a href="${profileUrl}" target="_blank" rel="noopener" class="vp-id-link">${r.id}</a></td>
+                <td class="${profitClass}">${profitStr}</td>
+                <td class="${r.roi >= 0 ? 'profit-pos' : 'profit-neg'}">${roiStr}</td>
+                <td>${capitalStr}</td>
+                <td>${r.live_since || '—'}</td>
+                <td>${r.underlyings || '—'}</td>
+                <td><button class="vp-add-btn" onclick="vpAddProfile('${r.id}', this)" title="Add to scraping">+</button></td>
+            </tr>`;
+        }).join('');
+        document.getElementById('vpRowCount').textContent = `Showing ${rows.length} of ${vpAllRows.length} profile(s)`;
+    }
+
+    async function vpAddProfile(slug, btn) {
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+            const r = await fetch('/api/profiles/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({slug})
+            });
+            const data = await r.json();
+            if (data.success) {
+                btn.textContent = '✓';
+                btn.style.background = '#6c757d';
+                showToast(`Added "${slug}" for scraping!`, 'success');
+            } else {
+                btn.disabled = false;
+                btn.textContent = '+';
+                showToast(data.error || 'Failed to add profile', 'error');
+            }
+        } catch(e) {
+            btn.disabled = false;
+            btn.textContent = '+';
+            showToast('Error adding profile', 'error');
+        }
+    }
+
+    // ── Manage Profiles ────────────────────────────────────────────
     window.addEventListener('DOMContentLoaded', loadProfiles);
 
     async function loadProfiles() {

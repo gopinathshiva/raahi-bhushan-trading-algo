@@ -3,6 +3,7 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from werkzeug.security import check_password_hash
 import sqlite3
 import json
+import requests as http_requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from database import get_db, sync_profiles, now_ist, init_db
@@ -2610,6 +2611,18 @@ def api_delete_profile(profile_id):
 # ============================================================================
 # EXPORT / IMPORT ROUTES
 # ============================================================================
+
+@app.route('/api/sensibull/snapshot/<slug>')
+@login_required
+def sensibull_snapshot_proxy(slug):
+    """Proxy Sensibull live snapshot to avoid browser CORS restrictions."""
+    url = f"https://oxide.sensibull.com/v1/compute/verified_by_sensibull/live_positions/snapshot/{slug}"
+    try:
+        resp = http_requests.get(url, timeout=10)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
 
 @app.route('/export')
 @login_required
