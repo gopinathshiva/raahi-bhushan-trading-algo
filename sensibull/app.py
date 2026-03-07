@@ -877,21 +877,38 @@ def _best_effort_trade_before(trade, last_good_trade):
     return out
 
 
-def _compute_exit_metrics(before_trade):
-    """Compute best-effort exit price/pnl, aligned with calculate_diff() logic."""
+def _compute_exit_metrics(before_trade, closed_qty=None, exit_price_override=None):
+    """Compute best-effort exit price/pnl, aligned with calculate_diff() logic.
+
+    closed_qty: quantity actually closed (for partial exits). If None, uses the
+                full before_qty (appropriate for full exits).
+    exit_price_override: use this as the exit price (e.g. implied_fill_price)
+                         instead of falling back to the previous LTP.
+    """
     if not before_trade:
         return 0, 0
 
     qty = before_trade.get('quantity', 0) or 0
     avg_price = before_trade.get('average_price', 0) or 0
     last_price = before_trade.get('last_price', 0) or 0
-    booked_pnl = before_trade.get('booked_profit_loss', 0) or 0
 
-    exit_price = last_price or 0
-    if booked_pnl != 0:
-        exit_pnl = booked_pnl
-    elif qty and avg_price and exit_price:
-        exit_pnl = (exit_price - avg_price) * qty
+    exit_price = exit_price_override if exit_price_override else (last_price or 0)
+
+    # For full exits only: prefer broker-provided booked P&L if available.
+    # We intentionally skip this for partial exits (closed_qty is not None)
+    # because broker's booked_profit_loss is cumulative and would be wrong here.
+    if closed_qty is None:
+        booked_pnl = before_trade.get('booked_profit_loss', 0) or 0
+        if booked_pnl != 0:
+            return booked_pnl, exit_price
+
+    qty_for_pnl = closed_qty if closed_qty is not None else qty
+
+    if avg_price and exit_price and qty_for_pnl:
+        if qty > 0:
+            exit_pnl = (exit_price - avg_price) * qty_for_pnl   # Long
+        else:
+            exit_pnl = (avg_price - exit_price) * qty_for_pnl   # Short
     else:
         exit_pnl = 0
 
@@ -1138,7 +1155,13 @@ def api_profile_all_underlyings(slug):
                 exit_price = 0
                 if event_type == 'EXITED':
                     exit_pnl, exit_price = _compute_exit_metrics(prev_trade)
-                
+                    # For positions that expired (broker removes them without providing booked P&L),
+                    # fall back to computed exit metrics so display and group stats are correct.
+                    if after_booked == 0 and exit_pnl != 0:
+                        after_booked = exit_pnl
+                    if after_ltp == 0 and exit_price != 0:
+                        after_ltp = exit_price
+
                 implied_fill_side = ''
                 implied_fill_qty = 0
                 implied_fill_price = 0
@@ -1150,8 +1173,13 @@ def api_profile_all_underlyings(slug):
                     )
                     # Compute exit P&L if reducing position
                     if (before_qty > 0 and after_qty < before_qty) or (before_qty < 0 and after_qty > before_qty):
-                        exit_pnl, exit_price = _compute_exit_metrics(prev_trade)
-                
+                        closed_qty = abs(before_qty - after_qty)
+                        exit_pnl, exit_price = _compute_exit_metrics(
+                            prev_trade,
+                            closed_qty=closed_qty,
+                            exit_price_override=implied_fill_price if implied_fill_price else None,
+                        )
+
                 underlying_events[underlying].append({
                     'timestamp': timestamp,
                     'snapshot_id': snap_id,
@@ -1314,6 +1342,12 @@ def api_profile_symbol_lifecycle(slug):
                 exit_price = 0
                 if event_type == 'EXITED':
                     exit_pnl, exit_price = _compute_exit_metrics(prev_trade)
+                    # For positions that expired (broker removes them without providing booked P&L),
+                    # fall back to computed exit metrics so display and group stats are correct.
+                    if after_booked == 0 and exit_pnl != 0:
+                        after_booked = exit_pnl
+                    if after_ltp == 0 and exit_price != 0:
+                        after_ltp = exit_price
 
                 implied_fill_side = ''
                 implied_fill_qty = 0
@@ -1324,6 +1358,14 @@ def api_profile_symbol_lifecycle(slug):
                         curr_trade or {},
                         original_avg_price=before_avg,
                     )
+                    # Compute exit P&L if reducing position
+                    if (before_qty > 0 and after_qty < before_qty) or (before_qty < 0 and after_qty > before_qty):
+                        closed_qty = abs(before_qty - after_qty)
+                        exit_pnl, exit_price = _compute_exit_metrics(
+                            prev_trade,
+                            closed_qty=closed_qty,
+                            exit_price_override=implied_fill_price if implied_fill_price else None,
+                        )
 
                 # Product always comes from key
                 product_val = key.split('|', 1)[1] if '|' in key else (curr_trade or {}).get('product', '')

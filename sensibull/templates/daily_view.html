@@ -100,6 +100,29 @@
             .underlying-toggle.expanded { transform: rotate(90deg); }
             .underlying-content { display: none; padding: 0; }
             .underlying-content.expanded { display: block; }
+
+            /* Symbol multi-select tags */
+            .symbol-tags-input-wrap { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border: 1px solid #ccc; border-radius: 6px; padding: 4px 8px; background: white; min-width: min(400px, 90vw); cursor: text; }
+            .symbol-tags-input-wrap:focus-within { border-color: #007bff; box-shadow: 0 0 0 2px rgba(0,123,255,0.15); }
+            .symbol-tag { display: inline-flex; align-items: center; gap: 4px; background: #007bff; color: white; border-radius: 4px; padding: 2px 8px; font-size: 0.85em; font-weight: 500; white-space: nowrap; }
+            .symbol-tag-remove { cursor: pointer; font-size: 1.1em; line-height: 1; border: none; background: none; color: white; padding: 0 1px; }
+            .symbol-tag-remove:hover { color: #ffcccc; }
+            .symbol-search-stats { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 12px 16px; margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+            .symbol-search-stat { display: flex; flex-direction: column; align-items: flex-start; }
+            .symbol-search-stat-label { color: #666; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.03em; }
+            .symbol-search-stat-value { font-size: 1.15em; font-weight: bold; }
+            /* Per-symbol accordion */
+            .sym-accordion-item { border: 1px solid #dee2e6; border-radius: 6px; margin-bottom: 6px; overflow: hidden; }
+            .sym-accordion-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8f9fa; cursor: pointer; user-select: none; gap: 10px; flex-wrap: wrap; }
+            .sym-accordion-header:hover { background: #e9ecef; }
+            .sym-accordion-header.open { background: #e8f0fe; border-bottom: 1px solid #dee2e6; }
+            .sym-accordion-title { font-weight: 600; font-size: 0.95em; }
+            .sym-accordion-summary { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 0.85em; }
+            .sym-accordion-body { display: none; padding: 12px 16px; background: white; }
+            .sym-accordion-body.open { display: flex; flex-wrap: wrap; gap: 18px; }
+            .sym-accordion-stat { display: flex; flex-direction: column; }
+            .sym-accordion-stat-label { color: #666; font-size: 0.75em; text-transform: uppercase; }
+            .sym-accordion-stat-value { font-size: 1.05em; font-weight: bold; }
         </style>
         <div class="tabs">
             <button class="tab-btn active" id="tab-btn-daily" onclick="switchTab('daily')">Daily Timeline</button>
@@ -220,17 +243,23 @@
 
         <div id="tab-panel-search" class="tab-panel">
             <div class="search-row">
-                <div class="suggest-wrap">
-                    <input id="symbol-search-input" type="text" placeholder="Exact symbol (e.g., NIFTY26APR27150CE)" autocomplete="off" />
+                <div class="suggest-wrap" id="symbol-suggest-wrap">
+                    <div class="symbol-tags-input-wrap" id="symbol-tags-input-wrap" onclick="document.getElementById('symbol-search-input').focus()">
+                        <input id="symbol-search-input" type="text" placeholder="Type symbol, Enter to add..." autocomplete="off"
+                            style="border:none;outline:none;padding:4px 2px;min-width:180px;flex:1;font-size:14px;" />
+                    </div>
                     <div id="symbol-suggest-box" class="suggest-box" style="display:none;"></div>
                 </div>
                 <select id="symbol-search-product">
                     <option value="">All Products</option>
                 </select>
                 <button onclick="runSymbolSearch()">Search</button>
-                <span class="search-help">Tip: press Enter to search</span>
+                <button onclick="clearSymbolTags()" style="background:#6c757d;">Clear</button>
+                <span class="search-help">Add multiple symbols, then Search</span>
             </div>
             <div id="symbol-search-status" class="search-help"></div>
+            <div id="symbol-search-stats" class="symbol-search-stats" style="display:none;"></div>
+            <div id="symbol-per-symbol-accordion" style="display:none; margin-bottom:12px;"></div>
             <div style="overflow-x:auto; width: 100%;">
                 <table class="lifecycle-table" id="symbol-search-table" style="display:none;">
                     <thead>
@@ -272,6 +301,18 @@
                 <label style="cursor:pointer; user-select:none;">
                     <input type="checkbox" id="sort-by-strike" style="margin-right:6px;" />
                     Sort by Strike Price (PE first, then CE)
+                </label>
+            </div>
+            <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:18px;">
+                <span style="font-weight:bold; font-size:0.9em; color:#555;">Show:</span>
+                <label style="cursor:pointer; user-select:none;">
+                    <input type="radio" name="position-status-filter" value="all" checked style="margin-right:5px;" />All
+                </label>
+                <label style="cursor:pointer; user-select:none; color:#28a745;">
+                    <input type="radio" name="position-status-filter" value="open" style="margin-right:5px;" />Open Only
+                </label>
+                <label style="cursor:pointer; user-select:none; color:#888;">
+                    <input type="radio" name="position-status-filter" value="closed" style="margin-right:5px;" />Closed Only
                 </label>
             </div>
             <div id="underlying-status" class="search-help"></div>
@@ -770,6 +811,49 @@
 
         let _symbolSuggestTimer = null;
         let _lastSuggestQuery = '';
+        const _selectedSymbols = [];
+
+        function addSymbolTag(symbol) {
+            symbol = (symbol || '').trim().toUpperCase();
+            if (!symbol || _selectedSymbols.includes(symbol)) return;
+            _selectedSymbols.push(symbol);
+            renderSymbolTags();
+        }
+
+        function removeSymbolTag(symbol) {
+            const idx = _selectedSymbols.indexOf(symbol);
+            if (idx !== -1) _selectedSymbols.splice(idx, 1);
+            renderSymbolTags();
+        }
+
+        function clearSymbolTags() {
+            _selectedSymbols.length = 0;
+            renderSymbolTags();
+            const inp = document.getElementById('symbol-search-input');
+            if (inp) inp.value = '';
+            document.getElementById('symbol-search-status').textContent = '';
+            document.getElementById('symbol-search-stats').style.display = 'none';
+            const accordion = document.getElementById('symbol-per-symbol-accordion');
+            if (accordion) { accordion.innerHTML = ''; accordion.style.display = 'none'; }
+            document.getElementById('symbol-search-table').style.display = 'none';
+            document.getElementById('symbol-search-tbody').innerHTML = '';
+        }
+
+        function renderSymbolTags() {
+            const wrap = document.getElementById('symbol-tags-input-wrap');
+            const input = document.getElementById('symbol-search-input');
+            if (!wrap || !input) return;
+            // Remove existing tag chips only (leave input intact)
+            wrap.querySelectorAll('.symbol-tag').forEach(el => el.remove());
+            // Re-insert all tags before the input
+            _selectedSymbols.forEach(sym => {
+                const tag = document.createElement('span');
+                tag.className = 'symbol-tag';
+                tag.innerHTML = `${sym} <button class="symbol-tag-remove" title="Remove ${sym}" onclick="removeSymbolTag('${sym}'); event.stopPropagation();">&times;</button>`;
+                wrap.insertBefore(tag, input);
+            });
+            input.placeholder = _selectedSymbols.length === 0 ? 'Type symbol, Enter to add...' : 'Add another symbol...';
+        }
 
         function setSuggestOptions(symbols) {
             const box = document.getElementById('symbol-suggest-box');
@@ -782,8 +866,153 @@
                 return;
             }
 
-            box.innerHTML = items.map(s => `<div class="suggest-item" data-value="${s}">${s}</div>`).join('');
+            box.innerHTML = items.map(s => {
+                const already = _selectedSymbols.includes(s.toUpperCase());
+                return `<div class="suggest-item" data-value="${s}" style="${already ? 'color:#aaa;' : ''}">${already ? '✓ ' : ''}${s}</div>`;
+            }).join('');
             box.style.display = 'block';
+        }
+
+        function renderConsolidatedStats(events) {
+            const statsEl = document.getElementById('symbol-search-stats');
+            if (!statsEl) return;
+            if (!events || events.length === 0) { statsEl.style.display = 'none'; return; }
+
+            // Use latest event per symbol|product key
+            const latestByKey = {};
+            events.forEach(e => {
+                const key = (e.symbol || '') + '|' + (e.product || '');
+                if (!latestByKey[key]) latestByKey[key] = e;
+            });
+
+            let bookedPnl = 0, unbookedPnl = 0, totalExitPnl = 0, active = 0, closed = 0;
+            Object.values(latestByKey).forEach(e => {
+                bookedPnl += Number(e.after_booked_pnl || 0);
+                unbookedPnl += Number(e.after_unbooked_pnl || 0);
+                if (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0) closed++;
+                else active++;
+            });
+            events.forEach(e => { if (e.exit_pnl) totalExitPnl += Number(e.exit_pnl || 0); });
+
+            const totalPnl = bookedPnl + unbookedPnl;
+            const c = v => v > 0 ? '#28a745' : (v < 0 ? '#dc3545' : '#555');
+
+            const fmt = (v, d = 0) => v.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+            statsEl.innerHTML = `
+                <div class="symbol-search-stat">
+                    <span class="symbol-search-stat-label">Symbols</span>
+                    <span class="symbol-search-stat-value" style="color:#333;">${_selectedSymbols.length}</span>
+                </div>
+                <div class="symbol-search-stat">
+                    <span class="symbol-search-stat-label">Events</span>
+                    <span class="symbol-search-stat-value" style="color:#333;">${events.length}</span>
+                </div>
+                <div class="symbol-search-stat">
+                    <span class="symbol-search-stat-label">Open Positions</span>
+                    <span class="symbol-search-stat-value" style="color:#555;">● ${active}</span>
+                </div>
+                <div class="symbol-search-stat">
+                    <span class="symbol-search-stat-label">Closed Positions</span>
+                    <span class="symbol-search-stat-value" style="color:#aaa;">✕ ${closed}</span>
+                </div>
+                <div class="symbol-search-stat">
+                    <span class="symbol-search-stat-label">Booked P&amp;L</span>
+                    <span class="symbol-search-stat-value" style="color:${c(bookedPnl)};">₹${fmt(bookedPnl, 2)}</span>
+                </div>
+                <div class="symbol-search-stat">
+                    <span class="symbol-search-stat-label">Unbooked P&amp;L</span>
+                    <span class="symbol-search-stat-value" style="color:${c(unbookedPnl)};">₹${fmt(unbookedPnl, 2)}</span>
+                </div>
+                <div class="symbol-search-stat" style="border-left:2px solid #dee2e6; padding-left:18px;">
+                    <span class="symbol-search-stat-label">Total P&amp;L</span>
+                    <span class="symbol-search-stat-value" style="color:${c(totalPnl)}; font-size:1.3em;">₹${fmt(totalPnl, 2)}</span>
+                </div>`;
+            statsEl.style.display = 'flex';
+        }
+
+        function computeSymbolStats(events) {
+            const latestByKey = {};
+            events.forEach(e => {
+                const key = (e.symbol || '') + '|' + (e.product || '');
+                if (!latestByKey[key]) latestByKey[key] = e;
+            });
+            let bookedPnl = 0, unbookedPnl = 0, active = 0, closed = 0;
+            Object.values(latestByKey).forEach(e => {
+                bookedPnl += Number(e.after_booked_pnl || 0);
+                unbookedPnl += Number(e.after_unbooked_pnl || 0);
+                if (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0) closed++;
+                else active++;
+            });
+            return { bookedPnl, unbookedPnl, total: bookedPnl + unbookedPnl, active, closed, events: events.length };
+        }
+
+        function renderPerSymbolAccordion(perSymbolResults) {
+            const accordion = document.getElementById('symbol-per-symbol-accordion');
+            if (!accordion) return;
+            // Only show accordion when there are 2+ symbols
+            if (!perSymbolResults || perSymbolResults.length <= 1) {
+                accordion.innerHTML = ''; accordion.style.display = 'none'; return;
+            }
+            const fmt = (v, d = 2) => v.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
+            const c = v => v > 0 ? '#28a745' : (v < 0 ? '#dc3545' : '#555');
+
+            accordion.innerHTML = `<div style="font-size:0.85em; font-weight:600; color:#555; margin-bottom:6px;">Individual Symbol Stats</div>` +
+                perSymbolResults.map(({ symbol, stats }) => {
+                    const id = 'sym-acc-' + symbol.replace(/[^a-zA-Z0-9]/g, '_');
+                    return `
+                    <div class="sym-accordion-item">
+                        <div class="sym-accordion-header" id="${id}-hdr" onclick="toggleSymAccordion('${id}')">
+                            <span class="sym-accordion-title">${symbol}</span>
+                            <span class="sym-accordion-summary">
+                                <span style="color:#555;">● ${stats.active} open</span>
+                                <span style="color:#aaa;">✕ ${stats.closed} closed</span>
+                                <span title="Booked P&L">Bkd: <b style="color:${c(stats.bookedPnl)}">₹${fmt(stats.bookedPnl)}</b></span>
+                                <span title="Unbooked P&L">Unbkd: <b style="color:${c(stats.unbookedPnl)}">₹${fmt(stats.unbookedPnl)}</b></span>
+                                <b style="color:${c(stats.total)}">= ₹${fmt(stats.total)}</b>
+                            </span>
+                            <span style="font-size:1.1em; color:#666; flex-shrink:0;">▶</span>
+                        </div>
+                        <div class="sym-accordion-body" id="${id}-body">
+                            <div class="sym-accordion-stat">
+                                <span class="sym-accordion-stat-label">Events</span>
+                                <span class="sym-accordion-stat-value" style="color:#333;">${stats.events}</span>
+                            </div>
+                            <div class="sym-accordion-stat">
+                                <span class="sym-accordion-stat-label">Open</span>
+                                <span class="sym-accordion-stat-value" style="color:#555;">● ${stats.active}</span>
+                            </div>
+                            <div class="sym-accordion-stat">
+                                <span class="sym-accordion-stat-label">Closed</span>
+                                <span class="sym-accordion-stat-value" style="color:#aaa;">✕ ${stats.closed}</span>
+                            </div>
+                            <div class="sym-accordion-stat">
+                                <span class="sym-accordion-stat-label">Booked P&amp;L</span>
+                                <span class="sym-accordion-stat-value" style="color:${c(stats.bookedPnl)};">₹${fmt(stats.bookedPnl)}</span>
+                            </div>
+                            <div class="sym-accordion-stat">
+                                <span class="sym-accordion-stat-label">Unbooked P&amp;L</span>
+                                <span class="sym-accordion-stat-value" style="color:${c(stats.unbookedPnl)};">₹${fmt(stats.unbookedPnl)}</span>
+                            </div>
+                            <div class="sym-accordion-stat" style="border-left:2px solid #dee2e6; padding-left:14px;">
+                                <span class="sym-accordion-stat-label">Total P&amp;L</span>
+                                <span class="sym-accordion-stat-value" style="color:${c(stats.total)}; font-size:1.15em;">₹${fmt(stats.total)}</span>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            accordion.style.display = 'block';
+        }
+
+        function toggleSymAccordion(id) {
+            const hdr = document.getElementById(id + '-hdr');
+            const body = document.getElementById(id + '-body');
+            if (!hdr || !body) return;
+            const isOpen = body.classList.contains('open');
+            body.classList.toggle('open', !isOpen);
+            hdr.classList.toggle('open', !isOpen);
+            const arrow = hdr.querySelector('span:last-child');
+            if (arrow) arrow.style.transform = isOpen ? '' : 'rotate(90deg)';
         }
 
         async function fetchSymbolSuggestions(query) {
@@ -825,11 +1054,17 @@
             const productSel = document.getElementById('symbol-search-product');
             const status = document.getElementById('symbol-search-status');
 
-            const symbol = (inp?.value || '').trim();
+            // If there's text in the input, add it as a tag first
+            const typedVal = (inp?.value || '').trim().toUpperCase();
+            if (typedVal) {
+                addSymbolTag(typedVal);
+                if (inp) inp.value = '';
+            }
+
             const product = (productSel?.value || '').trim();
 
-            if (!symbol) {
-                if (status) status.textContent = 'Enter a symbol to search.';
+            if (_selectedSymbols.length === 0) {
+                if (status) status.textContent = 'Add at least one symbol to search.';
                 renderLifecycleEvents([]);
                 return;
             }
@@ -840,36 +1075,61 @@
             const sb = document.getElementById('symbol-suggest-box');
             if (sb) sb.style.display = 'none';
 
-            if (status) status.textContent = 'Searching...';
+            if (status) status.textContent = `Searching ${_selectedSymbols.length} symbol(s)...`;
 
             const pathParts = window.location.pathname.split('/');
             const slug = pathParts[2];
 
-            const params = new URLSearchParams({ symbol });
-            if (product) params.set('product', product);
-
             try {
-                const res = await fetch('/api/profile_symbol_lifecycle/' + slug + '?' + params.toString());
-                const data = await res.json();
-                if (data.error) {
-                    if (status) status.textContent = data.error;
-                    renderLifecycleEvents([]);
-                    return;
-                }
+                // Fetch lifecycle for all selected symbols in parallel
+                const fetches = _selectedSymbols.map(sym => {
+                    const params = new URLSearchParams({ symbol: sym });
+                    if (product) params.set('product', product);
+                    return fetch('/api/profile_symbol_lifecycle/' + slug + '?' + params.toString())
+                        .then(r => r.json())
+                        .catch(() => null);
+                });
 
-                // Populate product dropdown (keep current selection)
-                if (productSel && data.products_seen) {
+                const results = await Promise.all(fetches);
+
+                // Merge events from all results + build per-symbol map
+                let allEvents = [];
+                const allProducts = new Set();
+                const perSymbolResults = [];
+                results.forEach((data, idx) => {
+                    if (!data || data.error) return;
+                    const sym = _selectedSymbols[idx];
+                    const evts = data.events || [];
+                    evts.forEach(e => allEvents.push(e));
+                    (data.products_seen || []).forEach(p => allProducts.add(p));
+                    perSymbolResults.push({ symbol: sym, stats: computeSymbolStats(evts) });
+                });
+
+                // Sort merged events by timestamp descending (latest first)
+                allEvents.sort((a, b) => {
+                    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+                    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+                    return tb - ta;
+                });
+
+                // Populate product dropdown
+                if (productSel) {
                     const current = productSel.value || '';
-                    const options = [''].concat(data.products_seen);
+                    const options = [''].concat([...allProducts].sort());
                     productSel.innerHTML = options
                         .map(p => `<option value="${p}">${p ? p : 'All Products'}</option>`)
                         .join('');
-                    // restore selection
                     productSel.value = options.includes(current) ? current : '';
                 }
 
-                renderLifecycleEvents(data.events || []);
-                
+                renderConsolidatedStats(allEvents);
+                renderPerSymbolAccordion(perSymbolResults);
+                renderLifecycleEvents(allEvents);
+                // Override the status set by renderLifecycleEvents with multi-symbol summary
+                if (status && _selectedSymbols.length > 1) {
+                    status.textContent = `Found ${allEvents.length} lifecycle event(s) across ${_selectedSymbols.length} symbol(s).`;
+                }
+
                 // Update subscription indicators after rendering buttons
                 updateSubscriptionIndicators();
             } catch (e) {
@@ -955,6 +1215,46 @@
             }
         }
 
+        function computeGroupStats(events) {
+            // For each unique symbol, use the latest event (events are sorted latest-first)
+            const latestBySymbol = {};
+            events.forEach(e => {
+                const key = (e.symbol || '') + '|' + (e.product || '');
+                if (!latestBySymbol[key]) latestBySymbol[key] = e;
+            });
+            let bookedPnl = 0, unbookedPnl = 0, exitPnl = 0, active = 0, closed = 0;
+            Object.values(latestBySymbol).forEach(e => {
+                bookedPnl += Number(e.after_booked_pnl || 0);
+                unbookedPnl += Number(e.after_unbooked_pnl || 0);
+                if (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0) closed++;
+                else active++;
+            });
+            // Sum exit_pnl from all EXITED events (each is a distinct realised P&L)
+            events.forEach(e => { if (e.exit_pnl) exitPnl += Number(e.exit_pnl || 0); });
+            return { bookedPnl, unbookedPnl, exitPnl, active, closed, symbols: Object.keys(latestBySymbol).length };
+        }
+
+        function renderStatsBadge(stats, compact) {
+            const c = v => v > 0 ? '#28a745' : (v < 0 ? '#dc3545' : '#888');
+            const total = stats.bookedPnl + stats.unbookedPnl;
+            if (compact) {
+                return `<span style="display:inline-flex;gap:10px;align-items:center;font-size:0.8em;font-weight:normal;margin-left:8px;">` +
+                    `<span title="Latest booked P&amp;L across positions in this expiry">Bkd: <b style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
+                    `<span title="Latest unbooked P&amp;L across open positions">Unbkd: <b style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
+                    `<span title="Total P&amp;L" style="color:${c(total)}; font-weight:bold;">= ₹${fmtNum(total,0)}</span>` +
+                    `<span title="Open positions" style="color:#555;">● ${stats.active}</span>` +
+                    `<span title="Closed positions" style="color:#999;">✕ ${stats.closed}</span>` +
+                    `</span>`;
+            }
+            return `<span style="display:inline-flex;gap:14px;align-items:center;font-size:0.83em;font-weight:normal;margin-left:10px;">` +
+                `<span title="Latest booked P&amp;L across all positions">Booked: <b style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
+                `<span title="Latest unbooked P&amp;L across open positions">Unbooked: <b style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
+                `<span title="Total P&amp;L (Booked + Unbooked)" style="color:${c(total)}; font-weight:bold;">Total: ₹${fmtNum(total,0)}</span>` +
+                `<span title="Open positions" style="color:#555;">● ${stats.active} open</span>` +
+                `<span title="Closed positions" style="color:#aaa;">✕ ${stats.closed} closed</span>` +
+                `</span>`;
+        }
+
         function renderUnderlyingGroups(underlyings, events) {
             const container = document.getElementById('underlying-groups-container');
             if (!container) return;
@@ -997,8 +1297,13 @@
                 headerDiv.className = 'underlying-header';
                 headerDiv.onclick = () => toggleUnderlyingGroup(underlying);
 
+                const underlyingStats = computeGroupStats(eventList);
                 const titleSpan = document.createElement('span');
-                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span><span class="underlying-count">(${eventList.length} events)</span>`;
+                titleSpan.style.display = 'flex';
+                titleSpan.style.alignItems = 'center';
+                titleSpan.style.flexWrap = 'wrap';
+                titleSpan.style.gap = '4px';
+                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span><span class="underlying-count">(${eventList.length} events)</span>${renderStatsBadge(underlyingStats, false)}`;
 
                 const buttonsDiv = document.createElement('div');
                 buttonsDiv.style.display = 'flex';
@@ -1097,12 +1402,33 @@
                         }
                     });
 
+                    // Apply open/closed position filter
+                    const positionStatusFilter = document.querySelector('input[name="position-status-filter"]:checked')?.value || 'all';
+                    let visibleEvents = sortedEvents;
+                    if (positionStatusFilter !== 'all') {
+                        // Determine latest state per symbol (expiryEvents sorted latest-first)
+                        const latestBySymbol = {};
+                        expiryEvents.forEach(e => {
+                            const key = (e.symbol || '') + '|' + (e.product || '');
+                            if (!latestBySymbol[key]) latestBySymbol[key] = e;
+                        });
+                        const matchingSymbols = new Set();
+                        Object.entries(latestBySymbol).forEach(([key, e]) => {
+                            const isClosed = e.type === 'EXITED' || Number(e.after_quantity || 0) === 0;
+                            if (positionStatusFilter === 'open' && !isClosed) matchingSymbols.add(key);
+                            if (positionStatusFilter === 'closed' && isClosed) matchingSymbols.add(key);
+                        });
+                        visibleEvents = sortedEvents.filter(e => matchingSymbols.has((e.symbol || '') + '|' + (e.product || '')));
+                    }
+                    if (visibleEvents.length === 0) return;
+
                     const expiryId = `${underlying}-${expiryKey}`.replace(/[^a-zA-Z0-9]/g, '_');
+                    const expiryStats = computeGroupStats(expiryEvents);
 
                     expiryHtml += `
                         <div class="expiry-section" style="margin-top: 15px; border-left: 3px solid #ddd; padding-left: 15px;">
                             <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-                                <span onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span></span>
+                                <span onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true)}</span>
                                 <button 
                                     data-subscribe-btn="true"
                                     data-subscribe-type="expiry"
@@ -1134,7 +1460,7 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                        ${sortedEvents.map(e => {
+                                        ${visibleEvents.map(e => {
                                             const typeLower = (e.type || '').toLowerCase();
                                             const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
 
@@ -1309,6 +1635,13 @@
                 });
             }
 
+            // Add event listeners for position status filter radios
+            document.querySelectorAll('input[name="position-status-filter"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    reRenderUnderlyingGroups();
+                });
+            });
+
             const isNoPositionChangeSummary = (text) => {
                 text = (text || '').trim();
                 // Legacy
@@ -1405,10 +1738,32 @@
             };
 
             const chooseSuggestion = (value) => {
-                if (!symbolSearchInput) return;
-                symbolSearchInput.value = value || '';
-                hideSuggestBox();
-                symbolSearchInput.focus();
+                if (!value) return;
+                const upper = value.toUpperCase();
+                if (_selectedSymbols.includes(upper)) {
+                    removeSymbolTag(upper);
+                } else {
+                    addSymbolTag(upper);
+                }
+                // Refresh suggest box in-place to reflect updated check states
+                // without closing it — user can keep multi-selecting
+                const currentQuery = (symbolSearchInput?.value || '').trim();
+                if (currentQuery.length >= 2) {
+                    scheduleSymbolSuggestions(currentQuery);
+                } else {
+                    // Re-render existing items with updated check marks
+                    const box = document.getElementById('symbol-suggest-box');
+                    if (box) {
+                        box.querySelectorAll('.suggest-item').forEach(item => {
+                            const v = item.getAttribute('data-value') || '';
+                            const already = _selectedSymbols.includes(v.toUpperCase());
+                            item.style.color = already ? '#aaa' : '';
+                            item.textContent = (already ? '✓ ' : '') + v;
+                            item.setAttribute('data-value', v);
+                        });
+                    }
+                }
+                if (symbolSearchInput) symbolSearchInput.focus();
             };
 
             if (symbolSearchInput) {
@@ -1421,7 +1776,16 @@
                     if (!suggestBox || suggestBox.style.display === 'none') {
                         if (ev.key === 'Enter') {
                             ev.preventDefault();
-                            runSymbolSearch();
+                            const val = (symbolSearchInput.value || '').trim();
+                            if (val) {
+                                addSymbolTag(val);
+                                symbolSearchInput.value = '';
+                            } else {
+                                runSymbolSearch();
+                            }
+                        } else if (ev.key === 'Backspace' && !symbolSearchInput.value && _selectedSymbols.length > 0) {
+                            // Remove last tag on backspace when input is empty
+                            removeSymbolTag(_selectedSymbols[_selectedSymbols.length - 1]);
                         }
                         return;
                     }
@@ -1439,9 +1803,10 @@
                         applySuggestActive();
                     } else if (ev.key === 'Enter') {
                         ev.preventDefault();
-                        const chosen = items[Math.max(0, suggestActiveIndex)]?.getAttribute('data-value');
+                        const chosen = suggestActiveIndex >= 0
+                            ? items[suggestActiveIndex]?.getAttribute('data-value')
+                            : items[0]?.getAttribute('data-value');
                         if (chosen) chooseSuggestion(chosen);
-                        runSymbolSearch();
                     } else if (ev.key === 'Escape') {
                         ev.preventDefault();
                         hideSuggestBox();
@@ -1462,19 +1827,16 @@
                     const item = t.closest ? t.closest('.suggest-item') : null;
                     if (!item) return;
                     const value = item.getAttribute('data-value');
-                    if (value) {
-                        chooseSuggestion(value);
-                        runSymbolSearch();
-                    }
+                    if (value) chooseSuggestion(value);
                 });
             }
 
-            // Hide suggestions when clicking outside
+            // Hide suggestions when clicking outside the entire suggest area
             document.addEventListener('click', (ev) => {
                 const target = ev.target;
                 if (!target) return;
-                if (target.id === 'symbol-search-input') return;
-                if (suggestBox && (target === suggestBox || (suggestBox.contains && suggestBox.contains(target)))) return;
+                const wrap = document.getElementById('symbol-suggest-wrap');
+                if (wrap && (wrap === target || wrap.contains(target))) return;
                 hideSuggestBox();
             });
 
