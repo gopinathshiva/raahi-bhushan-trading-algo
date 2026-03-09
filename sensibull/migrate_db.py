@@ -14,6 +14,11 @@ def column_exists(cursor, table_name, column_name):
     columns = [row[1] for row in cursor.fetchall()]
     return column_name in columns
 
+def table_exists(cursor, table_name):
+    """Check if a table exists"""
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    return cursor.fetchone() is not None
+
 def migrate_database():
     """Run all database migrations"""
     print("Running database migrations...")
@@ -47,6 +52,27 @@ def migrate_database():
         migrations_applied += 1
         print("    ✓ Added 'added_at' column")
     
+    # Migration 4: Create ai_chat_history table if missing
+    if not table_exists(c, 'ai_chat_history'):
+        print("  - Creating 'ai_chat_history' table...")
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS ai_chat_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                scope_type TEXT NOT NULL,
+                underlying TEXT NOT NULL,
+                expiry_key TEXT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (profile_id) REFERENCES profiles (id)
+            )
+        ''')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_ai_chat_scope ON ai_chat_history (profile_id, scope_type, underlying, expiry_key)')
+        migrations_applied += 1
+        print("    ✓ Created 'ai_chat_history' table")
+
     # Commit all changes
     conn.commit()
     conn.close()
