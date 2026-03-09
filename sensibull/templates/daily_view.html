@@ -81,6 +81,10 @@
             .lifecycle-table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
             .lifecycle-table th, .lifecycle-table td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; vertical-align: top; }
             .lifecycle-table th { background: #f2f2f2; position: sticky; top: 0; z-index: 1; }
+            .lifecycle-table th.sortable { cursor: pointer; user-select: none; }
+            .lifecycle-table th.sortable:hover { background: #e2e6ea; }
+            .lifecycle-table th .sort-indicator { margin-left: 6px; color: #999; font-size: 0.85em; }
+            .lifecycle-table th.sorted-asc .sort-indicator, .lifecycle-table th.sorted-desc .sort-indicator { color: #007bff; }
             .table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
             .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.85em; font-weight: bold; }
             .pill.entered { background: #d4edda; color: #155724; }
@@ -123,6 +127,97 @@
             .sym-accordion-stat { display: flex; flex-direction: column; }
             .sym-accordion-stat-label { color: #666; font-size: 0.75em; text-transform: uppercase; }
             .sym-accordion-stat-value { font-size: 1.05em; font-weight: bold; }
+
+            /* AI Chat Panel */
+            .ai-chat-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 9000; }
+            .ai-chat-overlay.open { display: block; }
+            .ai-chat-panel {
+                display: flex; flex-direction: column;
+                position: fixed; top: 0; right: -520px; width: min(500px, 100vw); height: 100vh;
+                background: #fff; box-shadow: -4px 0 24px rgba(0,0,0,0.18);
+                z-index: 9001; transition: right 0.3s ease;
+            }
+            .ai-chat-panel.open { right: 0; }
+            .ai-chat-panel-header {
+                display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+                background: #1a1a2e; color: white; flex-shrink: 0; flex-wrap: wrap;
+            }
+            .ai-chat-panel-title { font-weight: bold; font-size: 0.95em; flex: 1; min-width: 0; }
+            .ai-chat-panel-title small { display: block; font-weight: normal; font-size: 0.8em; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .ai-model-select {
+                padding: 4px 8px; border-radius: 4px; border: 1px solid #444; background: #2d2d4e;
+                color: white; font-size: 0.8em; cursor: pointer;
+            }
+            .ai-chat-close-btn {
+                background: none; border: none; color: white; font-size: 1.4em;
+                cursor: pointer; padding: 2px 6px; border-radius: 4px; line-height: 1;
+            }
+            .ai-chat-close-btn:hover { background: rgba(255,255,255,0.15); }
+            .ai-clear-btn {
+                background: none; border: 1px solid #555; color: #ccc; font-size: 0.75em;
+                padding: 3px 8px; border-radius: 4px; cursor: pointer;
+            }
+            .ai-clear-btn:hover { background: rgba(255,255,255,0.1); }
+            .ai-context-bar {
+                background: #f8f9fa; border-bottom: 1px solid #e9ecef;
+                font-size: 0.82em; flex-shrink: 0;
+            }
+            .ai-context-bar-header {
+                padding: 8px 14px; cursor: pointer; display: flex; justify-content: space-between;
+                align-items: center; color: #555; user-select: none;
+            }
+            .ai-context-bar-header:hover { background: #eef; }
+            .ai-context-bar-body { padding: 0 14px 10px; display: none; }
+            .ai-context-bar-body.open { display: block; }
+            .ai-context-stat { display: inline-block; margin-right: 16px; margin-top: 6px; }
+            .ai-context-stat-label { color: #888; font-size: 0.85em; }
+            .ai-context-stat-value { font-weight: bold; }
+            .ai-messages {
+                flex: 1; overflow-y: auto; padding: 14px; display: flex;
+                flex-direction: column; gap: 12px;
+            }
+            .ai-msg { max-width: 88%; word-wrap: break-word; }
+            .ai-msg.user { align-self: flex-end; }
+            .ai-msg.assistant { align-self: flex-start; }
+            .ai-msg-bubble {
+                padding: 10px 14px; border-radius: 14px; line-height: 1.5; font-size: 0.9em;
+                white-space: pre-wrap;
+            }
+            .ai-msg.user .ai-msg-bubble { background: #007bff; color: white; border-bottom-right-radius: 4px; }
+            .ai-msg.assistant .ai-msg-bubble { background: #f1f3f5; color: #222; border-bottom-left-radius: 4px; }
+            .ai-msg-meta { font-size: 0.72em; color: #aaa; margin-top: 3px; }
+            .ai-msg.user .ai-msg-meta { text-align: right; }
+            .ai-typing { align-self: flex-start; }
+            .ai-typing .ai-msg-bubble { background: #f1f3f5; color: #888; font-style: italic; }
+            .ai-suggestions { padding: 6px 14px 4px; display: flex; flex-wrap: wrap; gap: 6px; flex-shrink: 0; border-top: 1px solid #eee; }
+            .ai-suggestion-chip {
+                padding: 4px 10px; border-radius: 20px; border: 1px solid #007bff;
+                color: #007bff; font-size: 0.78em; cursor: pointer; background: white;
+                white-space: nowrap;
+            }
+            .ai-suggestion-chip:hover { background: #e8f0fe; }
+            .ai-input-area {
+                display: flex; gap: 8px; padding: 12px 14px;
+                border-top: 1px solid #e9ecef; flex-shrink: 0; background: white;
+            }
+            .ai-input-area textarea {
+                flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px;
+                resize: none; font-size: 0.9em; font-family: inherit; line-height: 1.4;
+            }
+            .ai-input-area textarea:focus { outline: none; border-color: #007bff; }
+            .ai-send-btn {
+                padding: 8px 16px; background: #007bff; color: white; border: none;
+                border-radius: 8px; cursor: pointer; font-size: 0.9em; align-self: flex-end;
+                white-space: nowrap;
+            }
+            .ai-send-btn:disabled { background: #6c757d; cursor: not-allowed; }
+            .ai-send-btn:hover:not(:disabled) { background: #0056b3; }
+            .ai-empty-state { text-align: center; color: #aaa; padding: 40px 20px; font-size: 0.9em; }
+            /* provider label badge in chat */
+            .ai-provider-badge {
+                display: inline-block; font-size: 0.7em; padding: 1px 6px; border-radius: 10px;
+                background: #e9ecef; color: #555; margin-left: 6px; vertical-align: middle;
+            }
         </style>
         <div class="tabs">
             <button class="tab-btn active" id="tab-btn-daily" onclick="switchTab('daily')">Daily Timeline</button>
@@ -303,6 +398,12 @@
                     Sort by Strike Price (PE first, then CE)
                 </label>
             </div>
+            <div style="margin-top: 6px; margin-bottom: 10px;">
+                <label style="cursor:pointer; user-select:none;">
+                    <input type="checkbox" id="consolidate-trades" style="margin-right:6px;" />
+                    Consolidate Trades (1 row per symbol)
+                </label>
+            </div>
             <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:18px;">
                 <span style="font-weight:bold; font-size:0.9em; color:#555;">Show:</span>
                 <label style="cursor:pointer; user-select:none;">
@@ -405,6 +506,31 @@
                         </div>
                     </div>
                     <span id="chart-filter-count" style="font-size:0.85em; color:#666;"></span>
+                    <div style="width:1px; background:#ddd; height:28px; margin:0 4px;"></div>
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">Filter by Date:</label>
+                    <select id="chart-date-filter" onchange="handleDateFilterChange()" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.9em; min-width:180px;">
+                        <option value="">All Dates</option>
+                    </select>
+                    <div style="width:1px; background:#ddd; height:28px; margin:0 4px;"></div>
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">Event Type:</label>
+                    <select id="chart-event-type-filter" onchange="handleEventTypeFilterChange()" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.9em;">
+                        <option value="">All</option>
+                        <option value="ENTERED">Entered</option>
+                        <option value="MODIFIED">Modified</option>
+                        <option value="EXITED">Exited</option>
+                    </select>
+                    <div style="width:1px; background:#ddd; height:28px; margin:0 4px;"></div>
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">Option Type:</label>
+                    <select id="chart-option-type-filter" onchange="handleOptionTypeFilterChange()" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.9em;">
+                        <option value="">All</option>
+                        <option value="PE">PE</option>
+                        <option value="CE">CE</option>
+                    </select>
+                    <div style="width:1px; background:#ddd; height:28px; margin:0 4px;"></div>
+                    <label style="font-size:0.85em; font-weight:bold; color:#666;">Expiry:</label>
+                    <select id="chart-expiry-filter" onchange="handleExpiryFilterChange()" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.9em; min-width:140px;">
+                        <option value="">All Expiries</option>
+                    </select>
                 </div>
             </div>
 
@@ -1141,6 +1267,7 @@
         // Track if underlying trades have been loaded
         let _underlyingTradesLoaded = false;
         let _cachedUnderlyingsData = null;
+        const _expiryEventsCache = {};
 
         async function loadUnderlyingTrades(forceReload = false) {
             // Only auto-load once; manual refresh (forceReload=true) always proceeds
@@ -1215,6 +1342,400 @@
             }
         }
 
+        // ========== Per-expiry table filter functions ==========
+
+        function toggleEtfPosDropdown(expiryId) {
+            const dropdown = document.getElementById(`etf-pos-dropdown-${expiryId}`);
+            if (!dropdown) return;
+            const isOpen = dropdown.style.display !== 'none';
+            // Close all other open etf dropdowns
+            document.querySelectorAll('[id^="etf-pos-dropdown-"]').forEach(d => { d.style.display = 'none'; });
+            if (!isOpen) dropdown.style.display = 'block';
+        }
+
+        function toggleEtfPosAll(expiryId) {
+            const allCb = document.getElementById(`etf-pos-all-${expiryId}`);
+            const optionsDiv = document.getElementById(`etf-pos-options-${expiryId}`);
+            if (!allCb || !optionsDiv) return;
+            optionsDiv.querySelectorAll('input[type="checkbox"][data-pos]').forEach(cb => { cb.checked = allCb.checked; });
+            const labelEl = document.getElementById(`etf-pos-label-${expiryId}`);
+            if (labelEl) labelEl.textContent = allCb.checked ? 'All Positions' : '0 selected';
+            filterExpiryTable(expiryId);
+        }
+
+        function handleEtfPosChange(expiryId) {
+            const allCb = document.getElementById(`etf-pos-all-${expiryId}`);
+            const optionsDiv = document.getElementById(`etf-pos-options-${expiryId}`);
+            if (!allCb || !optionsDiv) return;
+            const cbs = optionsDiv.querySelectorAll('input[type="checkbox"][data-pos]');
+            const checkedCount = [...cbs].filter(cb => cb.checked).length;
+            allCb.checked = checkedCount === cbs.length;
+            allCb.indeterminate = checkedCount > 0 && checkedCount < cbs.length;
+            const labelEl = document.getElementById(`etf-pos-label-${expiryId}`);
+            if (labelEl) labelEl.textContent = checkedCount === cbs.length ? 'All Positions' : `${checkedCount} of ${cbs.length} selected`;
+            filterExpiryTable(expiryId);
+        }
+
+        function filterExpiryTable(expiryId) {
+            // Check if there's an active sort for this expiry
+            const sortState = expiryTableSortState[expiryId];
+            if (sortState && sortState.column) {
+                // Use the sorted version
+                filterExpiryTableWithSort(expiryId, sortState.column, sortState.direction);
+                return;
+            }
+            
+            const cached = _expiryEventsCache[expiryId];
+            if (!cached) return;
+            const tbody = document.getElementById(`etf-tbody-${expiryId}`);
+            if (!tbody) return;
+
+            const typeFilter = document.getElementById(`etf-type-${expiryId}`)?.value || '';
+            const optTypeFilter = document.getElementById(`etf-opttype-${expiryId}`)?.value || '';
+
+            const posOptionsDiv = document.getElementById(`etf-pos-options-${expiryId}`);
+            const posCheckboxes = posOptionsDiv ? posOptionsDiv.querySelectorAll('input[type="checkbox"][data-pos]') : [];
+            const selectedPositions = new Set([...posCheckboxes].filter(cb => cb.checked).map(cb => cb.dataset.pos));
+            const allPosSelected = posCheckboxes.length === 0 || selectedPositions.size === posCheckboxes.length;
+
+            // Get date filter value
+            const dateFilter = document.getElementById(`etf-date-${expiryId}`)?.value || '';
+
+            // Apply global position-status filter
+            const positionStatusFilter = document.querySelector('input[name="position-status-filter"]:checked')?.value || 'all';
+            let visibleSymbolKeys = null;
+            if (positionStatusFilter !== 'all') {
+                const latestBySymbol = {};
+                cached.events.forEach(e => {
+                    const key = (e.symbol || '') + '|' + (e.product || '');
+                    if (!latestBySymbol[key]) latestBySymbol[key] = e;
+                });
+                visibleSymbolKeys = new Set();
+                Object.entries(latestBySymbol).forEach(([key, e]) => {
+                    const isClosed = e.type === 'EXITED' || Number(e.after_quantity || 0) === 0;
+                    if (positionStatusFilter === 'open' && !isClosed) visibleSymbolKeys.add(key);
+                    if (positionStatusFilter === 'closed' && isClosed) visibleSymbolKeys.add(key);
+                });
+            }
+
+            // Sort events
+            const sortByStrike = document.getElementById('sort-by-strike')?.checked || false;
+            const sortedEvents = cached.events.slice().sort((a, b) => {
+                if (sortByStrike) {
+                    const tA = getOptionType(a.symbol || ''), tB = getOptionType(b.symbol || '');
+                    const sA = getStrikePrice(a.symbol || '') || 0, sB = getStrikePrice(b.symbol || '') || 0;
+                    if (tA === 'PE' && tB === 'CE') return -1;
+                    if (tA === 'CE' && tB === 'PE') return 1;
+                    return sA - sB;
+                }
+                return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+            });
+
+            const filtered = sortedEvents.filter(e => {
+                const sym = e.symbol || '';
+                const symKey = sym + '|' + (e.product || '');
+                if (visibleSymbolKeys && !visibleSymbolKeys.has(symKey)) return false;
+                if (!allPosSelected && !selectedPositions.has(sym)) return false;
+                if (typeFilter && (e.type || '') !== typeFilter) return false;
+                if (optTypeFilter && getOptionType(sym) !== optTypeFilter) return false;
+                // Apply date filter
+                if (dateFilter) {
+                    const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
+                    if (eventDate !== dateFilter) return false;
+                }
+                return true;
+            });
+
+            tbody.innerHTML = filtered.map(e => renderEventRow(e, cached.underlying)).join('');
+            const countEl = document.getElementById(`etf-count-${expiryId}`);
+            if (countEl) countEl.textContent = filtered.length < cached.events.length ? `${filtered.length} of ${cached.events.length} events` : '';
+            const summaryEl = document.getElementById(`etf-summary-${expiryId}`);
+
+            // Determine which summary to show
+            const hasTypeFilter = typeFilter !== '';
+            const hasOptTypeFilter = optTypeFilter !== '';
+            const hasPositionFilter = !allPosSelected;
+            const hasDateFilter = dateFilter !== '';
+
+            if (summaryEl) {
+                if (hasTypeFilter || hasOptTypeFilter || hasDateFilter) {
+                    // Type, Option Type, or Date filter active → show consolidated summary
+                    summaryEl.innerHTML = buildConsolidatedEtfSummaryHtml(filtered);
+                } else if (hasPositionFilter) {
+                    // Only position filter active → show per-position summary
+                    summaryEl.innerHTML = buildEtfSummaryHtml(filtered);
+                } else {
+                    // No filters active → no summary
+                    summaryEl.innerHTML = '';
+                }
+            }
+        }
+
+        // Store sort state per expiry: { expiryId: { column: 'timestamp'|'booked_pnl'|'unbooked_pnl', direction: 'asc'|'desc' } }
+        const expiryTableSortState = {};
+
+        function handleExpiryTableSort(expiryId, column) {
+            const cached = _expiryEventsCache[expiryId];
+            if (!cached) return;
+
+            // Get or initialize sort state for this expiry
+            const currentState = expiryTableSortState[expiryId] || { column: null, direction: 'desc' };
+            
+            // Toggle direction if same column, otherwise default to desc
+            let newDirection = 'desc';
+            if (currentState.column === column) {
+                newDirection = currentState.direction === 'desc' ? 'asc' : 'desc';
+            }
+            
+            // Save new sort state
+            expiryTableSortState[expiryId] = { column, direction: newDirection };
+
+            // Re-apply filtering with new sort order
+            filterExpiryTableWithSort(expiryId, column, newDirection);
+            
+            // Update sort indicators in UI
+            updateSortIndicators(expiryId, column, newDirection);
+        }
+
+        function filterExpiryTableWithSort(expiryId, sortColumn, sortDirection) {
+            const cached = _expiryEventsCache[expiryId];
+            if (!cached) return;
+            const tbody = document.getElementById(`etf-tbody-${expiryId}`);
+            if (!tbody) return;
+
+            const typeFilter = document.getElementById(`etf-type-${expiryId}`)?.value || '';
+            const optTypeFilter = document.getElementById(`etf-opttype-${expiryId}`)?.value || '';
+            const dateFilter = document.getElementById(`etf-date-${expiryId}`)?.value || '';
+
+            const posOptionsDiv = document.getElementById(`etf-pos-options-${expiryId}`);
+            const posCheckboxes = posOptionsDiv ? posOptionsDiv.querySelectorAll('input[type="checkbox"][data-pos]') : [];
+            const selectedPositions = new Set([...posCheckboxes].filter(cb => cb.checked).map(cb => cb.dataset.pos));
+            const allPosSelected = posCheckboxes.length === 0 || selectedPositions.size === posCheckboxes.length;
+
+            // Apply global position-status filter
+            const positionStatusFilter = document.querySelector('input[name="position-status-filter"]:checked')?.value || 'all';
+            let visibleSymbolKeys = null;
+            if (positionStatusFilter !== 'all') {
+                const latestBySymbol = {};
+                cached.events.forEach(e => {
+                    const key = (e.symbol || '') + '|' + (e.product || '');
+                    if (!latestBySymbol[key]) latestBySymbol[key] = e;
+                });
+                visibleSymbolKeys = new Set();
+                Object.entries(latestBySymbol).forEach(([key, e]) => {
+                    const isClosed = e.type === 'EXITED' || Number(e.after_quantity || 0) === 0;
+                    if (positionStatusFilter === 'open' && !isClosed) visibleSymbolKeys.add(key);
+                    if (positionStatusFilter === 'closed' && isClosed) visibleSymbolKeys.add(key);
+                });
+            }
+
+            // Sort events based on selected column and direction
+            const sortByStrike = document.getElementById('sort-by-strike')?.checked || false;
+            const sortedEvents = cached.events.slice().sort((a, b) => {
+                // First apply strike sort if enabled (only applies when not sorting by column)
+                if (sortByStrike && !sortColumn) {
+                    const tA = getOptionType(a.symbol || ''), tB = getOptionType(b.symbol || '');
+                    const sA = getStrikePrice(a.symbol || '') || 0, sB = getStrikePrice(b.symbol || '') || 0;
+                    if (tA === 'PE' && tB === 'CE') return -1;
+                    if (tA === 'CE' && tB === 'PE') return 1;
+                    return sA - sB;
+                }
+
+                // Apply column-based sorting
+                if (sortColumn) {
+                    let valA, valB;
+                    if (sortColumn === 'timestamp') {
+                        valA = new Date(a.timestamp || 0).getTime();
+                        valB = new Date(b.timestamp || 0).getTime();
+                    } else if (sortColumn === 'booked_pnl') {
+                        valA = Number(a.after_booked_pnl || 0);
+                        valB = Number(b.after_booked_pnl || 0);
+                    } else if (sortColumn === 'unbooked_pnl') {
+                        valA = Number(a.after_unbooked_pnl || 0);
+                        valB = Number(b.after_unbooked_pnl || 0);
+                    }
+
+                    if (sortDirection === 'asc') {
+                        return valA - valB;
+                    } else {
+                        return valB - valA;
+                    }
+                }
+
+                // Default: sort by timestamp descending
+                return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+            });
+
+            const filtered = sortedEvents.filter(e => {
+                const sym = e.symbol || '';
+                const symKey = sym + '|' + (e.product || '');
+                if (visibleSymbolKeys && !visibleSymbolKeys.has(symKey)) return false;
+                if (!allPosSelected && !selectedPositions.has(sym)) return false;
+                if (typeFilter && (e.type || '') !== typeFilter) return false;
+                if (optTypeFilter && getOptionType(sym) !== optTypeFilter) return false;
+                // Apply date filter
+                if (dateFilter) {
+                    const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
+                    if (eventDate !== dateFilter) return false;
+                }
+                return true;
+            });
+
+            tbody.innerHTML = filtered.map(e => renderEventRow(e, cached.underlying)).join('');
+            const countEl = document.getElementById(`etf-count-${expiryId}`);
+            if (countEl) countEl.textContent = filtered.length < cached.events.length ? `${filtered.length} of ${cached.events.length} events` : '';
+            const summaryEl = document.getElementById(`etf-summary-${expiryId}`);
+
+            // Determine which summary to show
+            const hasTypeFilter = typeFilter !== '';
+            const hasOptTypeFilter = optTypeFilter !== '';
+            const hasPositionFilter = !allPosSelected;
+            const hasDateFilter = dateFilter !== '';
+
+            if (summaryEl) {
+                if (hasTypeFilter || hasOptTypeFilter || hasDateFilter) {
+                    // Type, Option Type, or Date filter active → show consolidated summary
+                    summaryEl.innerHTML = buildConsolidatedEtfSummaryHtml(filtered);
+                } else if (hasPositionFilter) {
+                    // Only position filter active → show per-position summary
+                    summaryEl.innerHTML = buildEtfSummaryHtml(filtered);
+                } else {
+                    // No filters active → no summary
+                    summaryEl.innerHTML = '';
+                }
+            }
+        }
+
+        function updateSortIndicators(expiryId, activeColumn, activeDirection) {
+            const table = document.getElementById(`etf-tbody-${expiryId}`)?.closest('table');
+            if (!table) return;
+            
+            // Clear all indicators
+            table.querySelectorAll('th').forEach(th => {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+                const indicator = th.querySelector('.sort-indicator');
+                if (indicator) indicator.textContent = '⇅';
+            });
+            
+            // Find the active column header and set indicator
+            const columnMap = {
+                'timestamp': 0,
+                'booked_pnl': 8,
+                'unbooked_pnl': 9
+            };
+            const thIndex = columnMap[activeColumn];
+            if (thIndex !== undefined) {
+                const th = table.querySelectorAll('th')[thIndex];
+                if (th) {
+                    th.classList.add(activeDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
+                    const indicator = th.querySelector('.sort-indicator');
+                    if (indicator) indicator.textContent = activeDirection === 'asc' ? '↑' : '↓';
+                }
+            }
+        }
+
+        function populateEtfDateFilter(expiryId, events) {
+            const select = document.getElementById(`etf-date-${expiryId}`);
+            if (!select) return;
+            
+            select.innerHTML = '<option value="">All Dates</option>';
+            
+            // Group events by local date (YYYY-MM-DD) and count
+            const dateCounts = {};
+            events.forEach(e => {
+                const d = new Date(e.timestamp);
+                const dateStr = d.toLocaleDateString('en-CA'); // YYYY-MM-DD in local timezone
+                dateCounts[dateStr] = (dateCounts[dateStr] || 0) + 1;
+            });
+            
+            // Sort dates descending and add as options
+            Object.keys(dateCounts).sort((a, b) => b.localeCompare(a)).forEach(dateStr => {
+                const option = document.createElement('option');
+                option.value = dateStr;
+                option.textContent = `${dateStr} (${dateCounts[dateStr]})`;
+                select.appendChild(option);
+            });
+        }
+
+        function buildEtfSummaryHtml(events) {
+            if (!events || events.length === 0) return '<div style="padding:8px 10px; color:#999; font-size:0.85em;">No events match filters.</div>';
+
+            // Latest event per symbol (use booked/unbooked from it)
+            const latestBySymbol = {};
+            events.slice().sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).forEach(e => {
+                const key = (e.symbol || '') + '|' + (e.product || '');
+                if (!latestBySymbol[key]) latestBySymbol[key] = e;
+            });
+
+            const positions = Object.values(latestBySymbol);
+            let totalBooked = 0, totalUnbooked = 0;
+
+            const rows = positions.map(e => {
+                const booked = Number(e.after_booked_pnl || 0);
+                const unbooked = Number(e.after_unbooked_pnl || 0);
+                const total = booked + unbooked;
+                totalBooked += booked;
+                totalUnbooked += unbooked;
+                const isClosed = e.type === 'EXITED' || Number(e.after_quantity || 0) === 0;
+                const bc = booked > 0 ? '#28a745' : (booked < 0 ? '#dc3545' : '#888');
+                const uc = unbooked > 0 ? '#28a745' : (unbooked < 0 ? '#dc3545' : '#888');
+                const tc = total > 0 ? '#28a745' : (total < 0 ? '#dc3545' : '#888');
+                return `<div style="display:flex; gap:16px; align-items:center; padding:5px 10px; border-bottom:1px solid #f0f0f0; flex-wrap:wrap;">
+                    <span style="font-size:0.82em; font-weight:600; min-width:180px; color:#333; white-space:nowrap;">${e.symbol || ''} <span style="color:${isClosed ? '#aaa' : '#28a745'}; font-size:0.78em; font-weight:normal;">${isClosed ? '✕ closed' : '● open'}</span></span>
+                    <span style="font-size:0.82em; color:#555;">Booked: <b style="color:${bc};">₹${fmtNum(booked, 2)}</b></span>
+                    <span style="font-size:0.82em; color:#555;">Unbooked: <b style="color:${uc};">₹${fmtNum(unbooked, 2)}</b></span>
+                    <span style="font-size:0.82em; font-weight:bold; color:${tc};">Total: ₹${fmtNum(total, 2)}</span>
+                </div>`;
+            }).join('');
+
+            const grandTotal = totalBooked + totalUnbooked;
+            const tbc = totalBooked > 0 ? '#28a745' : (totalBooked < 0 ? '#dc3545' : '#888');
+            const tuc = totalUnbooked > 0 ? '#28a745' : (totalUnbooked < 0 ? '#dc3545' : '#888');
+            const tgc = grandTotal > 0 ? '#28a745' : (grandTotal < 0 ? '#dc3545' : '#888');
+
+            return `<div style="border:1px solid #dee2e6; border-radius:6px; overflow:hidden; margin-bottom:8px;">
+                <div style="background:#f2f4f8; padding:6px 10px; font-weight:bold; font-size:0.78em; color:#555; text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid #dee2e6;">P&amp;L Summary</div>
+                ${rows}
+                <div style="display:flex; gap:16px; align-items:center; padding:6px 10px; background:#e8f0fe; flex-wrap:wrap; border-top:1px solid #c5d0e8;">
+                    <span style="font-size:0.82em; font-weight:bold; min-width:180px; color:#333;">Total (${positions.length} position${positions.length !== 1 ? 's' : ''})</span>
+                    <span style="font-size:0.82em; color:#555;">Booked: <b style="color:${tbc};">₹${fmtNum(totalBooked, 2)}</b></span>
+                    <span style="font-size:0.82em; color:#555;">Unbooked: <b style="color:${tuc};">₹${fmtNum(totalUnbooked, 2)}</b></span>
+                    <span style="font-size:0.82em; font-weight:bold; color:${tgc};">Total: ₹${fmtNum(grandTotal, 2)}</span>
+                </div>
+            </div>`;
+        }
+
+        function buildConsolidatedEtfSummaryHtml(events) {
+            if (!events || events.length === 0) return '<div style="padding:8px 10px; color:#999; font-size:0.85em;">No events match filters.</div>';
+
+            // Aggregate P&L across all filtered events
+            let totalBooked = 0, totalUnbooked = 0;
+            const uniqueSymbols = new Set();
+
+            events.forEach(e => {
+                const booked = Number(e.after_booked_pnl || 0);
+                const unbooked = Number(e.after_unbooked_pnl || 0);
+                totalBooked += booked;
+                totalUnbooked += unbooked;
+                if (e.symbol) uniqueSymbols.add(e.symbol + '|' + (e.product || ''));
+            });
+
+            const grandTotal = totalBooked + totalUnbooked;
+            const tbc = totalBooked > 0 ? '#28a745' : (totalBooked < 0 ? '#dc3545' : '#888');
+            const tuc = totalUnbooked > 0 ? '#28a745' : (totalUnbooked < 0 ? '#dc3545' : '#888');
+            const tgc = grandTotal > 0 ? '#28a745' : (grandTotal < 0 ? '#dc3545' : '#888');
+
+            return `<div style="border:1px solid #dee2e6; border-radius:6px; overflow:hidden; margin-bottom:8px;">
+                <div style="background:#f2f4f8; padding:6px 10px; font-weight:bold; font-size:0.78em; color:#555; text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid #dee2e6;">Consolidated P&amp;L Summary</div>
+                <div style="display:flex; gap:16px; align-items:center; padding:10px 10px; background:#fff; flex-wrap:wrap; border-bottom:1px solid #f0f0f0;">
+                    <span style="font-size:0.82em; font-weight:bold; min-width:180px; color:#333;">Filtered Events (${uniqueSymbols.size} unique symbol${uniqueSymbols.size !== 1 ? 's' : ''})</span>
+                    <span style="font-size:0.82em; color:#555;">Booked: <b style="color:${tbc};">₹${fmtNum(totalBooked, 2)}</b></span>
+                    <span style="font-size:0.82em; color:#555;">Unbooked: <b style="color:${tuc};">₹${fmtNum(totalUnbooked, 2)}</b></span>
+                    <span style="font-size:0.82em; font-weight:bold; color:${tgc};">Total: ₹${fmtNum(grandTotal, 2)}</span>
+                </div>
+            </div>`;
+        }
+
         function computeGroupStats(events) {
             // For each unique symbol, use the latest event (events are sorted latest-first)
             const latestBySymbol = {};
@@ -1253,6 +1774,258 @@
                 `<span title="Open positions" style="color:#555;">● ${stats.active} open</span>` +
                 `<span title="Closed positions" style="color:#aaa;">✕ ${stats.closed} closed</span>` +
                 `</span>`;
+        }
+
+        function renderEventRow(e, underlying) {
+            const typeLower = (e.type || '').toLowerCase();
+            const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
+
+            const qtyBefore = Number(e.before_quantity || 0);
+            const qtyAfter = Number(e.after_quantity || 0);
+            const dq = Number(e.quantity_diff || (qtyAfter - qtyBefore));
+            const dqSign = dq > 0 ? '+' : '';
+
+            let exitFillHtml = '';
+            if ((e.type || '') === 'EXITED') {
+                exitFillHtml = `<div style="font-weight:bold; color:#721c24;">Exit P&L: ₹${fmtNum(e.exit_pnl || 0, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
+            } else if ((e.type || '') === 'MODIFIED') {
+                const side = (e.implied_fill_side || '').toUpperCase();
+                const fillQty = Math.abs(parseInt(e.implied_fill_qty || 0, 10) || 0);
+                const fillPrice = Number(e.implied_fill_price || 0);
+                if (side && fillQty > 0 && fillPrice > 0) {
+                    const fillColor = side === 'BUY' ? '#28a745' : '#dc3545';
+                    exitFillHtml = `<div style="font-weight:bold; color:${fillColor};">Implied Fill (${side}): Qty ${fillQty} @ ₹${fmtNum(fillPrice, 2)} <span style="color:#666; font-weight:normal;">(approx)</span></div>`;
+                }
+                if (e.exit_pnl && e.exit_pnl != 0) {
+                    const exitColor = e.exit_pnl > 0 ? '#28a745' : '#dc3545';
+                    exitFillHtml += `<div style="font-weight:bold; color:${exitColor}; margin-top:4px;">Exit P&L: ₹${fmtNum(e.exit_pnl, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
+                }
+            }
+
+            const positionId = JSON.stringify({symbol: e.symbol || '', product: e.product || ''}).replace(/"/g, '&quot;');
+            const actionHtml = `
+                <div style="display: flex; gap: 5px; align-items: center; justify-content: center;">
+                    ${e.change_id ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>` : ''}
+                    <button
+                        data-subscribe-btn="true"
+                        data-subscribe-type="position"
+                        data-subscribe-underlying="${underlying}"
+                        data-subscribe-position="${positionId}"
+                        onclick="event.stopPropagation(); toggleSubscription('position', '${underlying}', null, {symbol: '${e.symbol || ''}', product: '${e.product || ''}'});"
+                        style="padding: 2px 6px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75em;"
+                        title="Subscribe to this position">
+                        🔕
+                    </button>
+                </div>
+            `;
+
+            const bookedPnl = Number(e.after_booked_pnl || 0);
+            const bookedPnlColor = bookedPnl > 0 ? '#28a745' : (bookedPnl < 0 ? '#dc3545' : '#666');
+            const bookedPnlHtml = `<span style="color:${bookedPnlColor}; font-weight:bold;">₹${fmtNum(bookedPnl, 2)}</span>`;
+
+            const unbookedPnl = Number(e.after_unbooked_pnl || 0);
+            const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
+            const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
+
+            return `<tr>
+                <td>${fmtTimestamp(e.timestamp)}</td>
+                <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
+                <td>${e.symbol || ''}</td>
+                <td>${e.product || ''}</td>
+                <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
+                <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
+                <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
+                <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
+                <td class="num">${bookedPnlHtml}</td>
+                <td class="num">${unbookedPnlHtml}</td>
+                <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
+                <td style="text-align:center;">${actionHtml}</td>
+            </tr>`;
+        }
+
+        function consolidateEvents(events) {
+            const groups = {};
+            events.forEach(e => {
+                const key = (e.symbol || '') + '|' + (e.product || '');
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(e);
+            });
+
+            return Object.values(groups).map(evts => {
+                const sorted = evts.slice().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                const latest = sorted[sorted.length - 1];
+                const first = sorted[0];
+
+                const enteredEvts = sorted.filter(e => e.type === 'ENTERED');
+                const exitedEvts = sorted.filter(e => e.type === 'EXITED');
+
+                const entryDate = enteredEvts.length > 0 ? enteredEvts[0].timestamp : first.timestamp;
+                const exitDate = exitedEvts.length > 0 ? exitedEvts[exitedEvts.length - 1].timestamp : null;
+
+                const netQty = Number(latest.after_quantity || 0);
+                const isOpen = netQty !== 0;
+
+                // Avg entry: broker-computed weighted average at the time of the last ENTERED event
+                let avgEntryPrice = 0;
+                if (enteredEvts.length > 0) {
+                    avgEntryPrice = Number(enteredEvts[enteredEvts.length - 1].after_average_price || 0);
+                } else {
+                    avgEntryPrice = Number(first.after_average_price || 0);
+                }
+
+                // Avg exit: weighted average using exit_price × exited qty across all exit events
+                let totalExitPnl = 0;
+                let totalExitQty = 0, totalExitValue = 0;
+                sorted.forEach(e => {
+                    if (e.exit_pnl) totalExitPnl += Number(e.exit_pnl);
+                    if (e.exit_price && Number(e.exit_price) > 0) {
+                        const exitQty = Math.abs(Number(e.before_quantity || 0) - Number(e.after_quantity || 0));
+                        if (exitQty > 0) {
+                            totalExitQty += exitQty;
+                            totalExitValue += exitQty * Number(e.exit_price);
+                        }
+                    }
+                });
+                const avgExitPrice = totalExitQty > 0 ? totalExitValue / totalExitQty : 0;
+
+                return {
+                    symbol: first.symbol || '',
+                    product: first.product || '',
+                    isOpen,
+                    netQty,
+                    entryDate,
+                    exitDate,
+                    avgEntryPrice,
+                    avgExitPrice,
+                    totalExitPnl,
+                    bookedPnl: Number(latest.after_booked_pnl || 0),
+                    unbookedPnl: Number(latest.after_unbooked_pnl || 0),
+                    ltp: Number(latest.after_last_price || 0),
+                    lot_size: first.lot_size || 0,
+                    events: evts,
+                };
+            });
+        }
+
+        function renderConsolidatedExpiry(visibleEvents, underlying, expiryId) {
+            const consolidatedRows = consolidateEvents(visibleEvents);
+
+            // Open positions first, then by symbol name
+            consolidatedRows.sort((a, b) => {
+                if (a.isOpen && !b.isOpen) return -1;
+                if (!a.isOpen && b.isOpen) return 1;
+                return a.symbol.localeCompare(b.symbol);
+            });
+
+            const rowsHtml = consolidatedRows.map((row, idx) => {
+                const rowId = `${expiryId}_c${idx}`;
+                const statusClass = row.isOpen ? 'entered' : 'exited';
+                const statusText = row.isOpen ? 'OPEN' : 'CLOSED';
+
+                const pnlColor = row.totalExitPnl > 0 ? '#28a745' : (row.totalExitPnl < 0 ? '#dc3545' : '#888');
+                const unbookedColor = row.unbookedPnl > 0 ? '#28a745' : (row.unbookedPnl < 0 ? '#dc3545' : '#888');
+
+                const positionId = JSON.stringify({symbol: row.symbol, product: row.product}).replace(/"/g, '&quot;');
+                const actionHtml = `
+                    <div style="display: flex; gap: 5px; align-items: center; justify-content: center;">
+                        <button
+                            data-subscribe-btn="true"
+                            data-subscribe-type="position"
+                            data-subscribe-underlying="${underlying}"
+                            data-subscribe-position="${positionId}"
+                            onclick="event.stopPropagation(); toggleSubscription('position', '${underlying}', null, {symbol: '${row.symbol}', product: '${row.product}'});"
+                            style="padding: 2px 6px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75em;"
+                            title="Subscribe to this position">
+                            🔕
+                        </button>
+                    </div>
+                `;
+
+                // Sub-rows: sort latest first (same as default view)
+                const subEvents = row.events.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                const subRowsHtml = subEvents.map(e => renderEventRow(e, underlying)).join('');
+
+                return `
+                    <tr class="consolidated-row" onclick="toggleConsolidatedRow('${rowId}')" style="cursor:pointer;">
+                        <td style="text-align:center; color:#888;" id="consolidated-toggle-${rowId}">▶</td>
+                        <td style="font-weight:bold;">${row.symbol}</td>
+                        <td>${row.product}</td>
+                        <td><span class="pill ${statusClass}">${statusText}</span></td>
+                        <td style="font-size:0.9em;">${fmtTimestamp(row.entryDate)}</td>
+                        <td style="font-size:0.9em;">${row.exitDate ? fmtTimestamp(row.exitDate) : '<span style="color:#aaa;">—</span>'}</td>
+                        <td class="num">${row.netQty !== 0 ? row.netQty : '<span style="color:#aaa;">0</span>'}</td>
+                        <td class="num">₹${fmtNum(row.avgEntryPrice, 2)}</td>
+                        <td class="num">${row.isOpen
+                            ? `<span style="color:#555;" title="Last Traded Price">LTP: ₹${fmtNum(row.ltp, 2)}</span>`
+                            : `₹${fmtNum(row.avgExitPrice, 2)}`}</td>
+                        <td class="num"><span style="color:${pnlColor}; font-weight:bold;">₹${fmtNum(row.totalExitPnl, 2)}</span></td>
+                        <td class="num">${row.isOpen
+                            ? `<span style="color:${unbookedColor}; font-weight:bold;">₹${fmtNum(row.unbookedPnl, 2)}</span>`
+                            : '<span style="color:#aaa;">—</span>'}</td>
+                        <td style="text-align:center;">${actionHtml}</td>
+                    </tr>
+                    <tr id="consolidated-subrows-${rowId}" style="display:none;">
+                        <td colspan="12" style="padding:0; background:#f0f4f8; border-top:none;">
+                            <table class="lifecycle-table" style="margin:0; border-radius:0; font-size:0.9em; border:none;">
+                                <thead>
+                                    <tr>
+                                        <th style="min-width:150px;">Time</th>
+                                        <th style="min-width:110px;">Type</th>
+                                        <th>Symbol</th>
+                                        <th style="min-width:70px;">Product</th>
+                                        <th style="min-width:160px;" class="num">Qty (Before → After)</th>
+                                        <th style="min-width:140px;" class="num">Avg (Before)</th>
+                                        <th style="min-width:140px;" class="num">Avg (After)</th>
+                                        <th style="min-width:140px;" class="num">LTP (After)</th>
+                                        <th style="min-width:170px;" class="num">Booked P&L (After)</th>
+                                        <th style="min-width:170px;" class="num">Unbooked P&L (After)</th>
+                                        <th style="min-width:240px;">Exit / Fill</th>
+                                        <th style="width:70px; text-align:center;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${subRowsHtml}
+                                </tbody>
+                            </table>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <div class="table-wrapper">
+                    <table class="lifecycle-table">
+                        <thead>
+                            <tr>
+                                <th style="width:30px;"></th>
+                                <th>Symbol</th>
+                                <th style="min-width:70px;">Product</th>
+                                <th style="min-width:90px;">Status</th>
+                                <th style="min-width:150px;">Entry Date</th>
+                                <th style="min-width:150px;">Exit Date</th>
+                                <th style="min-width:110px;" class="num">Net Qty</th>
+                                <th style="min-width:140px;" class="num">Avg Entry</th>
+                                <th style="min-width:150px;" class="num">Avg Exit / LTP</th>
+                                <th style="min-width:160px;" class="num">Realized P&L</th>
+                                <th style="min-width:160px;" class="num">Unrealized P&L</th>
+                                <th style="width:70px; text-align:center;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function toggleConsolidatedRow(rowId) {
+            const subrows = document.getElementById(`consolidated-subrows-${rowId}`);
+            const toggle = document.getElementById(`consolidated-toggle-${rowId}`);
+            if (!subrows) return;
+            const isOpen = subrows.style.display !== 'none';
+            subrows.style.display = isOpen ? 'none' : 'table-row';
+            if (toggle) toggle.textContent = isOpen ? '▶' : '▼';
         }
 
         function renderUnderlyingGroups(underlyings, events) {
@@ -1358,8 +2131,17 @@
                 toggleSpan.textContent = '▶';
                 toggleSpan.id = `underlying-toggle-${underlying}`;
 
+                const aiBtn = document.createElement('button');
+                aiBtn.innerHTML = '&#x1F916; Ask AI';
+                aiBtn.style.cssText = 'padding:6px 12px; background:#6f42c1; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9em;';
+                aiBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openAIChatPanel(underlying, 'underlying', '', underlying + ' — All Expiries');
+                };
+
                 buttonsDiv.appendChild(subscribeBtn);
                 buttonsDiv.appendChild(chartBtn);
+                buttonsDiv.appendChild(aiBtn);
                 buttonsDiv.appendChild(toggleSpan);
 
                 headerDiv.appendChild(titleSpan);
@@ -1432,110 +2214,104 @@
                     const expiryId = `${underlying}-${expiryKey}`.replace(/[^a-zA-Z0-9]/g, '_');
                     const expiryStats = computeGroupStats(expiryEvents);
 
+                    // Compute ISO expiry date for AI scope key (use local date parts to avoid UTC offset issues)
+                    const expiryIso = expiryData.date
+                        ? `${expiryData.date.getFullYear()}-${String(expiryData.date.getMonth()+1).padStart(2,'0')}-${String(expiryData.date.getDate()).padStart(2,'0')}`
+                        : '';
+
+                    // Cache events for per-table filtering
+                    _expiryEventsCache[expiryId] = { underlying, events: expiryEvents };
+
+                    // Build unique symbols list for position filter
+                    const expirySymbols = [...new Set(expiryEvents.map(e => e.symbol || '').filter(Boolean))];
+                    const posFilterOptionsHtml = expirySymbols.map(sym =>
+                        `<label style="display:block; padding:3px 6px; cursor:pointer; font-size:0.85em; user-select:none; white-space:nowrap;">
+                            <input type="checkbox" checked data-pos="${sym.replace(/"/g, '&quot;')}" onchange="handleEtfPosChange('${expiryId}')" style="margin-right:5px;" />${sym}
+                        </label>`
+                    ).join('');
+
                     expiryHtml += `
                         <div class="expiry-section" style="margin-top: 15px; border-left: 3px solid #ddd; padding-left: 15px;">
-                            <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                            <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
                                 <span onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true)}</span>
-                                <button 
-                                    data-subscribe-btn="true"
-                                    data-subscribe-type="expiry"
-                                    data-subscribe-underlying="${underlying}"
-                                    data-subscribe-expiry="${expiryDateStr}"
-                                    onclick="event.stopPropagation(); toggleSubscription('expiry', '${underlying}', '${expiryDateStr}', null);"
-                                    style="padding: 4px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; margin-right: 10px;">
-                                    🔕 Subscribe
-                                </button>
-                                <span class="expiry-toggle" id="expiry-toggle-${expiryId}" onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer;">▶</span>
+                                <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
+                                    <button
+                                        data-subscribe-btn="true"
+                                        data-subscribe-type="expiry"
+                                        data-subscribe-underlying="${underlying}"
+                                        data-subscribe-expiry="${expiryDateStr}"
+                                        onclick="event.stopPropagation(); toggleSubscription('expiry', '${underlying}', '${expiryDateStr}', null);"
+                                        style="padding: 4px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
+                                        🔕 Subscribe
+                                    </button>
+                                    <button
+                                        onclick="event.stopPropagation(); openAIChatPanel('${underlying}', 'expiry', '${expiryIso}', '${underlying} \u2014 ${expiryDateStr}');"
+                                        style="padding: 4px 10px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
+                                        &#x1F916; Ask AI
+                                    </button>
+                                    <span class="expiry-toggle" id="expiry-toggle-${expiryId}" onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer;">▶</span>
+                                </div>
                             </div>
                             <div class="expiry-content" id="expiry-content-${expiryId}" style="display: none;">
-                                <div class="table-wrapper">
-                                    <table class="lifecycle-table">
-                                        <thead>
-                                            <tr>
-                                                <th style="min-width: 150px;">Time</th>
-                                                <th style="min-width: 110px;">Type</th>
-                                                <th>Symbol</th>
-                                                <th style="min-width: 70px;">Product</th>
-                                                <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
-                                                <th style="min-width: 140px;" class="num">Avg (Before)</th>
-                                                <th style="min-width: 140px;" class="num">Avg (After)</th>
-                                                <th style="min-width: 140px;" class="num">LTP (After)</th>
-                                                <th style="min-width: 170px;" class="num">Booked P&L (After)</th>
-                                                <th style="min-width: 170px;" class="num">Unbooked P&L (After)</th>
-                                                <th style="min-width: 240px;">Exit / Fill</th>
-                                                <th style="width: 70px; text-align:center;">Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                        ${visibleEvents.map(e => {
-                                            const typeLower = (e.type || '').toLowerCase();
-                                            const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
-
-                                            const qtyBefore = Number(e.before_quantity || 0);
-                                            const qtyAfter = Number(e.after_quantity || 0);
-                                            const dq = Number(e.quantity_diff || (qtyAfter - qtyBefore));
-                                            const dqSign = dq > 0 ? '+' : '';
-
-                                            let exitFillHtml = '';
-                                            if ((e.type || '') === 'EXITED') {
-                                                exitFillHtml = `<div style="font-weight:bold; color:#721c24;">Exit P&L: ₹${fmtNum(e.exit_pnl || 0, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
-                                            } else if ((e.type || '') === 'MODIFIED') {
-                                                const side = (e.implied_fill_side || '').toUpperCase();
-                                                const fillQty = Math.abs(parseInt(e.implied_fill_qty || 0, 10) || 0);
-                                                const fillPrice = Number(e.implied_fill_price || 0);
-                                                if (side && fillQty > 0 && fillPrice > 0) {
-                                                    const fillColor = side === 'BUY' ? '#28a745' : '#dc3545';
-                                                    exitFillHtml = `<div style="font-weight:bold; color:${fillColor};">Implied Fill (${side}): Qty ${fillQty} @ ₹${fmtNum(fillPrice, 2)} <span style="color:#666; font-weight:normal;">(approx)</span></div>`;
-                                                }
-                                                if (e.exit_pnl && e.exit_pnl != 0) {
-                                                    const exitColor = e.exit_pnl > 0 ? '#28a745' : '#dc3545';
-                                                    exitFillHtml += `<div style="font-weight:bold; color:${exitColor}; margin-top:4px;">Exit P&L: ₹${fmtNum(e.exit_pnl, 2)} | Exit Price: ₹${fmtNum(e.exit_price || 0, 2)}</div>`;
-                                                }
-                                            }
-
-                                            const positionId = JSON.stringify({symbol: e.symbol || '', product: e.product || ''}).replace(/"/g, '&quot;');
-                                            const actionHtml = `
-                                                <div style="display: flex; gap: 5px; align-items: center; justify-content: center;">
-                                                    ${e.change_id ? `<button class="diff-btn" style="border:none; background:none; cursor:pointer; font-size:1.2em;" onclick="showDiff(${e.change_id})" title="View Details">&#128065;</button>` : ''}
-                                                    <button 
-                                                        data-subscribe-btn="true"
-                                                        data-subscribe-type="position"
-                                                        data-subscribe-underlying="${underlying}"
-                                                        data-subscribe-position="${positionId}"
-                                                        onclick="event.stopPropagation(); toggleSubscription('position', '${underlying}', null, {symbol: '${e.symbol || ''}', product: '${e.product || ''}'});"
-                                                        style="padding: 2px 6px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75em;"
-                                                        title="Subscribe to this position">
-                                                        🔕
-                                                    </button>
+                                ${document.getElementById('consolidate-trades')?.checked
+                                    ? renderConsolidatedExpiry(visibleEvents, underlying, expiryId)
+                                    : `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; padding:8px 10px; background:#f0f4ff; border-radius:6px; border:1px solid #d0d8ef;">
+                                        <span style="font-size:0.82em; font-weight:bold; color:#555;">Filters:</span>
+                                        <div style="position:relative;">
+                                            <button id="etf-pos-toggle-${expiryId}" onclick="toggleEtfPosDropdown('${expiryId}')" style="padding:4px 10px; border:1px solid #ccc; border-radius:4px; background:white; cursor:pointer; min-width:150px; text-align:left; font-size:0.85em;">
+                                                <span id="etf-pos-label-${expiryId}">All Positions</span>
+                                                <span style="float:right;">▼</span>
+                                            </button>
+                                            <div id="etf-pos-dropdown-${expiryId}" style="display:none; position:absolute; top:100%; left:0; margin-top:4px; background:white; border:1px solid #ccc; border-radius:4px; box-shadow:0 4px 8px rgba(0,0,0,0.15); min-width:260px; max-height:300px; overflow-y:auto; z-index:500;">
+                                                <div style="padding:8px; border-bottom:1px solid #eee; background:#f8f9fa;">
+                                                    <label style="cursor:pointer; font-weight:bold; user-select:none; font-size:0.9em;">
+                                                        <input type="checkbox" id="etf-pos-all-${expiryId}" checked onchange="toggleEtfPosAll('${expiryId}')" style="margin-right:5px;" />Select All
+                                                    </label>
                                                 </div>
-                                            `;
-
-                                            const bookedPnl = Number(e.after_booked_pnl || 0);
-                                            const bookedPnlColor = bookedPnl > 0 ? '#28a745' : (bookedPnl < 0 ? '#dc3545' : '#666');
-                                            const bookedPnlHtml = `<span style="color:${bookedPnlColor}; font-weight:bold;">₹${fmtNum(bookedPnl, 2)}</span>`;
-
-                                            const unbookedPnl = Number(e.after_unbooked_pnl || 0);
-                                            const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
-                                            const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
-
-                                            return `<tr>
-                                                <td>${fmtTimestamp(e.timestamp)}</td>
-                                                <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
-                                                <td>${e.symbol || ''}</td>
-                                                <td>${e.product || ''}</td>
-                                                <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
-                                                <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
-                                                <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
-                                                <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
-                                                <td class="num">${bookedPnlHtml}</td>
-                                                <td class="num">${unbookedPnlHtml}</td>
-                                                <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
-                                                <td style="text-align:center;">${actionHtml}</td>
-                                            </tr>`;
-                                        }).join('')}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                                <div id="etf-pos-options-${expiryId}" style="padding:6px;">${posFilterOptionsHtml}</div>
+                                            </div>
+                                        </div>
+                                        <select id="etf-type-${expiryId}" onchange="filterExpiryTable('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em;">
+                                            <option value="">All Types</option>
+                                            <option value="ENTERED">Entered</option>
+                                            <option value="MODIFIED">Modified</option>
+                                            <option value="EXITED">Exited</option>
+                                        </select>
+                                        <select id="etf-opttype-${expiryId}" onchange="filterExpiryTable('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em;">
+                                            <option value="">All Option Types</option>
+                                            <option value="PE">PE</option>
+                                            <option value="CE">CE</option>
+                                        </select>
+                                        <select id="etf-date-${expiryId}" onchange="filterExpiryTable('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em; min-width:140px;">
+                                            <option value="">All Dates</option>
+                                        </select>
+                                        <span id="etf-count-${expiryId}" style="font-size:0.82em; color:#666;"></span>
+                                    </div>
+                                    <div id="etf-summary-${expiryId}"></div>
+                                    <div class="table-wrapper">
+                                        <table class="lifecycle-table">
+                                            <thead>
+                                                <tr>
+                                                    <th class="sortable" style="min-width: 150px;" onclick="handleExpiryTableSort('${expiryId}', 'timestamp')">Time <span class="sort-indicator">⇅</span></th>
+                                                    <th style="min-width: 110px;">Type</th>
+                                                    <th>Symbol</th>
+                                                    <th style="min-width: 70px;">Product</th>
+                                                    <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
+                                                    <th style="min-width: 140px;" class="num">Avg (Before)</th>
+                                                    <th style="min-width: 140px;" class="num">Avg (After)</th>
+                                                    <th style="min-width: 140px;" class="num">LTP (After)</th>
+                                                    <th class="sortable num" style="min-width: 170px;" onclick="handleExpiryTableSort('${expiryId}', 'booked_pnl')">Booked P&L (After) <span class="sort-indicator">⇅</span></th>
+                                                    <th class="sortable num" style="min-width: 170px;" onclick="handleExpiryTableSort('${expiryId}', 'unbooked_pnl')">Unbooked P&L (After) <span class="sort-indicator">⇅</span></th>
+                                                    <th style="min-width: 240px;">Exit / Fill</th>
+                                                    <th style="width: 70px; text-align:center;">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="etf-tbody-${expiryId}">
+                                                ${visibleEvents.map(e => renderEventRow(e, underlying)).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>`
+                                }
                             </div>
                         </div>
                     `;
@@ -1550,6 +2326,17 @@
                 groupDiv.appendChild(contentDiv);
                 container.appendChild(groupDiv);
             });
+            
+            // Populate date filters for all expiry tables after DOM is updated
+            // Use setTimeout to ensure DOM elements exist
+            setTimeout(() => {
+                Object.keys(_expiryEventsCache).forEach(expiryId => {
+                    const select = document.getElementById(`etf-date-${expiryId}`);
+                    if (select && _expiryEventsCache[expiryId]) {
+                        populateEtfDateFilter(expiryId, _expiryEventsCache[expiryId].events);
+                    }
+                });
+            }, 0);
         }
 
         function toggleExpiryGroup(expiryId) {
@@ -1631,6 +2418,11 @@
             if (excludeExpiredCheckbox) {
                 excludeExpiredCheckbox.addEventListener('change', function() {
                     reRenderUnderlyingGroups();
+                    // Repopulate expiry filter in chart modal if events are loaded
+                    const expirySelect = document.getElementById('chart-expiry-filter');
+                    if (expirySelect && currentChartEvents.length > 0) {
+                        populateExpiryFilter(currentChartEvents);
+                    }
                 });
             }
 
@@ -1638,6 +2430,14 @@
             const sortByStrikeCheckbox = document.getElementById('sort-by-strike');
             if (sortByStrikeCheckbox) {
                 sortByStrikeCheckbox.addEventListener('change', function() {
+                    reRenderUnderlyingGroups();
+                });
+            }
+
+            // Add event listener for consolidate-trades checkbox
+            const consolidateTradesCheckbox = document.getElementById('consolidate-trades');
+            if (consolidateTradesCheckbox) {
+                consolidateTradesCheckbox.addEventListener('change', function() {
                     reRenderUnderlyingGroups();
                 });
             }
@@ -1987,6 +2787,10 @@
         let selectedPositions = new Set(); // Track selected positions
         let allChartData = null; // Store loaded chart data
         let visibleChartSymbols = []; // Symbols shown in filter dropdown (may exclude expired)
+        let selectedChartDate = null; // Selected date filter (YYYY-MM-DD or null for all)
+        let selectedEventType = null; // ENTERED / MODIFIED / EXITED or null for all
+        let selectedOptionType = null; // PE / CE or null for all
+        let selectedExpiry = null; // Expiry string (e.g. "26FEB25") or null for all
 
         function openChartModal(underlying, events) {
             currentChartUnderlying = underlying;
@@ -2009,9 +2813,22 @@
 
             selectedPositions = new Set(uniqueSymbols); // All (non-expired) selected by default
             visibleChartSymbols = uniqueSymbols; // Track for label count
+            selectedChartDate = null; // Reset date filter
+            selectedEventType = null; // Reset event type filter
+            selectedOptionType = null; // Reset option type filter
+            selectedExpiry = null; // Reset expiry filter
+            document.getElementById('chart-event-type-filter').value = '';
+            document.getElementById('chart-option-type-filter').value = '';
+            document.getElementById('chart-expiry-filter').value = '';
 
             // Populate position filter dropdown
             populatePositionFilter(uniqueSymbols);
+
+            // Populate date filter dropdown
+            populateDateFilter(events);
+
+            // Populate expiry filter dropdown
+            populateExpiryFilter(events);
 
             const modal = document.getElementById('chart-modal');
             const title = document.getElementById('chart-modal-title');
@@ -2269,6 +3086,111 @@
             updateFilterLabel();
         }
 
+        function populateDateFilter(events) {
+            const select = document.getElementById('chart-date-filter');
+            select.innerHTML = '<option value="">All Dates</option>';
+
+            // Group events by local date (YYYY-MM-DD) and count position changes
+            const dateCounts = {};
+            events.forEach(e => {
+                const d = new Date(e.timestamp);
+                const dateStr = d.toLocaleDateString('en-CA'); // YYYY-MM-DD in local timezone
+                dateCounts[dateStr] = (dateCounts[dateStr] || 0) + 1;
+            });
+
+            // Sort dates descending and add as options
+            Object.keys(dateCounts).sort((a, b) => b.localeCompare(a)).forEach(dateStr => {
+                const option = document.createElement('option');
+                option.value = dateStr;
+                option.textContent = `${dateStr} (${dateCounts[dateStr]})`;
+                select.appendChild(option);
+            });
+
+            selectedChartDate = null;
+        }
+
+        function handleDateFilterChange() {
+            const select = document.getElementById('chart-date-filter');
+            selectedChartDate = select.value || null;
+
+            if (selectedChartDate) {
+                document.getElementById('chart-from-date').value = selectedChartDate;
+                document.getElementById('chart-to-date').value = selectedChartDate;
+            }
+
+            // Re-render with filtered events if chart data already loaded
+            if (allChartData) {
+                renderChart(allChartData, currentChartEvents);
+            }
+        }
+
+        function handleEventTypeFilterChange() {
+            selectedEventType = document.getElementById('chart-event-type-filter').value || null;
+            if (allChartData) {
+                renderChart(allChartData, currentChartEvents);
+            }
+        }
+
+        function handleOptionTypeFilterChange() {
+            selectedOptionType = document.getElementById('chart-option-type-filter').value || null;
+            if (allChartData) {
+                renderChart(allChartData, currentChartEvents);
+            }
+        }
+
+        function populateExpiryFilter(events) {
+            const select = document.getElementById('chart-expiry-filter');
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">All Expiries</option>';
+
+            const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
+            const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+            // Build unique expiry map keyed by expiry_date (YYYY-MM-DD from backend)
+            // This guarantees no duplicates regardless of symbol format variations
+            const seen = {};
+            events.forEach(e => {
+                const d = e.expiry_date; // YYYY-MM-DD or null
+                if (d && !seen[d]) {
+                    seen[d] = true;
+                }
+            });
+
+            // Format YYYY-MM-DD → "DD MMM YY" for display
+            function fmtExpiry(dateStr) {
+                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                const parts = dateStr.split('-');
+                if (parts.length !== 3) return dateStr;
+                const day = parseInt(parts[2], 10);
+                const mon = months[parseInt(parts[1], 10) - 1] || '';
+                const yr = parts[0].slice(2);
+                return `${day} ${mon} ${yr}`;
+            }
+
+            // Sort ascending, optionally hide expired
+            Object.keys(seen)
+                .sort()
+                .forEach(dateStr => {
+                    if (excludeExpired && dateStr < todayStr) return;
+                    const option = document.createElement('option');
+                    option.value = dateStr;
+                    option.textContent = fmtExpiry(dateStr);
+                    select.appendChild(option);
+                });
+
+            // Restore previous selection if still present
+            if (currentValue && [...select.options].some(o => o.value === currentValue)) {
+                select.value = currentValue;
+            }
+        }
+
+        function handleExpiryFilterChange() {
+            selectedExpiry = document.getElementById('chart-expiry-filter').value || null;
+            if (allChartData) {
+                renderChart(allChartData, currentChartEvents);
+            }
+        }
+
         function togglePositionFilter() {
             const dropdown = document.getElementById('chart-filter-dropdown');
             dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
@@ -2369,9 +3291,14 @@
         document.addEventListener('click', function(event) {
             const dropdown = document.getElementById('chart-filter-dropdown');
             const toggle = document.getElementById('chart-filter-toggle');
-            
+
             if (dropdown && toggle && !dropdown.contains(event.target) && !toggle.contains(event.target)) {
                 dropdown.style.display = 'none';
+            }
+
+            // Close expiry table filter dropdowns when clicking outside
+            if (!event.target.closest('[id^="etf-pos-toggle-"],[id^="etf-pos-dropdown-"]')) {
+                document.querySelectorAll('[id^="etf-pos-dropdown-"]').forEach(d => { d.style.display = 'none'; });
             }
         });
 
@@ -2519,8 +3446,24 @@
                 };
             });
 
-            // Filter events based on selected positions
-            const filteredEvents = events.filter(e => selectedPositions.has(e.symbol));
+            // Filter events based on selected positions, date, event type, and option type
+            const filteredEvents = events.filter(e => {
+                if (!selectedPositions.has(e.symbol)) return false;
+                if (selectedChartDate) {
+                    const dateStr = new Date(e.timestamp).toLocaleDateString('en-CA');
+                    if (dateStr !== selectedChartDate) return false;
+                }
+                if (selectedEventType && e.type !== selectedEventType) return false;
+                if (selectedOptionType) {
+                    const sym = (e.symbol || '').toUpperCase();
+                    const endsWithPE = sym.endsWith('PE');
+                    const endsWithCE = sym.endsWith('CE');
+                    if (selectedOptionType === 'PE' && !endsWithPE) return false;
+                    if (selectedOptionType === 'CE' && !endsWithCE) return false;
+                }
+                if (selectedExpiry && e.expiry_date !== selectedExpiry) return false;
+                return true;
+            });
 
             // Prepare trade markers
             const markers = filteredEvents.map(e => {
@@ -2805,13 +3748,30 @@
             };
             const labelPlacements = []; // tracks placed label boxes for collision avoidance
 
+            // Group markers by timestamp so stacked markers on same candle get vertical offsets
+            const markerGroups = {};
+            markers.forEach(marker => {
+                const key = marker.timestamp;
+                if (!markerGroups[key]) markerGroups[key] = [];
+                markerGroups[key].push(marker);
+            });
+
             // Draw trade markers
             markers.forEach(marker => {
                 const dataIndex = data.findIndex(d => d.timestamp === marker.timestamp);
                 if (dataIndex === -1) return;
 
                 const x = xScale(dataIndex);
-                const y = yScale(marker.price);
+                const baseY = yScale(marker.price);
+
+                // Compute vertical offset for markers sharing the same candle
+                const group = markerGroups[marker.timestamp];
+                const groupIndex = group.indexOf(marker);
+                const groupSize = group.length;
+                const markerSizeForOffset = marker.type === 'EXITED' ? 10 : 8;
+                const totalSpan = (groupSize - 1) * markerSizeForOffset * 2.5;
+                const yOffset = groupSize > 1 ? (groupIndex * markerSizeForOffset * 2.5) - totalSpan / 2 : 0;
+                const y = baseY + yOffset;
 
                 let markerColor, markerSize;
                 if (marker.type === 'ENTERED') {
@@ -3483,5 +4443,449 @@
         loadSubscriptions();
         loadUnreadCount();
         setInterval(loadUnreadCount, 10000); // Check every 10 seconds for real-time alerts
+
+        // ====================================================================
+        // AI CHAT
+        // ====================================================================
+
+        const AI_SLUG = '{{ slug }}';
+
+        // Current chat scope state
+        let aiScope = { underlying: '', scopeType: 'underlying', expiryKey: '', scopeLabel: '' };
+        let aiIsStreaming = false;
+
+        function openAIChatPanel(underlying, scopeType, expiryKey, scopeLabel) {
+            aiScope = { underlying, scopeType, expiryKey: expiryKey || '', scopeLabel };
+
+            // Update panel header
+            const titleEl = document.getElementById('ai-chat-scope-label');
+            const subtitleEl = document.getElementById('ai-chat-scope-sublabel');
+            if (titleEl) titleEl.textContent = underlying + ' — AI Analysis';
+            if (subtitleEl) subtitleEl.textContent = scopeLabel;
+
+            // Derive events from the already-loaded cache (avoids passing large JSON in onclick)
+            let events = [];
+            if (_cachedUnderlyingsData && _cachedUnderlyingsData.events) {
+                const allEvents = _cachedUnderlyingsData.events[underlying] || [];
+                if (scopeType === 'expiry' && expiryKey) {
+                    events = allEvents.filter(e => {
+                        const d = getExpiryDateFromSymbolEnhanced(e.symbol || '');
+                        if (!d) return false;
+                        const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                        return iso === expiryKey;
+                    });
+                } else {
+                    events = allEvents;
+                }
+            }
+
+            // Populate context bar with computed stats
+            if (events.length > 0) {
+                let booked = 0, unbooked = 0, active = 0, closed = 0;
+                const latestBySymbol = {};
+                events.forEach(e => {
+                    const k = (e.symbol || '') + '|' + (e.product || '');
+                    if (!latestBySymbol[k]) latestBySymbol[k] = e;
+                });
+                Object.values(latestBySymbol).forEach(e => {
+                    booked += Number(e.after_booked_pnl || 0);
+                    unbooked += Number(e.after_unbooked_pnl || 0);
+                    if (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0) closed++;
+                    else active++;
+                });
+                const fmt = v => {
+                    const s = Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+                    return (v >= 0 ? '+' : '-') + s;
+                };
+                const c = v => v > 0 ? '#28a745' : v < 0 ? '#dc3545' : '#555';
+                document.getElementById('ai-ctx-symbols').textContent = Object.keys(latestBySymbol).length;
+                document.getElementById('ai-ctx-open').textContent = active;
+                document.getElementById('ai-ctx-closed').textContent = closed;
+                const bEl = document.getElementById('ai-ctx-booked');
+                bEl.textContent = fmt(booked);
+                bEl.style.color = c(booked);
+                const uEl = document.getElementById('ai-ctx-unbooked');
+                uEl.textContent = fmt(unbooked);
+                uEl.style.color = c(unbooked);
+                document.getElementById('ai-context-bar').style.display = 'block';
+            } else {
+                document.getElementById('ai-context-bar').style.display = 'none';
+            }
+
+            // Update suggestions based on scope
+            renderAISuggestions(scopeType);
+
+            // Ensure model selector shows correct default
+            _buildModelSelect();
+
+            // Load and render persisted history
+            loadAIChatHistory();
+
+            // Show panel
+            document.getElementById('ai-chat-overlay').classList.add('open');
+            document.getElementById('ai-chat-panel').classList.add('open');
+        }
+
+        function closeAIChatPanel() {
+            document.getElementById('ai-chat-overlay').classList.remove('open');
+            document.getElementById('ai-chat-panel').classList.remove('open');
+        }
+
+        function toggleAIContextBar() {
+            const body = document.getElementById('ai-context-bar-body');
+            const arrow = document.getElementById('ai-context-bar-arrow');
+            body.classList.toggle('open');
+            arrow.textContent = body.classList.contains('open') ? '▲' : '▼';
+        }
+
+        async function loadAIChatHistory() {
+            const messagesEl = document.getElementById('ai-messages');
+            messagesEl.innerHTML = '<div class="ai-empty-state">Loading history...</div>';
+
+            const params = new URLSearchParams({
+                slug: AI_SLUG,
+                scope_type: aiScope.scopeType,
+                underlying: aiScope.underlying,
+                expiry_key: aiScope.expiryKey,
+            });
+
+            try {
+                const res = await fetch('/api/ai/chat/history?' + params);
+                const data = await res.json();
+                if (data.error) { messagesEl.innerHTML = `<div class="ai-empty-state">${data.error}</div>`; return; }
+                if (!data.messages || data.messages.length === 0) {
+                    messagesEl.innerHTML = '<div class="ai-empty-state">No conversation yet.<br>Ask anything about these trades to get started.</div>';
+                    return;
+                }
+                messagesEl.innerHTML = '';
+                data.messages.forEach(m => appendAIMessage(m.role, m.content, m.model, m.created_at));
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            } catch (e) {
+                messagesEl.innerHTML = `<div class="ai-empty-state">Failed to load history: ${e}</div>`;
+            }
+        }
+
+        function appendAIMessage(role, content, model, createdAt) {
+            const messagesEl = document.getElementById('ai-messages');
+            // Clear empty state if present
+            const emptyState = messagesEl.querySelector('.ai-empty-state');
+            if (emptyState) emptyState.remove();
+
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `ai-msg ${role}`;
+
+            const bubble = document.createElement('div');
+            bubble.className = 'ai-msg-bubble';
+            bubble.textContent = content;
+
+            const meta = document.createElement('div');
+            meta.className = 'ai-msg-meta';
+            if (role === 'assistant' && model) {
+                meta.textContent = _modelDisplayName(model);
+            } else if (createdAt) {
+                try {
+                    const dt = new Date(createdAt);
+                    meta.textContent = dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+                } catch (e) { meta.textContent = ''; }
+            }
+
+            msgDiv.appendChild(bubble);
+            msgDiv.appendChild(meta);
+            messagesEl.appendChild(msgDiv);
+        }
+
+        async function sendAIMessage() {
+            if (aiIsStreaming) return;
+            const input = document.getElementById('ai-message-input');
+            const sendBtn = document.getElementById('ai-send-btn');
+            const model = document.getElementById('ai-model-select').value;
+            const message = (input.value || '').trim();
+            if (!message) return;
+
+            aiIsStreaming = true;
+            sendBtn.disabled = true;
+            input.value = '';
+            input.style.height = 'auto';
+
+            appendAIMessage('user', message, null, new Date().toISOString());
+            const messagesEl = document.getElementById('ai-messages');
+
+            // Add typing indicator
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'ai-msg ai-typing';
+            typingDiv.id = 'ai-typing-indicator';
+            typingDiv.innerHTML = '<div class="ai-msg-bubble">Thinking...</div>';
+            messagesEl.appendChild(typingDiv);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+
+            try {
+                const res = await fetch('/api/ai/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        slug: AI_SLUG,
+                        scope_type: aiScope.scopeType,
+                        underlying: aiScope.underlying,
+                        expiry_key: aiScope.expiryKey,
+                        message,
+                        model,
+                    }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+                    typingDiv.remove();
+                    appendAIMessage('assistant', 'Error: ' + (err.error || res.statusText), null, null);
+                    return;
+                }
+
+                // Remove typing indicator, create streaming bubble
+                typingDiv.remove();
+                const streamDiv = document.createElement('div');
+                streamDiv.className = 'ai-msg assistant';
+                const streamBubble = document.createElement('div');
+                streamBubble.className = 'ai-msg-bubble';
+                streamBubble.textContent = '';
+                const streamMeta = document.createElement('div');
+                streamMeta.className = 'ai-msg-meta';
+                streamMeta.textContent = _modelDisplayName(model);
+                streamDiv.appendChild(streamBubble);
+                streamDiv.appendChild(streamMeta);
+                messagesEl.appendChild(streamDiv);
+
+                // Read SSE stream
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        try {
+                            const evt = JSON.parse(line.slice(6));
+                            if (evt.type === 'chunk') {
+                                streamBubble.textContent += evt.text;
+                                messagesEl.scrollTop = messagesEl.scrollHeight;
+                            } else if (evt.type === 'done') {
+                                // Stream complete
+                            } else if (evt.type === 'error') {
+                                streamBubble.textContent += '\n\n[Error: ' + evt.message + ']';
+                            }
+                        } catch (e) { /* ignore parse errors */ }
+                    }
+                }
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            } catch (e) {
+                typingDiv.remove();
+                appendAIMessage('assistant', 'Network error: ' + e, null, null);
+            } finally {
+                aiIsStreaming = false;
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+
+        function sendAISuggestion(text) {
+            const input = document.getElementById('ai-message-input');
+            input.value = text;
+            input.focus();
+            input.setSelectionRange(text.length, text.length);
+        }
+
+        function renderAISuggestions(scopeType) {
+            const container = document.getElementById('ai-suggestions');
+            const underlyingSuggestions = [
+                'Summarize my overall performance on this underlying',
+                'What patterns do you see in my trades?',
+                'Which trades had the best risk/reward?',
+                'Am I scalping or holding positions longer?',
+                'What could I have done better?',
+            ];
+            const expirySuggestions = [
+                'Summarize this expiry performance',
+                'Was my entry timing good?',
+                'Analyze my exit strategy',
+                'Did I manage risk well in this expiry?',
+                'What strategy was I using — spread, directional, or hedge?',
+            ];
+            container.innerHTML = '';
+            (scopeType === 'expiry' ? expirySuggestions : underlyingSuggestions).forEach(s => {
+                const btn = document.createElement('button');
+                btn.className = 'ai-suggestion-chip';
+                btn.textContent = s;
+                btn.addEventListener('click', () => sendAISuggestion(s));
+                container.appendChild(btn);
+            });
+        }
+
+        async function clearAIChatHistory() {
+            if (!confirm('Clear all chat history for this scope?')) return;
+            try {
+                await fetch('/api/ai/chat/clear', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        slug: AI_SLUG,
+                        scope_type: aiScope.scopeType,
+                        underlying: aiScope.underlying,
+                        expiry_key: aiScope.expiryKey,
+                    }),
+                });
+                await loadAIChatHistory();
+            } catch (e) {
+                alert('Failed to clear: ' + e);
+            }
+        }
+
+        // ====================================================================
+        // DYNAMIC MODEL SELECTOR
+        // ====================================================================
+
+        let _aiProviders = [];
+
+        async function loadAIProviders() {
+            try {
+                const res = await fetch('/api/ai/providers');
+                const data = await res.json();
+                _aiProviders = data.providers || [];
+                _buildModelSelect();
+            } catch (e) {
+                console.warn('Failed to load AI providers', e);
+            }
+        }
+
+        function _buildModelSelect() {
+            const sel = document.getElementById('ai-model-select');
+            if (!sel) return;
+            const currentVal = sel.value;
+            sel.innerHTML = '';
+            let hasOptions = false;
+            _aiProviders.forEach(provider => {
+                if (!provider.connected || !provider.models || provider.models.length === 0) return;
+                const grp = document.createElement('optgroup');
+                grp.label = provider.name;
+                provider.models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = provider.id + ':' + m.id;
+                    opt.textContent = m.name;
+                    grp.appendChild(opt);
+                });
+                sel.appendChild(grp);
+                hasOptions = true;
+            });
+            if (!hasOptions) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No providers configured';
+                sel.appendChild(opt);
+            }
+            // Restore previous selection if still valid
+            if (currentVal && [...sel.options].some(o => o.value === currentVal)) {
+                sel.value = currentVal;
+            } else {
+                // Prefer Gemini 2.5 Flash, then first real option
+                const allOpts = [...sel.options].filter(o => !o.value.includes('__'));
+                const geminiFlashOpt = allOpts.find(o => o.value === 'gemini:gemini-2.5-flash');
+                const preferred = geminiFlashOpt || allOpts[0];
+                if (preferred) sel.value = preferred.value;
+            }
+        }
+
+        // ====================================================================
+        // MODEL LABEL HELPER
+        // ====================================================================
+
+        function _modelDisplayName(modelStr) {
+            if (!modelStr) return '';
+            // Try to find in providers list
+            const [provider, ...rest] = modelStr.split(':');
+            const modelId = rest.join(':');
+            const prov = _aiProviders.find(p => p.id === provider);
+            if (prov && prov.models) {
+                const m = prov.models.find(m => m.id === modelId);
+                if (m) return (prov.name.split(' ')[0]) + ' · ' + m.name;
+            }
+            // Fallback: prettify claude model strings
+            return modelStr.replace('anthropic:', '').replace('claude-', '')
+                .replace('-4-6', ' 4.6').replace('-4-5-20251001', ' 4.5');
+        }
+
+        // Load providers on page load
+        document.addEventListener('DOMContentLoaded', loadAIProviders);
+
+        // Allow Ctrl+Enter to send
+        document.addEventListener('DOMContentLoaded', function () {
+            const inp = document.getElementById('ai-message-input');
+            if (inp) {
+                inp.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        sendAIMessage();
+                    }
+                });
+            }
+        });
     </script>
+
+
+    <!-- AI Chat Overlay + Panel -->
+    <div class="ai-chat-overlay" id="ai-chat-overlay" onclick="closeAIChatPanel()"></div>
+    <div class="ai-chat-panel" id="ai-chat-panel">
+        <div class="ai-chat-panel-header">
+            <div class="ai-chat-panel-title">
+                <span id="ai-chat-scope-label">AI Analysis</span>
+                <small id="ai-chat-scope-sublabel"></small>
+            </div>
+            <select class="ai-model-select" id="ai-model-select" title="Select AI model">
+                <option value="">Loading models...</option>
+            </select>
+            <button class="ai-clear-btn" onclick="clearAIChatHistory()" title="Clear chat history">Clear</button>
+            <button class="ai-chat-close-btn" onclick="closeAIChatPanel()" title="Close">&#x2715;</button>
+        </div>
+
+        <div class="ai-context-bar" id="ai-context-bar">
+            <div class="ai-context-bar-header" onclick="toggleAIContextBar()">
+                <span>Trade Context Summary</span>
+                <span id="ai-context-bar-arrow">&#x25BC;</span>
+            </div>
+            <div class="ai-context-bar-body" id="ai-context-bar-body">
+                <span class="ai-context-stat">
+                    <span class="ai-context-stat-label">Symbols </span>
+                    <span class="ai-context-stat-value" id="ai-ctx-symbols">—</span>
+                </span>
+                <span class="ai-context-stat">
+                    <span class="ai-context-stat-label">Open </span>
+                    <span class="ai-context-stat-value" id="ai-ctx-open">—</span>
+                </span>
+                <span class="ai-context-stat">
+                    <span class="ai-context-stat-label">Closed </span>
+                    <span class="ai-context-stat-value" id="ai-ctx-closed">—</span>
+                </span>
+                <span class="ai-context-stat">
+                    <span class="ai-context-stat-label">Booked P&amp;L </span>
+                    <span class="ai-context-stat-value" id="ai-ctx-booked">—</span>
+                </span>
+                <span class="ai-context-stat">
+                    <span class="ai-context-stat-label">Unbooked P&amp;L </span>
+                    <span class="ai-context-stat-value" id="ai-ctx-unbooked">—</span>
+                </span>
+            </div>
+        </div>
+
+        <div class="ai-messages" id="ai-messages">
+            <div class="ai-empty-state">Open a trade group and click "Ask AI" to start analyzing.</div>
+        </div>
+
+        <div class="ai-suggestions" id="ai-suggestions"></div>
+
+        <div class="ai-input-area">
+            <textarea id="ai-message-input" placeholder="Ask about these trades... (Ctrl+Enter to send)" rows="2"></textarea>
+            <button class="ai-send-btn" id="ai-send-btn" onclick="sendAIMessage()">Send</button>
+        </div>
+    </div>
 {% endblock %}

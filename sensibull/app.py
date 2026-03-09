@@ -10,6 +10,8 @@ from database import get_db, sync_profiles, now_ist, init_db
 import sys
 import os
 import threading
+from dotenv import load_dotenv
+load_dotenv()
 import time
 import subprocess
 import signal
@@ -1188,6 +1190,7 @@ def api_profile_all_underlyings(slug):
                     'type': event_type,
                     'symbol': symbol,
                     'product': product,
+                    'expiry_date': _parse_expiry_from_symbol(symbol),
                     'before_quantity': before_qty,
                     'after_quantity': after_qty,
                     'quantity_diff': after_qty - before_qty,
@@ -1397,6 +1400,7 @@ def api_profile_symbol_lifecycle(slug):
                     'type': event_type,
                     'symbol': symbol_norm,
                     'product': product_val,
+                    'expiry_date': _parse_expiry_from_symbol(symbol_norm),
                     'before_quantity': before_qty,
                     'after_quantity': after_qty,
                     'quantity_diff': after_qty - before_qty,
@@ -1474,6 +1478,390 @@ def normalize_trades_for_diff(positions_data):
                 trades_map[key]['booked_profit_loss'] = booked
     
     return trades_map
+
+def _fetch_underlying_events(c, profile_id, underlying_filter):
+    """Fetch all trade lifecycle events for a specific underlying. Returns {underlying: [events...]}."""
+    import re
+
+    def _get_underlying(trading_symbol):
+        if not trading_symbol:
+            return None
+        m = re.match(r'^[a-zA-Z&-]+', trading_symbol)
+        return m.group(0).upper() if m else None
+
+    snapshots = c.execute(
+        "SELECT id, timestamp, raw_data FROM snapshots WHERE profile_id = ? ORDER BY id ASC",
+        (profile_id,),
+    ).fetchall()
+
+    changes_rows = c.execute(
+        "SELECT id, snapshot_id FROM position_changes WHERE profile_id = ?",
+        (profile_id,),
+    ).fetchall()
+    snapshot_to_change_id = {row['snapshot_id']: row['id'] for row in changes_rows}
+
+    state = {}
+    underlying_events = {}
+
+    for snap in snapshots:
+        snap_id = snap['id']
+        timestamp = snap['timestamp']
+        change_id = snapshot_to_change_id.get(snap_id)
+
+        try:
+            raw = json.loads(snap['raw_data'])
+        except Exception:
+            continue
+
+        trades_map = normalize_trades_for_diff(raw.get('data', []))
+        all_keys = set(trades_map.keys()) | set(state.keys())
+
+        for key in all_keys:
+            curr_trade = trades_map.get(key)
+            st = state.get(key) or {'present': False, 'last_trade': None, 'last_good_trade': None}
+
+            if curr_trade:
+                symbol = curr_trade.get('trading_symbol', '')
+                product = curr_trade.get('product', '')
+            else:
+                prev_t = st.get('last_trade')
+                if prev_t:
+                    symbol = prev_t.get('trading_symbol', '')
+                    product = prev_t.get('product', '')
+                else:
+                    continue
+
+            underlying = _get_underlying(symbol)
+            if not underlying:
+                if key in state:
+                    del state[key]
+                continue
+
+            # Track state for non-matching underlyings too (needed for correct state tracking)
+            if underlying != underlying_filter:
+                curr_present = curr_trade is not None and ((curr_trade.get('quantity', 0) or 0) != 0)
+                if curr_trade and (curr_trade.get('quantity', 0) not in (None, 0)) and (curr_trade.get('average_price', 0) not in (None, 0)):
+                    st['last_good_trade'] = curr_trade
+                st['present'] = curr_present
+                st['last_trade'] = curr_trade if curr_trade is not None else None
+                state[key] = st
+                continue
+
+            if underlying not in underlying_events:
+                underlying_events[underlying] = []
+
+            prev_present = bool(st.get('present'))
+            prev_trade_raw = st.get('last_trade')
+            prev_trade = _best_effort_trade_before(prev_trade_raw, st.get('last_good_trade'))
+            curr_present = curr_trade is not None and ((curr_trade.get('quantity', 0) or 0) != 0)
+
+            if curr_trade and (curr_trade.get('quantity', 0) not in (None, 0)) and (curr_trade.get('average_price', 0) not in (None, 0)):
+                st['last_good_trade'] = curr_trade
+
+            event_type = None
+            if (not prev_present) and curr_present:
+                event_type = 'ENTERED'
+            elif prev_present and (not curr_present):
+                event_type = 'EXITED'
+            elif prev_present and curr_present:
+                prev_qty = (prev_trade or {}).get('quantity', 0) or 0
+                curr_qty = (curr_trade or {}).get('quantity', 0) or 0
+                if prev_qty != curr_qty:
+                    event_type = 'MODIFIED'
+
+            if event_type:
+                before_qty = (prev_trade or {}).get('quantity', 0) or 0
+                after_qty = (curr_trade or {}).get('quantity', 0) or 0
+                before_avg = (prev_trade or {}).get('average_price', 0) or 0
+                after_avg = (curr_trade or {}).get('average_price', 0) or 0
+                after_ltp = (curr_trade or {}).get('last_price', 0) or 0
+                after_unbooked = (curr_trade or {}).get('unbooked_pnl', 0) or 0
+                after_booked = (curr_trade or {}).get('booked_profit_loss', 0) or 0
+
+                exit_pnl = 0
+                exit_price = 0
+                if event_type == 'EXITED':
+                    exit_pnl, exit_price = _compute_exit_metrics(prev_trade)
+                    if after_booked == 0 and exit_pnl != 0:
+                        after_booked = exit_pnl
+                    if after_ltp == 0 and exit_price != 0:
+                        after_ltp = exit_price
+
+                implied_fill_side = ''
+                implied_fill_qty = 0
+                implied_fill_price = 0
+                if event_type == 'MODIFIED':
+                    implied_fill_side, implied_fill_qty, implied_fill_price = _compute_implied_fill(
+                        prev_trade or {}, curr_trade or {}, original_avg_price=before_avg,
+                    )
+                    if (before_qty > 0 and after_qty < before_qty) or (before_qty < 0 and after_qty > before_qty):
+                        closed_qty = abs(before_qty - after_qty)
+                        exit_pnl, exit_price = _compute_exit_metrics(
+                            prev_trade,
+                            closed_qty=closed_qty,
+                            exit_price_override=implied_fill_price if implied_fill_price else None,
+                        )
+
+                underlying_events[underlying].append({
+                    'timestamp': timestamp,
+                    'change_id': change_id,
+                    'type': event_type,
+                    'symbol': symbol,
+                    'product': product,
+                    'expiry_date': _parse_expiry_from_symbol(symbol),
+                    'before_quantity': before_qty,
+                    'after_quantity': after_qty,
+                    'before_average_price': before_avg,
+                    'after_average_price': after_avg,
+                    'after_last_price': after_ltp,
+                    'after_unbooked_pnl': after_unbooked,
+                    'after_booked_pnl': after_booked,
+                    'exit_pnl': exit_pnl,
+                    'exit_price': exit_price,
+                    'implied_fill_side': implied_fill_side,
+                    'implied_fill_qty': implied_fill_qty,
+                    'implied_fill_price': implied_fill_price,
+                })
+
+            st['present'] = curr_present
+            st['last_trade'] = curr_trade if curr_trade is not None else None
+            state[key] = st
+
+    # Sort each underlying's events chronologically (earliest first for AI narrative)
+    for u in underlying_events:
+        underlying_events[u].sort(key=lambda e: e['timestamp'])
+
+    return underlying_events
+
+
+def _parse_expiry_from_symbol(trading_symbol):
+    """Parse expiry date (YYYY-MM-DD) from an NSE trading symbol.
+
+    Mirrors the frontend getExpiryDateFromSymbolEnhanced logic.
+    Returns a YYYY-MM-DD string or None if unparseable.
+
+    NSE monthly stock options (last Tuesday of month, dayOfWeek=2):
+        ETERNAL26MAR10700PE  → 26=year, MAR=month → last Tuesday of Mar 2026
+    NSE weekly single-letter months (O=Oct, N=Nov, D=Dec):
+        NIFTY25O0319000CE    → 25=year, O=Oct, 03=day
+    NSE weekly numeric:
+        NIFTY2531310700CE    → year extracted, then MMDD or similar
+    """
+    import re as _re
+    import calendar
+
+    def last_day_of_week_in_month(year, month_0indexed, day_of_week):
+        """Return the date of the last occurrence of day_of_week (Mon=0..Sun=6) in that month."""
+        # calendar.monthrange returns (weekday of first day, number of days)
+        _, num_days = calendar.monthrange(year, month_0indexed + 1)
+        # Start from last day and go back
+        d = num_days
+        while True:
+            dt = datetime(year, month_0indexed + 1, d)
+            if dt.weekday() == day_of_week:  # Python: Mon=0, Tue=1, Wed=2, Thu=3, Fri=4
+                return dt.strftime('%Y-%m-%d')
+            d -= 1
+
+    MONTH_MAP = {'JAN':0,'FEB':1,'MAR':2,'APR':3,'MAY':4,'JUN':5,
+                 'JUL':6,'AUG':7,'SEP':8,'OCT':9,'NOV':10,'DEC':11}
+    SINGLE_LETTER_MAP = {'O':9,'N':10,'D':11}  # Oct, Nov, Dec
+    # For stock options on NSE: last Tuesday (weekday=1). SENSEX: Friday (weekday=4).
+    is_sensex = 'SENSEX' in trading_symbol.upper()
+    default_dow = 4 if is_sensex else 1  # Tue=1, Fri=4
+
+    # Pattern 1: standard month abbreviation YY + MON (e.g. 26MAR)
+    m = _re.search(r'(\d{2})([A-Z]{3})', trading_symbol)
+    if m:
+        yr = 2000 + int(m.group(1))
+        mon = MONTH_MAP.get(m.group(2).upper())
+        if mon is not None:
+            return last_day_of_week_in_month(yr, mon, default_dow)
+
+    # Pattern 2: single-letter months O/N/D (e.g. NIFTY25O0319000CE)
+    m2 = _re.match(r'^[A-Z]+(\d{2})([OND])(\d{2})', trading_symbol)
+    if m2:
+        yr = 2000 + int(m2.group(1))
+        mon = SINGLE_LETTER_MAP.get(m2.group(2))
+        day = int(m2.group(3))
+        if mon is not None and 1 <= day <= 31:
+            try:
+                return datetime(yr, mon + 1, day).strftime('%Y-%m-%d')
+            except ValueError:
+                pass
+
+    # Pattern 3: numeric encoding (e.g. NIFTY2631023700PE → 26 + 310 → month=3, day=10)
+    # Mirrors JS logic: match YY + 3-digit code, zero-pad code to 4 chars → MMDD
+    m3 = _re.search(r'(\d{2})(\d{3})', trading_symbol)
+    if m3:
+        yr_match = _re.match(r'^[A-Z]+(\d{2})', trading_symbol)
+        yr = 2000 + int(yr_match.group(1)) if yr_match else 2000 + int(m3.group(1))
+        code_str = m3.group(2).zfill(4)  # e.g. "310" -> "0310"
+        p1, p2 = int(code_str[:2]), int(code_str[2:4])
+        if 1 <= p1 <= 12 and 1 <= p2 <= 31:
+            try:
+                return datetime(yr, p1, p2).strftime('%Y-%m-%d')
+            except ValueError:
+                pass
+
+    return None
+
+
+def _build_ai_system_prompt(c, profile_id, profile_name, underlying, scope_type, expiry_key):
+    """Build a structured system prompt with full trade context for Claude."""
+
+    events_by_underlying = _fetch_underlying_events(c, profile_id, underlying)
+    all_events = events_by_underlying.get(underlying, [])
+
+    # Filter to a specific expiry if needed
+    if scope_type == 'expiry' and expiry_key:
+        # Build expiry_map using symbol-name parsing first (mirrors frontend getExpiryDateFromSymbolEnhanced),
+        # so expiry_key from the frontend always matches. Fall back to master_contract only when
+        # symbol-name parsing fails (e.g. non-standard symbols).
+        symbols = set(e['symbol'] for e in all_events)
+        expiry_map = {}
+
+        for sym in symbols:
+            parsed = _parse_expiry_from_symbol(sym)
+            if parsed:
+                expiry_map[sym] = parsed
+
+        # Fallback: for symbols where name-parsing returned nothing, try master_contract
+        missing = [sym for sym in symbols if sym not in expiry_map]
+        if missing:
+            placeholders = ','.join('?' * len(missing))
+            rows = c.execute(
+                f"SELECT trading_symbol, expiry FROM master_contract WHERE trading_symbol IN ({placeholders})",
+                missing,
+            ).fetchall()
+            for row in rows:
+                if row['expiry']:
+                    expiry_map[row['trading_symbol']] = row['expiry'][:10]  # YYYY-MM-DD
+
+        all_events = [e for e in all_events if expiry_map.get(e['symbol']) == expiry_key]
+        scope_label = f"Expiry: {expiry_key}"
+    else:
+        scope_label = "All Expiries"
+
+    def fmt_ts(ts):
+        try:
+            dt = datetime.fromisoformat(ts) if 'T' in ts else datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+            return dt.strftime('%d %b %Y %H:%M')
+        except Exception:
+            return ts
+
+    # Group by symbol|product
+    events_by_symbol = {}
+    for e in all_events:
+        sym_key = f"{e['symbol']}|{e['product']}"
+        events_by_symbol.setdefault(sym_key, []).append(e)
+
+    lines = [
+        f"TRADER PROFILE: {profile_name}",
+        f"UNDERLYING: {underlying}",
+        f"SCOPE: {scope_label}",
+        "",
+        "=== TRADE LIFECYCLE DATA ===",
+        "(Sorted earliest to latest. All prices in INR. Times in IST.)",
+        "",
+    ]
+
+    def _symbol_realized_pnl(sym_events):
+        """Sum exit_pnl across all MODIFIED (partial exits) and EXITED events for a symbol.
+
+        This is more accurate than using only the last event's after_booked_pnl, which
+        reflects only the final-exit P&L when the broker clears booked_profit_loss on close.
+        """
+        return sum(float(e.get('exit_pnl') or 0) for e in sym_events)
+
+    if not events_by_symbol:
+        lines.append("No trade data found for this scope.")
+    else:
+        for sym_key, sym_events in sorted(events_by_symbol.items()):
+            symbol, product = sym_key.split('|', 1)
+            lines.append(f"[{symbol} | {product}]")
+            for e in sym_events:
+                ts = fmt_ts(e['timestamp'])
+                etype = e['type']
+                bq = e['before_quantity']
+                aq = e['after_quantity']
+                ba = float(e['before_average_price'] or 0)
+                aa = float(e['after_average_price'] or 0)
+
+                if etype == 'ENTERED':
+                    direction = "SHORT" if aq < 0 else "LONG"
+                    lines.append(f"  ENTERED  {ts} | Qty: {bq}->{aq} ({direction}) | Avg: {ba:.2f}->{aa:.2f}")
+                elif etype == 'EXITED':
+                    ep = float(e.get('exit_pnl') or 0)
+                    eprice = float(e.get('exit_price') or 0)
+                    pnl_str = f"+{ep:,.2f}" if ep >= 0 else f"{ep:,.2f}"
+                    lines.append(f"  EXITED   {ts} | Qty: {bq}->{aq} | Exit Price: {eprice:.2f} | Exit P&L: {pnl_str}")
+                elif etype == 'MODIFIED':
+                    fill_side = e.get('implied_fill_side', '')
+                    fill_qty = e.get('implied_fill_qty', 0)
+                    fill_price = float(e.get('implied_fill_price') or 0)
+                    fill_str = f" | Fill: {fill_side} {fill_qty} @ {fill_price:.2f}" if (fill_side and fill_qty and fill_price) else ""
+                    ep = float(e.get('exit_pnl') or 0)
+                    exit_str = f" | Partial Exit P&L: {ep:+,.2f}" if ep else ""
+                    lines.append(f"  MODIFIED {ts} | Qty: {bq}->{aq} | Avg: {ba:.2f}->{aa:.2f}{fill_str}{exit_str}")
+
+            # Show consolidated status line for this symbol
+            last_e = sym_events[-1]
+            is_closed = last_e['type'] == 'EXITED' or (last_e.get('after_quantity') or 0) == 0
+            if is_closed:
+                realized = _symbol_realized_pnl(sym_events)
+                lines.append(f"  → TOTAL REALIZED P&L: {realized:+,.2f}")
+            else:
+                booked = float(last_e.get('after_booked_pnl') or 0)
+                unbooked = float(last_e.get('after_unbooked_pnl') or 0)
+                ltp = float(last_e.get('after_last_price') or 0)
+                lines.append(f"  STATUS: OPEN | Booked P&L: {booked:+,.2f} | Unbooked P&L: {unbooked:+,.2f} | LTP: {ltp:.2f}")
+            lines.append("")
+
+    # Summary statistics
+    total_booked = 0.0
+    total_unbooked = 0.0
+    active_count = 0
+    closed_count = 0
+    for sym_key, sym_events in events_by_symbol.items():
+        last_e = sym_events[-1]
+        is_closed = last_e['type'] == 'EXITED' or (last_e.get('after_quantity') or 0) == 0
+        if is_closed:
+            total_booked += _symbol_realized_pnl(sym_events)
+            closed_count += 1
+        else:
+            total_unbooked += float(last_e.get('after_unbooked_pnl') or 0)
+            active_count += 1
+
+    lines += [
+        "=== SUMMARY ===",
+        f"Total Symbols Traded: {len(events_by_symbol)}",
+        f"Active (Open) Positions: {active_count}",
+        f"Closed Positions: {closed_count}",
+        f"Total Booked P&L: {total_booked:+,.2f}",
+    ]
+    if active_count > 0:
+        lines.append(f"Total Unbooked P&L (open positions): {total_unbooked:+,.2f}")
+
+    lines += [
+        "",
+        "=== YOUR ROLE ===",
+        "You are an expert options trading coach and analyst. Your job is to help the trader understand their trades, identify patterns, and improve.",
+        "IMPORTANT — P&L RULES:",
+        "- Each [SYMBOL | PRODUCT] block above is ONE position lifecycle (ENTERED → optional MODIFIEDs → EXITED).",
+        "- Use ONLY the '→ TOTAL REALIZED P&L' line for each closed position's booked P&L. Do NOT recompute P&L from prices.",
+        "- Use ONLY the SUMMARY section totals for aggregate P&L. Do NOT sum individual exit events yourself.",
+        "When answering questions:",
+        "- Be specific with timestamps, prices, and P&L numbers from the data above",
+        "- Identify trading patterns (scalping, spreads, straddles, hedges, directional bets, etc.)",
+        "- Assess entry/exit timing quality (NSE normal session: 09:15-15:30 IST)",
+        "- Highlight what worked well and what could be improved",
+        "- Calculate risk/reward ratios when relevant",
+        "- If something is unclear from the data, say so honestly",
+        "- Keep responses concise and actionable",
+    ]
+
+    return '\n'.join(lines)
+
 
 def calculate_diff(prev_map, curr_map, historical_trades=None):
     """
@@ -2702,6 +3090,523 @@ def import_upload():
 
 # ============================================================================
 # END EXPORT / IMPORT ROUTES
+# ============================================================================
+
+# ============================================================================
+# AI CHAT ROUTES
+# ============================================================================
+
+# Qwen OAuth constants
+_QWEN_OAUTH_CREDS_PATH = os.path.expanduser('~/.qwen/oauth_creds.json')
+_QWEN_CLIENT_ID = 'f0304373b74a44d2b584a3fb70ca9e56'
+_QWEN_DEVICE_CODE_URL = 'https://chat.qwen.ai/api/v1/oauth2/device/code'
+_QWEN_TOKEN_URL = 'https://chat.qwen.ai/api/v1/oauth2/token'
+_QWEN_DEFAULT_API_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+
+
+def _get_qwen_oauth_token():
+    """Return (access_token, api_base_url) from ~/.qwen/oauth_creds.json, refreshing if expired."""
+    if not os.path.exists(_QWEN_OAUTH_CREDS_PATH):
+        raise FileNotFoundError('Qwen credentials not found — please connect your Qwen account.')
+    with open(_QWEN_OAUTH_CREDS_PATH, 'r') as f:
+        creds = json.load(f)
+    access_token = creds.get('access_token', '')
+    refresh_token = creds.get('refresh_token', '')
+    expiry_date = creds.get('expiry_date', 0)  # epoch milliseconds
+    resource_url = creds.get('resource_url') or _QWEN_DEFAULT_API_BASE
+    # Refresh if within 5 minutes of expiry
+    now_ms = int(time.time() * 1000)
+    if expiry_date and now_ms >= (expiry_date - 5 * 60 * 1000):
+        if not refresh_token:
+            raise ValueError('Qwen token expired — please reconnect your Qwen account.')
+        resp = http_requests.post(_QWEN_TOKEN_URL, data={
+            'grant_type': 'refresh_token',
+            'refresh_token': refresh_token,
+            'client_id': _QWEN_CLIENT_ID,
+        }, headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'}, timeout=15)
+        resp.raise_for_status()
+        new_creds = resp.json()
+        expires_in = new_creds.get('expires_in')
+        new_expiry = int(time.time() * 1000) + expires_in * 1000 if expires_in else new_creds.get('expiry_date', expiry_date)
+        creds.update({
+            'access_token': new_creds.get('access_token', access_token),
+            'refresh_token': new_creds.get('refresh_token', refresh_token),
+            'expiry_date': new_expiry,
+        })
+        os.makedirs(os.path.dirname(_QWEN_OAUTH_CREDS_PATH), exist_ok=True)
+        with open(_QWEN_OAUTH_CREDS_PATH, 'w') as f:
+            json.dump(creds, f, indent=2)
+        access_token = creds['access_token']
+        resource_url = creds.get('resource_url') or _QWEN_DEFAULT_API_BASE
+    normalized = resource_url if resource_url.startswith('http') else f'https://{resource_url}'
+    api_base = normalized.rstrip('/')
+    if not api_base.endswith('/v1'):
+        api_base = api_base + '/v1'
+    return access_token, api_base
+
+@app.route('/api/ai/providers')
+@login_required
+def api_ai_providers():
+    """Return available AI providers and their models based on configured API keys."""
+    providers = []
+    # if os.environ.get('ANTHROPIC_API_KEY'):
+    #     providers.append({
+    #         'id': 'anthropic',
+    #         'name': 'Claude (Anthropic)',
+    #         'connected': True,
+    #         'models': [
+    #             {'id': 'claude-sonnet-4-6', 'name': 'Sonnet 4.6 (balanced)'},
+    #             {'id': 'claude-haiku-4-5-20251001', 'name': 'Haiku 4.5 (fast)'},
+    #             {'id': 'claude-opus-4-6', 'name': 'Opus 4.6 (deep)'},
+    #         ],
+    #     })
+    if os.environ.get('GEMINI_API_KEY'):
+        providers.append({
+            'id': 'gemini',
+            'name': 'Gemini (Google)',
+            'connected': True,
+            'models': [
+                {'id': 'gemini-2.5-pro-preview-06-05', 'name': 'Gemini 2.5 Pro (best)'},
+                {'id': 'gemini-2.5-flash-preview-05-20', 'name': 'Gemini 2.5 Flash (fast)'},
+                {'id': 'gemini-2.0-pro-exp', 'name': 'Gemini 2.0 Pro Experimental'},
+                {'id': 'gemini-2.0-flash', 'name': 'Gemini 2.0 Flash'},
+                {'id': 'gemini-1.5-pro', 'name': 'Gemini 1.5 Pro'},
+            ],
+        })
+    if os.environ.get('OPENROUTER_API_KEY'):
+        providers.append({
+            'id': 'openrouter',
+            'name': 'OpenRouter',
+            'connected': True,
+            'models': [
+                {'id': 'google/gemini-2.5-flash-preview', 'name': 'Gemini 2.5 Flash'},
+                # {'id': 'anthropic/claude-3-5-sonnet', 'name': 'Claude 3.5 Sonnet'},
+                {'id': 'meta-llama/llama-3.3-70b-instruct', 'name': 'Llama 3.3 70B'},
+                {'id': 'deepseek/deepseek-chat', 'name': 'DeepSeek Chat'},
+            ],
+        })
+    if os.environ.get('QWEN_API_KEY'):
+        qwen_models = [
+            {'id': 'qwen-max', 'name': 'Qwen Max (best)'},
+            {'id': 'qwen-plus', 'name': 'Qwen Plus (balanced)'},
+            {'id': 'qwen-turbo', 'name': 'Qwen Turbo (fast)'},
+        ]
+    else:
+        qwen_models = [
+            {'id': 'coder-model', 'name': 'Qwen Coder'},
+        ]
+    providers.append({
+        'id': 'qwen',
+        'name': 'Qwen (Alibaba)',
+        'connected': True,
+        'models': qwen_models,
+    })
+    return jsonify({'providers': providers})
+
+
+@app.route('/api/ai/qwen/status')
+@login_required
+def api_ai_qwen_status():
+    """Check whether Qwen credentials exist and are valid (API key or OAuth)."""
+    if os.environ.get('QWEN_API_KEY'):
+        return jsonify({'connected': True, 'auth_type': 'api_key'})
+    try:
+        _get_qwen_oauth_token()
+        return jsonify({'connected': True, 'auth_type': 'oauth'})
+    except Exception as e:
+        return jsonify({'connected': False, 'reason': str(e)})
+
+
+@app.route('/api/ai/qwen/auth/start', methods=['POST'])
+@login_required
+def api_ai_qwen_auth_start():
+    """Initiate Qwen OAuth2 Device Authorization Flow with PKCE."""
+    import hashlib, base64, secrets as _secrets
+    code_verifier = _secrets.token_urlsafe(64)
+    digest = hashlib.sha256(code_verifier.encode()).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode()
+    try:
+        resp = http_requests.post(_QWEN_DEVICE_CODE_URL, json={
+            'client_id': _QWEN_CLIENT_ID,
+            'scope': 'openid profile email model.completion',
+            'code_challenge': code_challenge,
+            'code_challenge_method': 'S256',
+        }, timeout=15, headers={
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Content-Type': 'application/json',
+            'Origin': 'https://chat.qwen.ai',
+            'Referer': 'https://chat.qwen.ai/',
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        detail = str(e)
+        try:
+            detail = f'HTTP {resp.status_code}: {resp.text[:500]}'
+        except Exception:
+            pass
+        return jsonify({'error': detail}), 502
+    session['qwen_code_verifier'] = code_verifier
+    session['qwen_device_code'] = data.get('device_code')
+    return jsonify({
+        'user_code': data.get('user_code'),
+        'verification_uri': data.get('verification_uri'),
+        'verification_uri_complete': data.get('verification_uri_complete'),
+        'expires_in': data.get('expires_in', 300),
+        'interval': data.get('interval', 5),
+    })
+
+
+@app.route('/api/ai/qwen/auth/poll')
+@login_required
+def api_ai_qwen_auth_poll():
+    """SSE endpoint that polls the Qwen token endpoint until authorized or timed out."""
+    from flask import stream_with_context
+    device_code = session.get('qwen_device_code')
+    code_verifier = session.get('qwen_code_verifier')
+    if not device_code or not code_verifier:
+        return jsonify({'error': 'No pending Qwen auth session'}), 400
+
+    def poll_generator():
+        for _ in range(60):  # ~5 minutes at 5s interval
+            time.sleep(5)
+            try:
+                resp = http_requests.post(_QWEN_TOKEN_URL, data={
+                    'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
+                    'device_code': device_code,
+                    'client_id': _QWEN_CLIENT_ID,
+                    'code_verifier': code_verifier,
+                }, headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'}, timeout=15)
+                if resp.status_code == 200:
+                    token_data = resp.json()
+                    os.makedirs(os.path.dirname(_QWEN_OAUTH_CREDS_PATH), exist_ok=True)
+                    with open(_QWEN_OAUTH_CREDS_PATH, 'w') as f:
+                        json.dump(token_data, f, indent=2)
+                    yield f"data: {json.dumps({'type': 'success'})}\n\n"
+                    return
+                elif resp.status_code == 428:  # authorization_pending
+                    yield f"data: {json.dumps({'type': 'pending'})}\n\n"
+                elif resp.status_code == 429:  # slow_down
+                    time.sleep(5)
+                    yield f"data: {json.dumps({'type': 'pending'})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'error', 'message': resp.text})}\n\n"
+                    return
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                return
+        yield f"data: {json.dumps({'type': 'error', 'message': 'Authentication timed out'})}\n\n"
+
+    return app.response_class(
+        stream_with_context(poll_generator()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
+
+@app.route('/api/ai/qwen/auth/logout', methods=['POST'])
+@login_required
+def api_ai_qwen_auth_logout():
+    """Remove saved Qwen credentials."""
+    if os.path.exists(_QWEN_OAUTH_CREDS_PATH):
+        os.remove(_QWEN_OAUTH_CREDS_PATH)
+    session.pop('qwen_device_code', None)
+    session.pop('qwen_code_verifier', None)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/ai/chat/history')
+@login_required
+def api_ai_chat_history():
+    """Return persisted AI chat history for a given scope."""
+    slug = (request.args.get('slug') or '').strip()
+    scope_type = (request.args.get('scope_type') or '').strip()
+    underlying = (request.args.get('underlying') or '').strip().upper()
+    expiry_key = (request.args.get('expiry_key') or '').strip()
+
+    if not slug or not scope_type or not underlying:
+        return jsonify({'error': 'slug, scope_type, underlying required', 'messages': []}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found', 'messages': []}), 404
+
+    profile_id = profile['id']
+
+    if scope_type == 'expiry' and expiry_key:
+        rows = c.execute(
+            """SELECT role, content, model, created_at FROM ai_chat_history
+               WHERE profile_id = ? AND scope_type = ? AND underlying = ? AND expiry_key = ?
+               ORDER BY id ASC LIMIT 200""",
+            (profile_id, scope_type, underlying, expiry_key),
+        ).fetchall()
+    else:
+        rows = c.execute(
+            """SELECT role, content, model, created_at FROM ai_chat_history
+               WHERE profile_id = ? AND scope_type = ? AND underlying = ? AND (expiry_key IS NULL OR expiry_key = '')
+               ORDER BY id ASC LIMIT 200""",
+            (profile_id, scope_type, underlying),
+        ).fetchall()
+
+    conn.close()
+    messages = [{'role': r['role'], 'content': r['content'], 'model': r['model'], 'created_at': r['created_at']} for r in rows]
+    return jsonify({'messages': messages})
+
+
+@app.route('/api/ai/chat/clear', methods=['DELETE'])
+@login_required
+def api_ai_chat_clear():
+    """Clear AI chat history for a given scope."""
+    body = request.get_json() or {}
+    slug = (body.get('slug') or '').strip()
+    scope_type = (body.get('scope_type') or '').strip()
+    underlying = (body.get('underlying') or '').strip().upper()
+    expiry_key = (body.get('expiry_key') or '').strip()
+
+    if not slug or not scope_type or not underlying:
+        return jsonify({'error': 'slug, scope_type, underlying required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    profile_id = profile['id']
+
+    if scope_type == 'expiry' and expiry_key:
+        c.execute(
+            "DELETE FROM ai_chat_history WHERE profile_id = ? AND scope_type = ? AND underlying = ? AND expiry_key = ?",
+            (profile_id, scope_type, underlying, expiry_key),
+        )
+    else:
+        c.execute(
+            "DELETE FROM ai_chat_history WHERE profile_id = ? AND scope_type = ? AND underlying = ? AND (expiry_key IS NULL OR expiry_key = '')",
+            (profile_id, scope_type, underlying),
+        )
+
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/ai/debug-prompt', methods=['POST'])
+@login_required
+def api_ai_debug_prompt():
+    """Return the exact system prompt that would be sent to the AI for a given request."""
+    body = request.get_json() or {}
+    slug = (body.get('slug') or '').strip()
+    scope_type = (body.get('scope_type') or 'underlying').strip()
+    underlying = (body.get('underlying') or '').strip().upper()
+    expiry_key = (body.get('expiry_key') or '').strip()
+
+    if not slug or not underlying:
+        return jsonify({'error': 'slug and underlying required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    profile = c.execute("SELECT id, name FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    profile_name = profile['name'] or slug
+    prompt = _build_ai_system_prompt(c, profile['id'], profile_name, underlying, scope_type, expiry_key)
+    conn.close()
+    return jsonify({'system_prompt': prompt})
+
+
+@app.route('/api/ai/chat', methods=['POST'])
+@login_required
+def api_ai_chat():
+    """Stream an AI chat response with full trade context.
+
+    The 'model' field uses the format 'provider:model_id', e.g.:
+      anthropic:claude-sonnet-4-6
+      gemini:gemini-2.5-flash
+      openrouter:google/gemini-2.5-flash-preview
+      qwen:qwen-plus
+    If no provider prefix is given, 'anthropic' is assumed.
+    """
+    from flask import stream_with_context
+
+    body = request.get_json() or {}
+    slug = (body.get('slug') or '').strip()
+    scope_type = (body.get('scope_type') or 'underlying').strip()
+    underlying = (body.get('underlying') or '').strip().upper()
+    expiry_key = (body.get('expiry_key') or '').strip()
+    user_message = (body.get('message') or '').strip()
+    raw_model = (body.get('model') or 'anthropic:claude-sonnet-4-6').strip()
+
+    # Parse provider:model format
+    if ':' in raw_model:
+        provider, model_id = raw_model.split(':', 1)
+    else:
+        provider, model_id = 'anthropic', raw_model
+
+    provider = provider.lower()
+
+    if not slug or not underlying or not user_message:
+        return jsonify({'error': 'slug, underlying, message required'}), 400
+
+    # Validate provider and resolve credentials
+    if provider == 'anthropic':
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        if not api_key:
+            return jsonify({'error': 'ANTHROPIC_API_KEY is not configured in .env'}), 500
+        _ANTHROPIC_MODELS = {'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-opus-4-6'}
+        if model_id not in _ANTHROPIC_MODELS:
+            model_id = 'claude-sonnet-4-6'
+    elif provider == 'gemini':
+        api_key = os.environ.get('GEMINI_API_KEY', '')
+        if not api_key:
+            return jsonify({'error': 'GEMINI_API_KEY is not configured in .env'}), 500
+        api_base = 'https://generativelanguage.googleapis.com/v1beta/openai/'
+    elif provider == 'openrouter':
+        api_key = os.environ.get('OPENROUTER_API_KEY', '')
+        if not api_key:
+            return jsonify({'error': 'OPENROUTER_API_KEY is not configured in .env'}), 500
+        api_base = 'https://openrouter.ai/api/v1'
+    elif provider == 'qwen':
+        qwen_env_key = os.environ.get('QWEN_API_KEY', '')
+        if qwen_env_key:
+            api_key = qwen_env_key
+            api_base = _QWEN_DEFAULT_API_BASE
+        else:
+            try:
+                api_key, api_base = _get_qwen_oauth_token()
+                model_id = 'coder-model'  # portal.qwen.ai only supports this model
+            except Exception as e:
+                return jsonify({'error': str(e)}), 401
+    else:
+        return jsonify({'error': f'Unknown provider: {provider}'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT id, name FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    profile_id = profile['id']
+    profile_name = profile['name'] or slug
+    norm_expiry_key = expiry_key if (scope_type == 'expiry' and expiry_key) else None
+    stored_model = raw_model  # store the full provider:model string
+
+    # Save user message immediately
+    now_ts = now_ist().isoformat()
+    c.execute(
+        """INSERT INTO ai_chat_history (profile_id, scope_type, underlying, expiry_key, role, content, model, created_at)
+           VALUES (?, ?, ?, ?, 'user', ?, ?, ?)""",
+        (profile_id, scope_type, underlying, norm_expiry_key, user_message, stored_model, now_ts),
+    )
+    conn.commit()
+
+    # Fetch recent history (last 40 messages = 20 exchanges)
+    if norm_expiry_key:
+        history_rows = c.execute(
+            """SELECT role, content FROM ai_chat_history
+               WHERE profile_id = ? AND scope_type = ? AND underlying = ? AND expiry_key = ?
+               ORDER BY id DESC LIMIT 41""",
+            (profile_id, scope_type, underlying, norm_expiry_key),
+        ).fetchall()
+    else:
+        history_rows = c.execute(
+            """SELECT role, content FROM ai_chat_history
+               WHERE profile_id = ? AND scope_type = ? AND underlying = ? AND (expiry_key IS NULL OR expiry_key = '')
+               ORDER BY id DESC LIMIT 41""",
+            (profile_id, scope_type, underlying),
+        ).fetchall()
+
+    history_rows = list(reversed(history_rows))
+    messages_for_ai = [{'role': r['role'], 'content': r['content']} for r in history_rows[:-1]]
+    messages_for_ai.append({'role': 'user', 'content': user_message})
+
+    system_prompt = _build_ai_system_prompt(c, profile_id, profile_name, underlying, scope_type, expiry_key)
+    conn.close()
+
+    def _save_response(full_text):
+        save_conn = get_db()
+        save_c = save_conn.cursor()
+        save_c.execute(
+            """INSERT INTO ai_chat_history (profile_id, scope_type, underlying, expiry_key, role, content, model, created_at)
+               VALUES (?, ?, ?, ?, 'assistant', ?, ?, ?)""",
+            (profile_id, scope_type, underlying, norm_expiry_key, full_text, stored_model, now_ist().isoformat()),
+        )
+        save_conn.commit()
+        save_conn.close()
+
+    def generate_anthropic():
+        import anthropic as _anthropic
+        full_response = []
+        try:
+            ai_client = _anthropic.Anthropic(api_key=api_key)
+            with ai_client.messages.stream(
+                model=model_id,
+                max_tokens=2048,
+                system=system_prompt,
+                messages=messages_for_ai,
+            ) as stream:
+                for text in stream.text_stream:
+                    full_response.append(text)
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': text})}\n\n"
+            _save_response(''.join(full_response))
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    def generate_openai_compatible(base_url, key, extra_headers=None):
+        from openai import OpenAI
+        full_response = []
+        try:
+            client_kwargs = {'api_key': key, 'base_url': base_url}
+            oa_client = OpenAI(**client_kwargs)
+            oa_messages = [{'role': 'system', 'content': system_prompt}] + messages_for_ai
+            stream = oa_client.chat.completions.create(
+                model=model_id,
+                messages=oa_messages,
+                max_tokens=2048,
+                stream=True,
+                extra_headers=extra_headers or {},
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    full_response.append(delta.content)
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': delta.content})}\n\n"
+            _save_response(''.join(full_response))
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    if provider == 'anthropic':
+        generator = generate_anthropic()
+    elif provider == 'openrouter':
+        generator = generate_openai_compatible(api_base, api_key, extra_headers={
+            'HTTP-Referer': 'https://sensibull-tracker',
+            'X-Title': 'Sensibull Trade Tracker',
+        })
+    else:
+        # gemini and qwen both use plain OpenAI-compatible calls
+        generator = generate_openai_compatible(api_base, api_key)
+
+    return app.response_class(
+        stream_with_context(generator),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
+# ============================================================================
+# END AI CHAT ROUTES
 # ============================================================================
 
 if __name__ == '__main__':

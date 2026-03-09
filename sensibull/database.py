@@ -147,10 +147,27 @@ def init_db():
         )
     ''')
     
+    # Table to store AI chat history per profile + scope
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS ai_chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            scope_type TEXT NOT NULL,
+            underlying TEXT NOT NULL,
+            expiry_key TEXT,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            model TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id)
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_ai_chat_scope ON ai_chat_history (profile_id, scope_type, underlying, expiry_key)')
+
     conn.commit()
     conn.close()
     print("Database initialized.")
-    
+
     # Run migrations to add missing columns to existing tables
     try:
         from migrate_db import migrate_database

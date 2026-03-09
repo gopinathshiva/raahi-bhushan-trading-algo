@@ -9,4 +9,7 @@ dependencies = [
     "requests",
     "apscheduler",
     "simplejson",
+    "anthropic>=0.84.0",
+    "python-dotenv>=1.2.1",
+    "openai>=2.26.0",
 ]
