@@ -1706,9 +1706,88 @@ def _parse_expiry_from_symbol(trading_symbol):
     return None
 
 
-def _build_ai_system_prompt(c, profile_id, profile_name, underlying, scope_type, expiry_key):
-    """Build a structured system prompt with full trade context for Claude."""
+def _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type, expiry_key, consolidated_trades):
+    """Build a system prompt using pre-consolidated trade data from the frontend."""
+    
+    if scope_type == 'expiry' and expiry_key:
+        scope_label = f"Expiry: {expiry_key}"
+    else:
+        scope_label = "All Expiries"
+    
+    lines = [
+        f"TRADER PROFILE: {profile_name}",
+        f"UNDERLYING: {underlying}",
+        f"SCOPE: {scope_label}",
+        "",
+        "=== CONSOLIDATED TRADE DATA ===",
+        "(This is the exact consolidated view the user is currently seeing in their browser)",
+        "",
+    ]
+    
+    if not consolidated_trades or len(consolidated_trades) == 0:
+        lines.append("No consolidated trade data provided.")
+    else:
+        for trade in consolidated_trades:
+            symbol = trade.get('symbol', '')
+            product = trade.get('product', '')
+            is_open = trade.get('isOpen', False)
+            net_qty = trade.get('netQty', 0)
+            entry_date = trade.get('entryDate', '')
+            exit_date = trade.get('exitDate')
+            avg_entry = trade.get('avgEntryPrice', 0)
+            avg_exit = trade.get('avgExitPrice', 0)
+            ltp = trade.get('ltp', 0)
+            total_pnl = trade.get('totalExitPnl', 0)
+            unbooked_pnl = trade.get('unbookedPnl', 0)
+            
+            status = "OPEN" if is_open else "CLOSED"
+            lines.append(f"[{symbol} | {product}] - {status}")
+            lines.append(f"  Entry Date: {entry_date}")
+            if exit_date:
+                lines.append(f"  Exit Date: {exit_date}")
+            lines.append(f"  Net Quantity: {net_qty}")
+            lines.append(f"  Avg Entry Price: ₹{avg_entry:.2f}")
+            
+            if is_open:
+                lines.append(f"  LTP: ₹{ltp:.2f}")
+                lines.append(f"  Total Exit P&L: ₹{total_pnl:+,.2f}")
+                lines.append(f"  Unbooked P&L: ₹{unbooked_pnl:+,.2f}")
+            else:
+                lines.append(f"  Avg Exit Price: ₹{avg_exit:.2f}")
+                lines.append(f"  Total Exit P&L: ₹{total_pnl:+,.2f}")
+            
+            lines.append("")
+    
+    # Summary statistics
+    total_booked_pnl = sum(t.get('totalExitPnl', 0) for t in consolidated_trades if not t.get('isOpen', False))
+    total_unbooked_pnl = sum(t.get('unbookedPnl', 0) for t in consolidated_trades if t.get('isOpen', False))
+    open_count = sum(1 for t in consolidated_trades if t.get('isOpen', False))
+    closed_count = sum(1 for t in consolidated_trades if not t.get('isOpen', False))
+    
+    lines.append("=== SUMMARY ===")
+    lines.append(f"Total Symbols: {len(consolidated_trades)}")
+    lines.append(f"Open Positions: {open_count}")
+    lines.append(f"Closed Positions: {closed_count}")
+    lines.append(f"Total Realized P&L: ₹{total_booked_pnl:+,.2f}")
+    lines.append(f"Total Unrealized P&L: ₹{total_unbooked_pnl:+,.2f}")
+    lines.append("")
+    lines.append("You are an expert trading analyst. Help the user understand their trades and performance.")
+    
+    return "\n".join(lines)
 
+
+def _build_ai_system_prompt(c, profile_id, profile_name, underlying, scope_type, expiry_key, consolidated_trades=None):
+    """Build a structured system prompt with full trade context for Claude.
+    
+    If consolidated_trades is provided (from frontend), use that directly instead of
+    fetching and computing from database. This ensures the AI sees exactly what the user sees.
+    """
+
+    # Use pre-consolidated trades from frontend if provided
+    if consolidated_trades:
+        return _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type, expiry_key, consolidated_trades)
+    
+    # Fallback to original behavior: fetch from database
     events_by_underlying = _fetch_underlying_events(c, profile_id, underlying)
     all_events = events_by_underlying.get(underlying, [])
 
@@ -3445,6 +3524,7 @@ def api_ai_chat():
     expiry_key = (body.get('expiry_key') or '').strip()
     user_message = (body.get('message') or '').strip()
     raw_model = (body.get('model') or 'anthropic:claude-sonnet-4-6').strip()
+    consolidated_trades = body.get('consolidated_trades')  # Optional: pre-consolidated trade data from frontend
 
     # Parse provider:model format
     if ':' in raw_model:
@@ -3531,7 +3611,7 @@ def api_ai_chat():
     messages_for_ai = [{'role': r['role'], 'content': r['content']} for r in history_rows[:-1]]
     messages_for_ai.append({'role': 'user', 'content': user_message})
 
-    system_prompt = _build_ai_system_prompt(c, profile_id, profile_name, underlying, scope_type, expiry_key)
+    system_prompt = _build_ai_system_prompt(c, profile_id, profile_name, underlying, scope_type, expiry_key, consolidated_trades)
     conn.close()
 
     def _save_response(full_text):

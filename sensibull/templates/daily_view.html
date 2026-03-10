@@ -158,6 +158,12 @@
                 padding: 3px 8px; border-radius: 4px; cursor: pointer;
             }
             .ai-clear-btn:hover { background: rgba(255,255,255,0.1); }
+            .ai-cancel-btn {
+                background: #dc3545; border: none; color: white; font-size: 0.8em;
+                padding: 5px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;
+                display: none; /* Hidden by default, shown during streaming */
+            }
+            .ai-cancel-btn:hover { background: #c82333; }
             .ai-context-bar {
                 background: #f8f9fa; border-bottom: 1px solid #e9ecef;
                 font-size: 0.82em; flex-shrink: 0;
@@ -212,6 +218,74 @@
             }
             .ai-send-btn:disabled { background: #6c757d; cursor: not-allowed; }
             .ai-send-btn:hover:not(:disabled) { background: #0056b3; }
+
+            /* Minimize button */
+            .ai-minimize-btn {
+                background: none; border: none; color: white; font-size: 1.2em;
+                cursor: pointer; padding: 2px 6px; border-radius: 4px; line-height: 1;
+            }
+            .ai-minimize-btn:hover { background: rgba(255,255,255,0.15); }
+
+            /* Minimized chat windows container */
+            .ai-minimized-container {
+                position: fixed; bottom: 0; left: 0; right: 0;
+                display: flex; gap: 8px; padding: 8px;
+                pointer-events: none; z-index: 9998;
+            }
+            .ai-minimized-container > * { pointer-events: auto; }
+
+            /* Minimized chat window */
+            .ai-minimized-chat {
+                background: #1a1a2e; color: white;
+                border-radius: 8px 8px 0 0;
+                padding: 8px 12px;
+                min-width: 180px;
+                max-width: 280px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                cursor: pointer;
+                box-shadow: 0 -2px 8px rgba(0,0,0,0.2);
+                animation: slideUp 0.2s ease-out;
+                flex-shrink: 0;
+            }
+            @keyframes slideUp {
+                from { transform: translateY(100%); opacity: 0; }
+                to { transform: translateY(0); opacity: 1; }
+            }
+            .ai-minimized-chat:hover { background: #252542; }
+            .ai-minimized-chat-title {
+                font-size: 0.85em;
+                font-weight: bold;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                flex: 1;
+            }
+            .ai-minimized-chat-status {
+                font-size: 0.7em;
+                color: #aaa;
+                white-space: nowrap;
+            }
+            .ai-minimized-chat-status.streaming {
+                color: #4caf50;
+                animation: pulse 1.5s infinite;
+            }
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+            }
+            .ai-minimized-chat-close {
+                background: rgba(255,255,255,0.1);
+                border: none;
+                color: white;
+                font-size: 1em;
+                padding: 2px 6px;
+                border-radius: 4px;
+                cursor: pointer;
+                line-height: 1;
+            }
+            .ai-minimized-chat-close:hover { background: rgba(255,255,255,0.2); }
             .ai-empty-state { text-align: center; color: #aaa; padding: 40px 20px; font-size: 0.9em; }
             /* provider label badge in chat */
             .ai-provider-badge {
@@ -603,6 +677,11 @@
                 setPanelActive(underlyingsPanel, false);
             }
         }
+
+        // Set default tab to "All Underlying Trades" on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            switchTab('underlyings');
+        });
 
         function fmtNum(n, digits = 2) {
             const v = Number(n || 0);
@@ -1776,6 +1855,43 @@
                 `</span>`;
         }
 
+        function buildConsolidatedExpirySummaryHtml(consolidatedRows) {
+            if (!consolidatedRows || consolidatedRows.length === 0) {
+                return '<div style="padding:8px 10px; color:#999; font-size:0.85em;">No positions match filters.</div>';
+            }
+
+            let totalBooked = 0, totalUnbooked = 0;
+            let openCount = 0, closedCount = 0;
+
+            consolidatedRows.forEach(row => {
+                const booked = Number(row.totalExitPnl || 0);
+                const unbooked = Number(row.unbookedPnl || 0);
+                totalBooked += booked;
+                totalUnbooked += unbooked;
+                if (row.isOpen) openCount++;
+                else closedCount++;
+            });
+
+            const grandTotal = totalBooked + totalUnbooked;
+            const tbc = totalBooked > 0 ? '#28a745' : (totalBooked < 0 ? '#dc3545' : '#888');
+            const tuc = totalUnbooked > 0 ? '#28a745' : (totalUnbooked < 0 ? '#dc3545' : '#888');
+            const tgc = grandTotal > 0 ? '#28a745' : (grandTotal < 0 ? '#dc3545' : '#888');
+
+            return `<div style="border:1px solid #dee2e6; border-radius:6px; overflow:hidden; margin-bottom:8px;">
+                <div style="background:#f2f4f8; padding:6px 10px; font-weight:bold; font-size:0.78em; color:#555; text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid #dee2e6;">Consolidated P&amp;L Summary</div>
+                <div style="display:flex; gap:16px; align-items:center; padding:10px 10px; background:#fff; flex-wrap:wrap; border-bottom:1px solid #f0f0f0;">
+                    <span style="font-size:0.82em; font-weight:bold; min-width:180px; color:#333;">Filtered Positions (${consolidatedRows.length} total)</span>
+                    <span style="font-size:0.82em; color:#555;">Booked: <b style="color:${tbc};">₹${fmtNum(totalBooked, 2)}</b></span>
+                    <span style="font-size:0.82em; color:#555;">Unbooked: <b style="color:${tuc};">₹${fmtNum(totalUnbooked, 2)}</b></span>
+                    <span style="font-size:0.82em; font-weight:bold; color:${tgc};">Total: ₹${fmtNum(grandTotal, 2)}</span>
+                </div>
+                <div style="display:flex; gap:16px; align-items:center; padding:8px 10px; background:#f8f9fa; flex-wrap:wrap; font-size:0.82em; color:#666;">
+                    <span>● ${openCount} open</span>
+                    <span>✕ ${closedCount} closed</span>
+                </div>
+            </div>`;
+        }
+
         function renderEventRow(e, underlying) {
             const typeLower = (e.type || '').toLowerCase();
             const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
@@ -1907,7 +2023,144 @@
             });
         }
 
+        function gatherConsolidatedTradeData() {
+            // Gather consolidated trade data relevant to the current AI chat scope
+            // Only returns trades for the specific underlying and expiry (if applicable)
+            const consolidatedRows = [];
+
+            // Determine which expiry section we're in (if any)
+            // When user clicks "Ask AI" on a specific expiry, aiScope.expiryKey is set
+            // When user clicks "Ask AI" on underlying (all expiries), aiScope.expiryKey is empty
+            
+            if (aiScope.scopeType === 'expiry' && aiScope.expiryKey) {
+                // User clicked on a specific expiry - find consolidated rows for that expiry only
+                const expiryId = `${aiScope.underlying}-${new Date(aiScope.expiryKey).getTime()}`.replace(/[^a-zA-Z0-9]/g, '_');
+                
+                // Look for consolidated rows within this specific expiry section
+                const expiryContent = document.getElementById(`expiry-content-${expiryId}`);
+                if (expiryContent) {
+                    expiryContent.querySelectorAll('.consolidated-row').forEach(row => {
+                        consolidatedRows.push(parseConsolidatedRow(row));
+                    });
+                }
+            } else {
+                // User clicked on underlying (all expiries) - gather from all expiry sections for this underlying
+                const underlyingGroup = document.getElementById(`underlying-group-${aiScope.underlying}`);
+                if (underlyingGroup) {
+                    underlyingGroup.querySelectorAll('.consolidated-row').forEach(row => {
+                        consolidatedRows.push(parseConsolidatedRow(row));
+                    });
+                }
+            }
+
+            // If no consolidated rows found in DOM, fall back to computing from cached events
+            if (consolidatedRows.length === 0 && _cachedUnderlyingsData) {
+                const allEvents = _cachedUnderlyingsData.events[aiScope.underlying] || [];
+                let filteredEvents = allEvents;
+
+                // Filter by expiry if needed
+                if (aiScope.scopeType === 'expiry' && aiScope.expiryKey) {
+                    filteredEvents = allEvents.filter(e => {
+                        const d = getExpiryDateFromSymbolEnhanced(e.symbol || '');
+                        if (!d) return false;
+                        const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                        return iso === aiScope.expiryKey;
+                    });
+                }
+
+                // Apply exclude expired filter
+                const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
+                if (excludeExpired) {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    filteredEvents = filteredEvents.filter(e => {
+                        const expiryDate = getExpiryDateFromSymbolEnhanced(e.symbol || '');
+                        return !expiryDate || expiryDate >= today;
+                    });
+                }
+
+                // Consolidate the events
+                const consolidated = consolidateEvents(filteredEvents);
+                return consolidated.map(c => ({
+                    symbol: c.symbol,
+                    product: c.product,
+                    isOpen: c.isOpen,
+                    netQty: c.netQty,
+                    entryDate: fmtTimestamp(c.entryDate),
+                    exitDate: c.exitDate ? fmtTimestamp(c.exitDate) : null,
+                    avgEntryPrice: c.avgEntryPrice,
+                    avgExitPrice: c.avgExitPrice,
+                    ltp: c.ltp,
+                    totalExitPnl: c.totalExitPnl,
+                    unbookedPnl: c.unbookedPnl,
+                }));
+            }
+
+            return consolidatedRows;
+        }
+
+        function parseConsolidatedRow(row) {
+            // Helper to parse a consolidated row element into a data object
+            const symbol = row.cells[1]?.textContent?.trim() || '';
+            const product = row.cells[2]?.textContent?.trim() || '';
+            const status = row.cells[3]?.textContent?.trim() || '';
+            const entryDate = row.cells[4]?.textContent?.trim() || '';
+            const exitDate = row.cells[5]?.textContent?.trim() || '';
+            const netQty = row.cells[6]?.textContent?.trim() || '0';
+            const avgEntryPrice = row.cells[7]?.textContent?.replace('₹', '').trim() || '0';
+            const avgExitPriceOrLtp = row.cells[8]?.textContent?.trim() || '';
+            const totalExitPnl = row.cells[9]?.textContent?.replace('₹', '').trim() || '0';
+            const unbookedPnl = row.cells[10]?.textContent?.replace('₹', '').trim() || '0';
+
+            // Parse numeric values
+            const avgEntry = parseFloat(avgEntryPrice.replace(/,/g, '')) || 0;
+            const totalPnl = parseFloat(totalExitPnl.replace(/,/g, '')) || 0;
+            const unbooked = parseFloat(unbookedPnl.replace(/,/g, '')) || 0;
+
+            // Parse avg exit or LTP
+            let avgExit = 0, ltp = 0;
+            if (avgExitPriceOrLtp.includes('LTP')) {
+                const ltpMatch = avgExitPriceOrLtp.match(/₹([\d,]+\.?\d*)/);
+                ltp = ltpMatch ? parseFloat(ltpMatch[1].replace(/,/g, '')) || 0 : 0;
+            } else {
+                avgExit = parseFloat(avgExitPriceOrLtp.replace(/₹/g, '').replace(/,/g, '')) || 0;
+            }
+
+            return {
+                symbol,
+                product,
+                isOpen: status === 'OPEN',
+                netQty: parseFloat(netQty) || 0,
+                entryDate,
+                exitDate,
+                avgEntryPrice: avgEntry,
+                avgExitPrice: avgExit,
+                ltp,
+                totalExitPnl: totalPnl,
+                unbookedPnl: unbooked,
+            };
+        }
+
         function renderConsolidatedExpiry(visibleEvents, underlying, expiryId) {
+            // Build unique symbols list for position filter
+            const expirySymbols = [...new Set(visibleEvents.map(e => e.symbol || '').filter(Boolean))];
+            const posFilterOptionsHtml = expirySymbols.map(sym =>
+                `<label style="display:block; padding:3px 6px; cursor:pointer; font-size:0.85em; user-select:none; white-space:nowrap;">
+                    <input type="checkbox" checked data-pos="${sym.replace(/"/g, '&quot;')}" onchange="handleConsolidatedPosChange('${expiryId}')" style="margin-right:5px;" />${sym}
+                </label>`
+            ).join('');
+            
+            // Populate date filter
+            const dateCounts = {};
+            visibleEvents.forEach(e => {
+                const d = new Date(e.timestamp);
+                const dateStr = d.toLocaleDateString('en-CA');
+                dateCounts[dateStr] = (dateCounts[dateStr] || 0) + 1;
+            });
+            const dateOptionsHtml = Object.keys(dateCounts).sort((a, b) => b.localeCompare(a)).map(dateStr =>
+                `<option value="${dateStr}">${dateStr} (${dateCounts[dateStr]})</option>`
+            ).join('');
+
             const consolidatedRows = consolidateEvents(visibleEvents);
 
             // Open positions first, then by symbol name
@@ -1993,25 +2246,59 @@
             }).join('');
 
             return `
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; padding:8px 10px; background:#f0f4ff; border-radius:6px; border:1px solid #d0d8ef;">
+                    <span style="font-size:0.82em; font-weight:bold; color:#555;">Filters:</span>
+                    <div style="position:relative;">
+                        <button id="cons-pos-toggle-${expiryId}" onclick="toggleConsPosDropdown('${expiryId}')" style="padding:4px 10px; border:1px solid #ccc; border-radius:4px; background:white; cursor:pointer; min-width:150px; text-align:left; font-size:0.85em;">
+                            <span id="cons-pos-label-${expiryId}">All Positions</span>
+                            <span style="float:right;">▼</span>
+                        </button>
+                        <div id="cons-pos-dropdown-${expiryId}" style="display:none; position:absolute; top:100%; left:0; margin-top:4px; background:white; border:1px solid #ccc; border-radius:4px; box-shadow:0 4px 8px rgba(0,0,0,0.15); min-width:260px; max-height:300px; overflow-y:auto; z-index:500;">
+                            <div style="padding:8px; border-bottom:1px solid #eee; background:#f8f9fa;">
+                                <label style="cursor:pointer; font-weight:bold; user-select:none; font-size:0.9em;">
+                                    <input type="checkbox" id="cons-pos-all-${expiryId}" checked onchange="toggleConsPosAll('${expiryId}')" style="margin-right:5px;" />Select All
+                                </label>
+                            </div>
+                            <div id="cons-pos-options-${expiryId}" style="padding:6px;">${posFilterOptionsHtml}</div>
+                        </div>
+                    </div>
+                    <select id="cons-type-${expiryId}" onchange="handleConsolidatedFilterChange('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em;">
+                        <option value="">All Types</option>
+                        <option value="ENTERED">Entered</option>
+                        <option value="MODIFIED">Modified</option>
+                        <option value="EXITED">Exited</option>
+                    </select>
+                    <select id="cons-opttype-${expiryId}" onchange="handleConsolidatedFilterChange('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em;">
+                        <option value="">All Option Types</option>
+                        <option value="PE">PE</option>
+                        <option value="CE">CE</option>
+                    </select>
+                    <select id="cons-date-${expiryId}" onchange="handleConsolidatedFilterChange('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em; min-width:140px;">
+                        <option value="">All Dates</option>
+                        ${dateOptionsHtml}
+                    </select>
+                    <span id="cons-count-${expiryId}" style="font-size:0.82em; color:#666;"></span>
+                </div>
+                <div id="cons-summary-${expiryId}"></div>
                 <div class="table-wrapper">
                     <table class="lifecycle-table">
                         <thead>
                             <tr>
                                 <th style="width:30px;"></th>
-                                <th>Symbol</th>
+                                <th class="sortable" onclick="handleConsolidatedSort('${expiryId}', 'symbol')">Symbol <span class="sort-indicator">⇅</span></th>
                                 <th style="min-width:70px;">Product</th>
                                 <th style="min-width:90px;">Status</th>
-                                <th style="min-width:150px;">Entry Date</th>
+                                <th class="sortable num" style="min-width:150px;" onclick="handleConsolidatedSort('${expiryId}', 'entryDate')">Entry Date <span class="sort-indicator">⇅</span></th>
                                 <th style="min-width:150px;">Exit Date</th>
                                 <th style="min-width:110px;" class="num">Net Qty</th>
                                 <th style="min-width:140px;" class="num">Avg Entry</th>
                                 <th style="min-width:150px;" class="num">Avg Exit / LTP</th>
-                                <th style="min-width:160px;" class="num">Realized P&L</th>
-                                <th style="min-width:160px;" class="num">Unrealized P&L</th>
+                                <th class="sortable num" style="min-width:160px;" onclick="handleConsolidatedSort('${expiryId}', 'realized_pnl')">Realized P&L <span class="sort-indicator">⇅</span></th>
+                                <th class="sortable num" style="min-width:160px;" onclick="handleConsolidatedSort('${expiryId}', 'unrealized_pnl')">Unrealized P&L <span class="sort-indicator">⇅</span></th>
                                 <th style="width:70px; text-align:center;">Action</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="cons-tbody-${expiryId}">
                             ${rowsHtml}
                         </tbody>
                     </table>
@@ -2026,6 +2313,254 @@
             const isOpen = subrows.style.display !== 'none';
             subrows.style.display = isOpen ? 'none' : 'table-row';
             if (toggle) toggle.textContent = isOpen ? '▶' : '▼';
+        }
+
+        // Consolidated table state management
+        const consolidatedTableState = {};
+
+        function toggleConsPosDropdown(expiryId) {
+            const dropdown = document.getElementById(`cons-pos-dropdown-${expiryId}`);
+            dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function toggleConsPosAll(expiryId) {
+            const selectAll = document.getElementById(`cons-pos-all-${expiryId}`);
+            const checked = selectAll.checked;
+            const optionsDiv = document.getElementById(`cons-pos-options-${expiryId}`);
+            optionsDiv.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.checked = checked;
+            });
+            handleConsolidatedFilterChange(expiryId);
+        }
+
+        function handleConsolidatedPosChange(expiryId) {
+            handleConsolidatedFilterChange(expiryId);
+            updateConsPosLabel(expiryId);
+        }
+
+        function updateConsPosLabel(expiryId) {
+            const optionsDiv = document.getElementById(`cons-pos-options-${expiryId}`);
+            const checkboxes = optionsDiv.querySelectorAll('input[type="checkbox"]');
+            const checkedCount = [...checkboxes].filter(cb => cb.checked).length;
+            const label = document.getElementById(`cons-pos-label-${expiryId}`);
+            if (checkedCount === checkboxes.length) {
+                label.textContent = 'All Positions';
+            } else if (checkedCount === 0) {
+                label.textContent = 'No Positions';
+            } else {
+                label.textContent = `${checkedCount} Selected`;
+            }
+        }
+
+        function handleConsolidatedFilterChange(expiryId) {
+            const state = consolidatedTableState[expiryId] || { sortColumn: null, sortDirection: 'desc' };
+            renderConsolidatedTableWithFilters(expiryId, state.sortColumn, state.sortDirection);
+        }
+
+        function handleConsolidatedSort(expiryId, column) {
+            const currentState = consolidatedTableState[expiryId] || { sortColumn: null, sortDirection: 'desc' };
+            let newDirection = 'desc';
+            if (currentState.sortColumn === column) {
+                newDirection = currentState.sortDirection === 'desc' ? 'asc' : 'desc';
+            }
+            consolidatedTableState[expiryId] = { sortColumn: column, sortDirection: newDirection };
+            renderConsolidatedTableWithFilters(expiryId, column, newDirection);
+            updateConsSortIndicators(expiryId, column, newDirection);
+        }
+
+        function renderConsolidatedTableWithFilters(expiryId, sortColumn, sortDirection) {
+            const cached = _expiryEventsCache[expiryId];
+            if (!cached) return;
+
+            const typeFilter = document.getElementById(`cons-type-${expiryId}`)?.value || '';
+            const optTypeFilter = document.getElementById(`cons-opttype-${expiryId}`)?.value || '';
+            const dateFilter = document.getElementById(`cons-date-${expiryId}`)?.value || '';
+
+            const posOptionsDiv = document.getElementById(`cons-pos-options-${expiryId}`);
+            const posCheckboxes = posOptionsDiv ? posOptionsDiv.querySelectorAll('input[type="checkbox"][data-pos]') : [];
+            const selectedPositions = new Set([...posCheckboxes].filter(cb => cb.checked).map(cb => cb.dataset.pos));
+            const allPosSelected = posCheckboxes.length === 0 || selectedPositions.size === posCheckboxes.length;
+
+            // Filter events first
+            let filteredEvents = cached.events.filter(e => {
+                const sym = e.symbol || '';
+                if (!allPosSelected && !selectedPositions.has(sym)) return false;
+                if (typeFilter && (e.type || '') !== typeFilter) return false;
+                if (optTypeFilter && getOptionType(sym) !== optTypeFilter) return false;
+                if (dateFilter) {
+                    const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
+                    if (eventDate !== dateFilter) return false;
+                }
+                return true;
+            });
+
+            // Consolidate filtered events
+            let consolidatedRows = consolidateEvents(filteredEvents);
+
+            // Apply sorting
+            if (sortColumn) {
+                consolidatedRows.sort((a, b) => {
+                    let valA, valB;
+                    if (sortColumn === 'symbol') {
+                        valA = a.symbol.localeCompare(b.symbol);
+                        valB = 0;
+                    } else if (sortColumn === 'entryDate') {
+                        valA = new Date(a.entryDate || 0).getTime();
+                        valB = new Date(b.entryDate || 0).getTime();
+                    } else if (sortColumn === 'realized_pnl') {
+                        valA = a.totalExitPnl || 0;
+                        valB = b.totalExitPnl || 0;
+                    } else if (sortColumn === 'unrealized_pnl') {
+                        valA = a.unbookedPnl || 0;
+                        valB = b.unbookedPnl || 0;
+                    }
+
+                    if (sortDirection === 'asc') {
+                        return valA - valB;
+                    } else {
+                        return valB - valA;
+                    }
+                });
+            } else {
+                // Default: open positions first, then by symbol
+                consolidatedRows.sort((a, b) => {
+                    if (a.isOpen && !b.isOpen) return -1;
+                    if (!a.isOpen && b.isOpen) return 1;
+                    return a.symbol.localeCompare(b.symbol);
+                });
+            }
+
+            // Update count
+            const countEl = document.getElementById(`cons-count-${expiryId}`);
+            if (countEl) {
+                const totalEvents = cached.events.length;
+                countEl.textContent = filteredEvents.length < totalEvents ? `${filteredEvents.length} of ${totalEvents} events` : '';
+            }
+
+            // Update summary
+            const summaryEl = document.getElementById(`cons-summary-${expiryId}`);
+            if (summaryEl) {
+                const hasTypeFilter = typeFilter !== '';
+                const hasOptTypeFilter = optTypeFilter !== '';
+                const hasDateFilter = dateFilter !== '';
+                const hasPositionFilter = !allPosSelected;
+
+                if (hasTypeFilter || hasOptTypeFilter || hasDateFilter || hasPositionFilter) {
+                    // Show consolidated summary when any filter is active
+                    summaryEl.innerHTML = buildConsolidatedExpirySummaryHtml(consolidatedRows);
+                } else {
+                    // No filters active → no summary
+                    summaryEl.innerHTML = '';
+                }
+            }
+
+            // Re-render table
+            const tbody = document.getElementById(`cons-tbody-${expiryId}`);
+            if (!tbody) return;
+
+            const underlying = cached.underlying;
+            const rowsHtml = consolidatedRows.map((row, idx) => {
+                const rowId = `${expiryId}_c${idx}`;
+                const statusClass = row.isOpen ? 'entered' : 'exited';
+                const statusText = row.isOpen ? 'OPEN' : 'CLOSED';
+
+                const pnlColor = row.totalExitPnl > 0 ? '#28a745' : (row.totalExitPnl < 0 ? '#dc3545' : '#888');
+                const unbookedColor = row.unbookedPnl > 0 ? '#28a745' : (row.unbookedPnl < 0 ? '#dc3545' : '#888');
+
+                const positionId = JSON.stringify({symbol: row.symbol, product: row.product}).replace(/"/g, '&quot;');
+                const actionHtml = `
+                    <div style="display: flex; gap: 5px; align-items: center; justify-content: center;">
+                        <button
+                            data-subscribe-btn="true"
+                            data-subscribe-type="position"
+                            data-subscribe-underlying="${underlying}"
+                            data-subscribe-position="${positionId}"
+                            onclick="event.stopPropagation(); toggleSubscription('position', '${underlying}', null, {symbol: '${row.symbol}', product: '${row.product}'});"
+                            style="padding: 2px 6px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75em;"
+                            title="Subscribe to this position">
+                            🔕
+                        </button>
+                    </div>
+                `;
+
+                const subEvents = row.events.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                const subRowsHtml = subEvents.map(e => renderEventRow(e, underlying)).join('');
+
+                return `
+                    <tr class="consolidated-row" onclick="toggleConsolidatedRow('${rowId}')" style="cursor:pointer;">
+                        <td style="text-align:center; color:#888;" id="consolidated-toggle-${rowId}">▶</td>
+                        <td style="font-weight:bold;">${row.symbol}</td>
+                        <td>${row.product}</td>
+                        <td><span class="pill ${statusClass}">${statusText}</span></td>
+                        <td style="font-size:0.9em;">${fmtTimestamp(row.entryDate)}</td>
+                        <td style="font-size:0.9em;">${row.exitDate ? fmtTimestamp(row.exitDate) : '<span style="color:#aaa;">—</span>'}</td>
+                        <td class="num">${row.netQty !== 0 ? row.netQty : '<span style="color:#aaa;">0</span>'}</td>
+                        <td class="num">₹${fmtNum(row.avgEntryPrice, 2)}</td>
+                        <td class="num">${row.isOpen
+                            ? `<span style="color:#555;" title="Last Traded Price">LTP: ₹${fmtNum(row.ltp, 2)}</span>`
+                            : `₹${fmtNum(row.avgExitPrice, 2)}`}</td>
+                        <td class="num"><span style="color:${pnlColor}; font-weight:bold;">₹${fmtNum(row.totalExitPnl, 2)}</span></td>
+                        <td class="num">${row.isOpen
+                            ? `<span style="color:${unbookedColor}; font-weight:bold;">₹${fmtNum(row.unbookedPnl, 2)}</span>`
+                            : '<span style="color:#aaa;">—</span>'}</td>
+                        <td style="text-align:center;">${actionHtml}</td>
+                    </tr>
+                    <tr id="consolidated-subrows-${rowId}" style="display:none;">
+                        <td colspan="12" style="padding:0; background:#f0f4f8; border-top:none;">
+                            <table class="lifecycle-table" style="margin:0; border-radius:0; font-size:0.9em; border:none;">
+                                <thead>
+                                    <tr>
+                                        <th style="min-width:150px;">Time</th>
+                                        <th style="min-width:110px;">Type</th>
+                                        <th>Symbol</th>
+                                        <th style="min-width:70px;">Product</th>
+                                        <th style="min-width:160px;" class="num">Qty (Before → After)</th>
+                                        <th style="min-width:140px;" class="num">Avg (Before)</th>
+                                        <th style="min-width:140px;" class="num">Avg (After)</th>
+                                        <th style="min-width:140px;" class="num">LTP (After)</th>
+                                        <th style="min-width:170px;" class="num">Booked P&L (After)</th>
+                                        <th style="min-width:170px;" class="num">Unbooked P&L (After)</th>
+                                        <th style="min-width:240px;">Exit / Fill</th>
+                                        <th style="width:70px; text-align:center;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${subRowsHtml}
+                                </tbody>
+                            </table>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            tbody.innerHTML = rowsHtml;
+        }
+
+        function updateConsSortIndicators(expiryId, activeColumn, activeDirection) {
+            const table = document.getElementById(`cons-tbody-${expiryId}`)?.closest('table');
+            if (!table) return;
+
+            table.querySelectorAll('th').forEach(th => {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+                const indicator = th.querySelector('.sort-indicator');
+                if (indicator) indicator.textContent = '⇅';
+            });
+
+            const columnMap = {
+                'symbol': 1,
+                'entryDate': 4,
+                'realized_pnl': 9,
+                'unrealized_pnl': 10
+            };
+            const thIndex = columnMap[activeColumn];
+            if (thIndex !== undefined) {
+                const th = table.querySelectorAll('th')[thIndex];
+                if (th) {
+                    th.classList.add(activeDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
+                    const indicator = th.querySelector('.sort-indicator');
+                    if (indicator) indicator.textContent = activeDirection === 'asc' ? '↑' : '↓';
+                }
+            }
         }
 
         function renderUnderlyingGroups(underlyings, events) {
@@ -2502,6 +3037,11 @@
 
             // Apply initial filter (in case some rows already have counts stored)
             applyHideModifiedZeroFilter();
+
+            // Set default checkbox state for "Consolidate Trades"
+            if (consolidateTradesCheckbox) {
+                consolidateTradesCheckbox.checked = true;
+            }
 
             // Backfill counts for older records that stored just "Positions Modified" without (n)
             // or for records that used only the legacy single-type string.
@@ -4452,10 +4992,38 @@
 
         // Current chat scope state
         let aiScope = { underlying: '', scopeType: 'underlying', expiryKey: '', scopeLabel: '' };
-        let aiIsStreaming = false;
+        
+        // Track minimized chats per scope
+        const aiMinimizedChats = new Map(); // scopeKey -> { scope, element, isStreaming }
+        let currentAIChatScope = null; // Currently open chat scope (panel is visible)
+        
+        // Track streaming state and abort controllers per scope (key: 'underlying|expiryKey')
+        const aiStreamingState = new Map(); // key -> { isStreaming: bool, phase: 'typing'|'streaming', abortController: AbortController, streamBubble: DOMElement }
+        // NOTE: Don't use global aiCurrentAbortController or aiCurrentStreamBubble - always get from scope state
+
+        function getScopeKey(scope) {
+            return `${scope.underlying}|${scope.expiryKey || ''}`;
+        }
+
+        function getStreamingState(scope) {
+            const key = getScopeKey(scope);
+            return aiStreamingState.get(key) || { isStreaming: false, phase: null, abortController: null, streamBubble: null };
+        }
+
+        function setStreamingState(scope, isStreaming, phase = null, abortController = null, streamBubble = null) {
+            const key = getScopeKey(scope);
+            aiStreamingState.set(key, { isStreaming, phase, abortController, streamBubble });
+        }
 
         function openAIChatPanel(underlying, scopeType, expiryKey, scopeLabel) {
             aiScope = { underlying, scopeType, expiryKey: expiryKey || '', scopeLabel };
+            currentAIChatScope = getScopeKey(aiScope);
+
+            // If this scope is already minimized, restore it instead of opening fresh
+            if (aiMinimizedChats.has(currentAIChatScope)) {
+                restoreAIChatPanel(currentAIChatScope);
+                return;
+            }
 
             // Update panel header
             const titleEl = document.getElementById('ai-chat-scope-label');
@@ -4521,14 +5089,275 @@
             // Load and render persisted history
             loadAIChatHistory();
 
+            // Check if there's an active streaming request for this scope
+            // (after history loads, which clears state for fresh scopes)
+            const streamState = getStreamingState(aiScope);
+            if (streamState.isStreaming && streamState.abortController) {
+                // Recreate UI elements for in-progress request
+                recreateStreamingUI(streamState.phase);
+            } else {
+                // No active streaming, ensure button is enabled
+                updateSendButtonState();
+            }
+
             // Show panel
             document.getElementById('ai-chat-overlay').classList.add('open');
             document.getElementById('ai-chat-panel').classList.add('open');
         }
 
         function closeAIChatPanel() {
+            // If there's an active stream or conversation, minimize instead of close
+            const streamState = getStreamingState(aiScope);
+            const messagesEl = document.getElementById('ai-messages');
+            const hasConversation = messagesEl && !messagesEl.querySelector('.ai-empty-state');
+            
+            if (streamState.isStreaming || hasConversation) {
+                minimizeAIChatPanel();
+                return;
+            }
+            
+            // No active stream or conversation, just close
             document.getElementById('ai-chat-overlay').classList.remove('open');
             document.getElementById('ai-chat-panel').classList.remove('open');
+            currentAIChatScope = null;
+        }
+
+        function forceCloseAIChatPanel() {
+            // Force close without minimizing (used by close button and overlay click)
+            const overlay = document.getElementById('ai-chat-overlay');
+            const panel = document.getElementById('ai-chat-panel');
+            if (overlay) overlay.classList.remove('open');
+            if (panel) panel.classList.remove('open');
+            currentAIChatScope = null;
+        }
+
+        function minimizeAIChatPanel(event) {
+            if (event) event.stopPropagation();
+            
+            // Save current scope before closing
+            if (aiScope.underlying) {
+                const scopeKey = getScopeKey(aiScope);
+                
+                // Check if already minimized
+                if (!aiMinimizedChats.has(scopeKey)) {
+                    // Create minimized chat element
+                    createMinimizedChat(scopeKey, aiScope);
+                }
+            }
+            // Force close the panel (don't use closeAIChatPanel which might re-minimize)
+            forceCloseAIChatPanel();
+        }
+
+        function createMinimizedChat(scopeKey, scope) {
+            const container = document.getElementById('ai-minimized-container');
+            if (!container) return;
+
+            // Create title based on underlying and expiry
+            const title = scope.expiryKey 
+                ? `${scope.underlying} (${scope.expiryKey})`
+                : `${scope.underlying} (All)`;
+
+            const chatEl = document.createElement('div');
+            chatEl.className = 'ai-minimized-chat';
+            chatEl.dataset.scopeKey = scopeKey;
+            chatEl.onclick = (e) => {
+                if (!e.target.classList.contains('ai-minimized-chat-close')) {
+                    restoreAIChatPanel(scopeKey);
+                }
+            };
+
+            const streamState = getStreamingState(scope);
+            const statusHtml = streamState.isStreaming 
+                ? '<span class="ai-minimized-chat-status streaming">● Thinking...</span>'
+                : '';
+
+            chatEl.innerHTML = `
+                <span class="ai-minimized-chat-title" title="${title}">${title}</span>
+                ${statusHtml}
+                <button class="ai-minimized-chat-close" onclick="closeMinimizedChat('${scopeKey}')" title="Close">×</button>
+            `;
+
+            container.appendChild(chatEl);
+            aiMinimizedChats.set(scopeKey, { scope, element: chatEl, isStreaming: streamState.isStreaming });
+        }
+
+        function restoreAIChatPanel(scopeKey) {
+            const minimizedData = aiMinimizedChats.get(scopeKey);
+            if (!minimizedData) return;
+
+            const { scope } = minimizedData;
+            
+            // Set current scope
+            aiScope = { ...scope };
+            currentAIChatScope = scopeKey;
+
+            // Update panel header
+            const titleEl = document.getElementById('ai-chat-scope-label');
+            const subtitleEl = document.getElementById('ai-chat-scope-sublabel');
+            if (titleEl) titleEl.textContent = scope.underlying + ' — AI Analysis';
+            if (subtitleEl) subtitleEl.textContent = scope.scopeLabel;
+
+            // Load and render persisted history
+            loadAIChatHistory();
+
+            // Check if there's an active streaming request for this scope
+            const streamState = getStreamingState(aiScope);
+            if (streamState.isStreaming && streamState.abortController) {
+                recreateStreamingUI(streamState.phase);
+            } else {
+                // No active streaming, ensure button is enabled
+                updateSendButtonState();
+            }
+
+            // Remove from minimized
+            removeMinimizedChatElement(scopeKey);
+            aiMinimizedChats.delete(scopeKey);
+
+            // Show panel
+            document.getElementById('ai-chat-overlay').classList.add('open');
+            document.getElementById('ai-chat-panel').classList.add('open');
+        }
+
+        function closeMinimizedChat(scopeKey) {
+            // Parse scope from key
+            const parts = scopeKey.split('|');
+            const scope = { underlying: parts[0], expiryKey: parts[1] || '' };
+            
+            // Clear streaming state and abort if active
+            const streamState = getStreamingState(scope);
+            if (streamState.abortController) {
+                streamState.abortController.abort();
+            }
+            setStreamingState(scope, false, null, null, null);
+
+            removeMinimizedChatElement(scopeKey);
+            aiMinimizedChats.delete(scopeKey);
+        }
+
+        function removeMinimizedChatElement(scopeKey) {
+            const minimizedData = aiMinimizedChats.get(scopeKey);
+            if (minimizedData && minimizedData.element) {
+                minimizedData.element.remove();
+            }
+        }
+
+        function updateMinimizedChatStatus(scopeKey) {
+            const minimizedData = aiMinimizedChats.get(scopeKey);
+            if (!minimizedData || !minimizedData.element) return;
+
+            // Parse scope from key
+            const parts = scopeKey.split('|');
+            const scope = { underlying: parts[0], expiryKey: parts[1] || '' };
+            
+            const streamState = getStreamingState(scope);
+
+            const statusEl = minimizedData.element.querySelector('.ai-minimized-chat-status');
+            if (streamState.isStreaming) {
+                if (!statusEl) {
+                    const newStatus = document.createElement('span');
+                    newStatus.className = 'ai-minimized-chat-status streaming';
+                    newStatus.textContent = '● Thinking...';
+                    minimizedData.element.insertBefore(newStatus, minimizedData.element.querySelector('.ai-minimized-chat-close'));
+                }
+            } else {
+                if (statusEl) statusEl.remove();
+            }
+        }
+
+        function showAIStreamingUI(isStreaming) {
+            const sendBtn = document.getElementById('ai-send-btn');
+            const cancelBtn = document.getElementById('ai-cancel-btn');
+            const input = document.getElementById('ai-message-input');
+            
+            if (isStreaming) {
+                if (sendBtn) sendBtn.disabled = true;
+                if (cancelBtn) cancelBtn.style.display = 'block';
+                if (input) input.disabled = true;
+            } else {
+                if (sendBtn) sendBtn.disabled = false;
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                if (input) input.disabled = false;
+            }
+        }
+
+        function updateSendButtonState() {
+            // Update send button and cancel button based on current scope's streaming state
+            const streamState = getStreamingState(aiScope);
+            const isStreaming = streamState.isStreaming;
+            
+            const sendBtn = document.getElementById('ai-send-btn');
+            const cancelBtn = document.getElementById('ai-cancel-btn');
+            const input = document.getElementById('ai-message-input');
+            
+            if (isStreaming) {
+                if (sendBtn) sendBtn.disabled = true;
+                if (cancelBtn) cancelBtn.style.display = 'block';
+                if (input) input.disabled = true;
+            } else {
+                if (sendBtn) sendBtn.disabled = false;
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                if (input) input.disabled = false;
+            }
+        }
+
+        function recreateStreamingUI(phase) {
+            // Recreate UI elements for in-progress streaming request
+            updateSendButtonState();
+            const messagesEl = document.getElementById('ai-messages');
+            
+            if (phase === 'typing') {
+                // Recreate typing indicator
+                const typingDiv = document.createElement('div');
+                typingDiv.className = 'ai-msg ai-typing';
+                typingDiv.id = 'ai-typing-indicator';
+                typingDiv.innerHTML = '<div class="ai-msg-bubble">Thinking...</div>';
+                messagesEl.appendChild(typingDiv);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            } else if (phase === 'streaming') {
+                // Recreate streaming bubble
+                const streamDiv = document.createElement('div');
+                streamDiv.className = 'ai-msg assistant';
+                const streamBubble = document.createElement('div');
+                streamBubble.className = 'ai-msg-bubble';
+                streamBubble.textContent = 'Loading response...';
+                const streamMeta = document.createElement('div');
+                streamMeta.className = 'ai-msg-meta';
+                const model = document.getElementById('ai-model-select').value;
+                streamMeta.textContent = _modelDisplayName(model);
+                streamDiv.appendChild(streamBubble);
+                streamDiv.appendChild(streamMeta);
+                messagesEl.appendChild(streamDiv);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+                
+                // Update the state map with the new bubble reference
+                const streamState = getStreamingState(aiScope);
+                setStreamingState(aiScope, true, 'streaming', streamState.abortController, streamBubble);
+            }
+            
+            // Update minimized chat status if applicable
+            const scopeKey = getScopeKey(aiScope);
+            updateMinimizedChatStatus(scopeKey);
+        }
+
+        function cancelAIRequest() {
+            const streamState = getStreamingState(aiScope);
+            if (streamState.abortController) {
+                streamState.abortController.abort();
+            }
+            // Clear streaming state for current scope
+            setStreamingState(aiScope, false, null, null, null);
+            updateSendButtonState();
+            
+            // Remove typing indicator if present
+            const typingIndicator = document.getElementById('ai-typing-indicator');
+            if (typingIndicator) typingIndicator.remove();
+            
+            // Update minimized chat status if applicable
+            const scopeKey = getScopeKey(aiScope);
+            updateMinimizedChatStatus(scopeKey);
+            
+            // Add cancellation message
+            appendAIMessage('assistant', 'Request cancelled by user.', null, new Date().toISOString());
         }
 
         function toggleAIContextBar() {
@@ -4554,6 +5383,9 @@
                 const data = await res.json();
                 if (data.error) { messagesEl.innerHTML = `<div class="ai-empty-state">${data.error}</div>`; return; }
                 if (!data.messages || data.messages.length === 0) {
+                    // No prior conversation for this scope - clear any stale streaming state
+                    setStreamingState(aiScope, false, null, null, null);
+                    updateSendButtonState();
                     messagesEl.innerHTML = '<div class="ai-empty-state">No conversation yet.<br>Ask anything about these trades to get started.</div>';
                     return;
                 }
@@ -4595,15 +5427,26 @@
         }
 
         async function sendAIMessage() {
-            if (aiIsStreaming) return;
+            const scopeKey = getScopeKey(aiScope);
+            const streamState = getStreamingState(aiScope);
+            
+            // Check if already streaming for this scope
+            if (streamState.isStreaming) return;
+            
             const input = document.getElementById('ai-message-input');
             const sendBtn = document.getElementById('ai-send-btn');
             const model = document.getElementById('ai-model-select').value;
             const message = (input.value || '').trim();
             if (!message) return;
 
-            aiIsStreaming = true;
-            sendBtn.disabled = true;
+            // Create abort controller for this request
+            const abortController = new AbortController();
+            const signal = abortController.signal;
+            
+            // Set streaming state for this scope (phase: 'typing' initially)
+            setStreamingState(aiScope, true, 'typing', abortController, null);
+            updateSendButtonState();
+            
             input.value = '';
             input.style.height = 'auto';
 
@@ -4618,6 +5461,9 @@
             messagesEl.appendChild(typingDiv);
             messagesEl.scrollTop = messagesEl.scrollHeight;
 
+            // Gather consolidated trade data from the current view
+            const consolidatedTradeData = gatherConsolidatedTradeData();
+
             try {
                 const res = await fetch('/api/ai/chat', {
                     method: 'POST',
@@ -4629,13 +5475,17 @@
                         expiry_key: aiScope.expiryKey,
                         message,
                         model,
+                        consolidated_trades: consolidatedTradeData,
                     }),
+                    signal,
                 });
 
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({ error: 'Unknown error' }));
                     typingDiv.remove();
                     appendAIMessage('assistant', 'Error: ' + (err.error || res.statusText), null, null);
+                    setStreamingState(aiScope, false, null, null, null);
+                    updateSendButtonState();
                     return;
                 }
 
@@ -4652,6 +5502,10 @@
                 streamDiv.appendChild(streamBubble);
                 streamDiv.appendChild(streamMeta);
                 messagesEl.appendChild(streamDiv);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+
+                // Update state: now streaming response
+                setStreamingState(aiScope, true, 'streaming', abortController, streamBubble);
 
                 // Read SSE stream
                 const reader = res.body.getReader();
@@ -4669,24 +5523,41 @@
                         try {
                             const evt = JSON.parse(line.slice(6));
                             if (evt.type === 'chunk') {
-                                streamBubble.textContent += evt.text;
-                                messagesEl.scrollTop = messagesEl.scrollHeight;
+                                // Get current stream bubble from state (scope-specific)
+                                const currentState = getStreamingState(aiScope);
+                                const bubble = currentState.streamBubble || streamDiv.querySelector('.ai-msg-bubble');
+                                if (bubble) {
+                                    bubble.textContent += evt.text;
+                                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                                }
                             } else if (evt.type === 'done') {
                                 // Stream complete
                             } else if (evt.type === 'error') {
-                                streamBubble.textContent += '\n\n[Error: ' + evt.message + ']';
+                                const currentState = getStreamingState(aiScope);
+                                const bubble = currentState.streamBubble || streamDiv.querySelector('.ai-msg-bubble');
+                                if (bubble) {
+                                    bubble.textContent += '\n\n[Error: ' + evt.message + ']';
+                                }
                             }
                         } catch (e) { /* ignore parse errors */ }
                     }
                 }
                 messagesEl.scrollTop = messagesEl.scrollHeight;
             } catch (e) {
+                if (e.name === 'AbortError') {
+                    // Request was cancelled - don't show error
+                    typingDiv.remove();
+                    return;
+                }
                 typingDiv.remove();
                 appendAIMessage('assistant', 'Network error: ' + e, null, null);
             } finally {
-                aiIsStreaming = false;
-                sendBtn.disabled = false;
+                setStreamingState(aiScope, false, null, null, null);
+                updateSendButtonState();
                 input.focus();
+                
+                // Update minimized chat status if applicable
+                updateMinimizedChatStatus(scopeKey);
             }
         }
 
@@ -4788,10 +5659,10 @@
             if (currentVal && [...sel.options].some(o => o.value === currentVal)) {
                 sel.value = currentVal;
             } else {
-                // Prefer Gemini 2.5 Flash, then first real option
+                // Prefer Qwen Coder, then first real option
                 const allOpts = [...sel.options].filter(o => !o.value.includes('__'));
-                const geminiFlashOpt = allOpts.find(o => o.value === 'gemini:gemini-2.5-flash');
-                const preferred = geminiFlashOpt || allOpts[0];
+                const qwenCoderOpt = allOpts.find(o => o.value === 'qwen:coder-model');
+                const preferred = qwenCoderOpt || allOpts[0];
                 if (preferred) sel.value = preferred.value;
             }
         }
@@ -4834,7 +5705,11 @@
 
 
     <!-- AI Chat Overlay + Panel -->
-    <div class="ai-chat-overlay" id="ai-chat-overlay" onclick="closeAIChatPanel()"></div>
+    <div class="ai-chat-overlay" id="ai-chat-overlay" onclick="forceCloseAIChatPanel()"></div>
+    
+    <!-- Minimized chats container -->
+    <div class="ai-minimized-container" id="ai-minimized-container"></div>
+    
     <div class="ai-chat-panel" id="ai-chat-panel">
         <div class="ai-chat-panel-header">
             <div class="ai-chat-panel-title">
@@ -4844,8 +5719,10 @@
             <select class="ai-model-select" id="ai-model-select" title="Select AI model">
                 <option value="">Loading models...</option>
             </select>
+            <button class="ai-cancel-btn" id="ai-cancel-btn" onclick="cancelAIRequest()" title="Cancel request">&#x2715; Cancel</button>
             <button class="ai-clear-btn" onclick="clearAIChatHistory()" title="Clear chat history">Clear</button>
-            <button class="ai-chat-close-btn" onclick="closeAIChatPanel()" title="Close">&#x2715;</button>
+            <button class="ai-minimize-btn" onclick="minimizeAIChatPanel(event)" title="Minimize">&#x2193;</button>
+            <button class="ai-chat-close-btn" onclick="forceCloseAIChatPanel()" title="Close">&#x2715;</button>
         </div>
 
         <div class="ai-context-bar" id="ai-context-bar">
