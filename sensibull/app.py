@@ -4,12 +4,16 @@ from werkzeug.security import check_password_hash
 import sqlite3
 import json
 import requests as http_requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 from database import get_db, sync_profiles, now_ist, init_db
 import sys
 import os
 import threading
+import re
+import calendar
+from urllib.parse import urlparse
+from typing import Callable, Optional
 from dotenv import load_dotenv
 load_dotenv()
 import time
@@ -39,10 +43,10 @@ class AdminUser(UserMixin):
         self.username = username
         self.email = email
         self._is_active = is_active
-    
+
     def get_id(self):
         return str(self.id)
-    
+
     @property
     def is_active(self):
         """Override UserMixin is_active property"""
@@ -54,12 +58,12 @@ def load_user(user_id):
     conn = get_db()
     c = conn.cursor()
     user = c.execute("""
-        SELECT id, username, email, is_active 
-        FROM admin_users 
+        SELECT id, username, email, is_active
+        FROM admin_users
         WHERE id = ? AND is_active = 1
     """, (user_id,)).fetchone()
     conn.close()
-    
+
     if user:
         return AdminUser(user['id'], user['username'], user['email'], user['is_active'])
     return None
@@ -77,6 +81,13 @@ SCRAPER_AUTO_START_DELAY = 30  # seconds
 # Global flag to track if the daily master contract download failed
 MASTER_CONTRACT_DOWNLOAD_FAILED = False
 
+# Holiday API config (use {year} placeholder, e.g. https://example.com/holidays/{year})
+MARKET_HOLIDAYS_API_URL = os.environ.get('MARKET_HOLIDAYS_API_URL', '').strip()
+MARKET_HOLIDAYS_API_KEY = os.environ.get('MARKET_HOLIDAYS_API_KEY', '').strip()
+OPENALGO_HOLIDAYS_PATH = os.environ.get('OPENALGO_HOLIDAYS_PATH', '/api/v1/holidays').strip() or '/api/v1/holidays'
+MARKET_HOLIDAY_CACHE = {}
+MARKET_HOLIDAY_CACHE_LOCK = threading.Lock()
+
 @app.template_filter('to_datetime')
 def to_datetime_filter(value):
     # Timestamps in DB are stored in ISO format with IST timezone (e.g., "2026-02-16T10:30:00+05:30")
@@ -86,7 +97,7 @@ def to_datetime_filter(value):
         if value.tzinfo is None:
             return value.replace(tzinfo=IST)
         return value
-    
+
     try:
         # First try ISO format with timezone (new format)
         dt = datetime.fromisoformat(value)
@@ -109,12 +120,12 @@ def is_market_open():
     # Weekday check: 0=Monday, 4=Friday, 5=Saturday, 6=Sunday
     if now.weekday() > 4:
         return False
-    
+
     # Time check: 09:15 to 15:30 IST
     current_time = now.time()
     start_time = datetime.strptime("09:15", "%H:%M").time()
     end_time = datetime.strptime("15:30", "%H:%M").time()
-    
+
     return start_time <= current_time <= end_time
 
 def _do_download_master_contract():
@@ -183,14 +194,14 @@ def restart_scraper_internal():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     scraper_path = os.path.join(base_dir, 'scraper.py')
     log_file = os.path.join(base_dir, 'scraper.log')
-    
+
     # Kill existing
     os.system("pkill -f 'vibhu/sensibull/scraper.py'")
-    
+
     # Start new
     cmd = f"nohup python3 {scraper_path} >> {log_file} 2>&1 &"
     os.system(cmd)
-    
+
 def monitor_scraper():
     """Background thread to monitor scraper and restart if stuck"""
     global LAST_AUTO_RESTART
@@ -225,43 +236,43 @@ def monitor_scraper():
     print("Auto-starting scraper...")
     restart_scraper_internal()
     LAST_AUTO_RESTART = now_ist()
-    
+
     while True:
         try:
             # Check every minute
             time.sleep(60)
-            
+
             if not is_market_open():
                 continue
-                
+
             # Check DB for last update
             conn = get_db()
             c = conn.cursor()
             last_updated_row = c.execute("SELECT MAX(timestamp) FROM latest_snapshots").fetchone()
             conn.close()
-            
+
             last_updated = last_updated_row[0] if last_updated_row else None
-            
+
             should_restart = False
-            
+
             if last_updated:
                 last_dt = to_datetime_filter(last_updated)
                 # Ensure both datetimes are timezone-aware for comparison
                 if last_dt.tzinfo is None:
                     last_dt = last_dt.replace(tzinfo=IST)
                 time_diff = (now_ist() - last_dt).total_seconds()
-                
+
                 # If no update for > 5 minutes (300 seconds)
                 if time_diff > 300:
                     print(f"Monitor: Scraper stuck! Last update {time_diff}s ago.")
                     should_restart = True
             else:
-                 # If no data at all and market is open, maybe assume stuck? 
+                 # If no data at all and market is open, maybe assume stuck?
                  # Or maybe database is empty. Let's be conservative and only restart if data exists but is stale,
-                 # or perhaps if empty database persists for long. 
+                 # or perhaps if empty database persists for long.
                  # For now, only restart if stale.
                  pass
-                 
+
             if should_restart:
                 # Check cooldown (don't restart if we just restarted < 1 min ago)
                 if LAST_AUTO_RESTART and (now_ist() - LAST_AUTO_RESTART).total_seconds() < 60:
@@ -270,7 +281,7 @@ def monitor_scraper():
                     print("Monitor: Triggering auto-restart.")
                     restart_scraper_internal()
                     LAST_AUTO_RESTART = now_ist()
-                    
+
         except Exception as e:
             print(f"Monitor error: {e}")
             # Sleep a bit to avoid rapid loops on error
@@ -282,90 +293,90 @@ def login():
     # Redirect to index if already logged in
     if current_user.is_authenticated:
         return redirect(url_for('index'))
-    
+
     if request.method == 'POST':
         action = request.form.get('action', 'login')
-        
+
         # Handle Registration
         if action == 'register':
             username = request.form.get('username', '').strip()
             password = request.form.get('password', '')
             verification_code = request.form.get('verification_code', '').strip()
-            
+
             # Validate inputs
             if not username or not password or not verification_code:
                 return render_template('login.html', error='All fields are required for registration')
-            
+
             # Check verification code
             if verification_code != '1083':
                 return render_template('login.html', error='Invalid verification code')
-            
+
             # Validate password length
             if len(password) < 6:
                 return render_template('login.html', error='Password must be at least 6 characters long')
-            
+
             # Check if username already exists
             conn = get_db()
             c = conn.cursor()
-            
+
             existing_user = c.execute("""
                 SELECT id FROM admin_users WHERE username = ?
             """, (username,)).fetchone()
-            
+
             if existing_user:
                 conn.close()
                 return render_template('login.html', error=f'Username "{username}" already exists')
-            
+
             # Create new admin user
             try:
                 from werkzeug.security import generate_password_hash
                 password_hash = generate_password_hash(password, method='pbkdf2:sha256')
-                
+
                 c.execute("""
                     INSERT INTO admin_users (username, password_hash, email, created_at, is_active)
                     VALUES (?, ?, ?, ?, 1)
                 """, (username, password_hash, None, now_ist().isoformat()))
-                
+
                 conn.commit()
                 conn.close()
-                
+
                 return render_template('login.html', success=f'Admin user "{username}" created successfully! You can now login.')
-            
+
             except Exception as e:
                 conn.close()
                 return render_template('login.html', error=f'Error creating admin user: {str(e)}')
-        
+
         # Handle Login
         else:
             username = request.form.get('username', '').strip()
             password = request.form.get('password', '')
             remember = request.form.get('remember') == 'yes'
-            
+
             if not username or not password:
                 return render_template('login.html', error='Username and password are required')
-            
+
             conn = get_db()
             c = conn.cursor()
             user = c.execute("""
-                SELECT id, username, password_hash, email, is_active 
-                FROM admin_users 
+                SELECT id, username, password_hash, email, is_active
+                FROM admin_users
                 WHERE username = ?
             """, (username,)).fetchone()
-            
+
             if user and user['is_active'] and check_password_hash(user['password_hash'], password):
                 # Update last login
                 c.execute("""
-                    UPDATE admin_users 
-                    SET last_login = ? 
+                    UPDATE admin_users
+                    SET last_login = ?
                     WHERE id = ?
                 """, (now_ist().isoformat(), user['id']))
                 conn.commit()
                 conn.close()
-                
+
                 # Create user object and login
                 user_obj = AdminUser(user['id'], user['username'], user['email'], user['is_active'])
                 login_user(user_obj, remember=remember, duration=timedelta(days=30))
-                
+
                 # Redirect to next page or index
                 next_page = request.args.get('next')
                 if next_page and next_page.startswith('/'):
@@ -374,7 +385,7 @@ def login():
             else:
                 conn.close()
                 return render_template('login.html', error='Invalid username or password', username=username)
-    
+
     return render_template('login.html')
 
 @app.route('/logout')
@@ -396,30 +407,36 @@ def manage_profiles():
     """Profile management page"""
     return render_template('manage_profiles.html')
 
+@app.route('/openalgo')
+@login_required
+def openalgo_profiles_page():
+    """OpenAlgo profile management page"""
+    return render_template('openalgo.html')
+
 @app.route('/notifications/<slug>')
 @login_required
 def notifications(slug):
     """Notifications page for a profile"""
     conn = get_db()
     c = conn.cursor()
-    
+
     profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
     if not profile:
         conn.close()
         return "Profile not found", 404
-    
+
     # Get the last snapshot date for this profile
     last_snapshot = c.execute("""
-        SELECT date(timestamp) as snapshot_date 
-        FROM snapshots 
-        WHERE profile_id = ? 
-        ORDER BY timestamp DESC 
+        SELECT date(timestamp) as snapshot_date
+        FROM snapshots
+        WHERE profile_id = ?
+        ORDER BY timestamp DESC
         LIMIT 1
     """, (profile['id'],)).fetchone()
-    
+
     # Default to today if no snapshots exist
     last_date = last_snapshot['snapshot_date'] if last_snapshot else now_ist().strftime('%Y-%m-%d')
-    
+
     conn.close()
     return render_template('notifications.html', slug=slug, profile=profile, last_date=last_date)
 
@@ -428,42 +445,42 @@ def notifications(slug):
 def index():
     conn = get_db()
     c = conn.cursor()
-    
+
     # Get all active profiles, ordered by slug
     profiles = c.execute("""
-        SELECT * FROM profiles 
-        WHERE is_active = 1 
+        SELECT * FROM profiles
+        WHERE is_active = 1
         ORDER BY slug
     """).fetchall()
 
     # Calculate dates (last 30 days)
-    
+
     # We have profiles now. Now get dates.
     # Get unique dates from changes
     dates_rows = c.execute("SELECT DISTINCT date(timestamp) as day FROM position_changes ORDER BY day DESC LIMIT 30").fetchall()
     dates = [row['day'] for row in dates_rows]
-    
+
     # Build matrix
-    matrix = {} 
+    matrix = {}
     for p in profiles:
         for d in dates:
             # Check if any changes on this day
             count = c.execute("""
-                SELECT COUNT(*) FROM position_changes 
+                SELECT COUNT(*) FROM position_changes
                 WHERE profile_id = ? AND date(timestamp) = ?
             """, (p['id'], d)).fetchone()[0]
-            
+
             pnl = 0
             if count > 0:
                  metrics = get_daily_pnl_metrics(c, p['id'], d)
                  pnl = metrics['todays_pnl']
-                 
+
             matrix[(p['id'], d)] = {'count': count, 'pnl': pnl}
-            
+
     # Get global last updated time
     last_updated_row = c.execute("SELECT MAX(timestamp) FROM latest_snapshots").fetchone()
     last_updated = last_updated_row[0] if last_updated_row else None
-    
+
     scraper_error = None
     if not is_market_open():
         scraper_error = "Scraper is paused (Market Closed)"
@@ -489,69 +506,69 @@ def calculate_snapshot_pnl(c, snapshot_id):
     if not snap: return 0, 0
     raw = json.loads(snap['raw_data'])
     data = raw.get('data', [])
-    
+
     # Calculate manually to be safe
     total = 0
     booked = 0
-    
+
     for item in data:
         for trade in item.get('trades', []):
             u_pnl = trade.get('unbooked_pnl', 0)
             b_pnl = trade.get('booked_profit_loss', 0)
-            
+
             total += (u_pnl + b_pnl)
             booked += b_pnl
-            
+
     return total, booked
 
 def get_daily_pnl_metrics(c, profile_id, date):
     # 1. Start Day P&L
     start_day_pnl = 0
-    
+
     # Try to get previous day's close
     prev_change = c.execute("""
-        SELECT * FROM position_changes 
-        WHERE profile_id = ? AND date(timestamp) < ? 
+        SELECT * FROM position_changes
+        WHERE profile_id = ? AND date(timestamp) < ?
         ORDER BY timestamp DESC LIMIT 1
     """, (profile_id, date)).fetchone()
-    
+
     if prev_change:
         prev_total, prev_booked = calculate_snapshot_pnl(c, prev_change['snapshot_id'])
         start_day_pnl = prev_total - prev_booked
     else:
         # Fallback to first change of the day
         first_change = c.execute("""
-            SELECT * FROM position_changes 
-            WHERE profile_id = ? AND date(timestamp) = ? 
+            SELECT * FROM position_changes
+            WHERE profile_id = ? AND date(timestamp) = ?
             ORDER BY timestamp ASC LIMIT 1
         """, (profile_id, date)).fetchone()
-        
+
         if first_change:
             total, booked = calculate_snapshot_pnl(c, first_change['snapshot_id'])
-            # Only count unbooked if it's the very first record? 
+            # Only count unbooked if it's the very first record?
             # Or use total? If we fallback, it's safer to assume 0 start or use total.
             # Let's stick to total.
             start_day_pnl = total
-            
+
     # 2. Current P&L (Latest available snapshot for the day)
     # We query the `latest_snapshots` table which is updated on every scraper run
     # regardless of position changes. This gives us Realtime P&L.
-    
+
     current_pnl = 0
     booked_pnl = 0
-    
+
     # First try latest_snapshots for realtime data
     latest_realtime = c.execute("SELECT * FROM latest_snapshots WHERE profile_id = ?", (profile_id,)).fetchone()
-    
+
     # We only use realtime if it matches the requested date
     # (Or should we always use it if date is TODAY? Yes.)
     # If date is in the past, we must fall back to historical snapshots.
-    
+
     today_str = now_ist().strftime('%Y-%m-%d')
     use_realtime = (date == today_str) and (latest_realtime is not None)
-    
+
     last_updated = None
-    
+
     if use_realtime:
         # Parse raw_data manually since we don't have calculate_snapshot_pnl helper for raw JSON input
         raw = json.loads(latest_realtime['raw_data'])
@@ -568,17 +585,17 @@ def get_daily_pnl_metrics(c, profile_id, date):
     else:
         # Fallback to history (Last recorded snapshot for that day)
         latest_snapshot = c.execute("""
-            SELECT * FROM snapshots 
-            WHERE profile_id = ? AND date(timestamp) = ? 
+            SELECT * FROM snapshots
+            WHERE profile_id = ? AND date(timestamp) = ?
             ORDER BY timestamp DESC LIMIT 1
         """, (profile_id, date)).fetchone()
-        
+
         if latest_snapshot:
             current_pnl, booked_pnl = calculate_snapshot_pnl(c, latest_snapshot['id'])
             last_updated = latest_snapshot['timestamp']
-    
+
     todays_pnl = current_pnl - start_day_pnl
-    
+
     return {
         'start_pnl': start_day_pnl,
         'current_pnl': current_pnl,
@@ -592,26 +609,26 @@ def get_daily_pnl_metrics(c, profile_id, date):
 def daily_view(slug, date):
     conn = get_db()
     c = conn.cursor()
-    
+
     profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
     if not profile:
         conn.close()
         return "Profile not found", 404
-    
+
     # Get changes for this date
     changes = c.execute("""
-        SELECT * FROM position_changes 
-        WHERE profile_id = ? AND date(timestamp) = ? 
+        SELECT * FROM position_changes
+        WHERE profile_id = ? AND date(timestamp) = ?
         ORDER BY timestamp DESC
     """, (profile['id'], date)).fetchall()
-    
+
     # Get Metrics
     metrics = get_daily_pnl_metrics(c, profile['id'], date)
-        
+
     conn.close()
-    return render_template('daily_view.html', 
-                         slug=slug, 
-                         date=date, 
+    return render_template('daily_view.html',
+                         slug=slug,
+                         date=date,
                          changes=changes,
                          metrics=metrics)
 
@@ -620,12 +637,12 @@ def daily_view(slug, date):
 def api_diff(change_id):
     conn = get_db()
     c = conn.cursor()
-    
+
     change = c.execute("SELECT * FROM position_changes WHERE id = ?", (change_id,)).fetchone()
     if not change:
         conn.close()
         return jsonify({'error': 'Change not found'}), 404
-        
+
     current_snapshot = c.execute("SELECT * FROM snapshots WHERE id = ?", (change['snapshot_id'],)).fetchone()
     current_raw = json.loads(current_snapshot['raw_data']) if current_snapshot else {}
     current_trades = normalize_trades_for_diff(current_raw.get('data', []))
@@ -633,22 +650,22 @@ def api_diff(change_id):
     # Find PREVIOUS snapshot for this profile
     # We want the latest snapshot BEFORE this one
     prev_snapshot = c.execute("""
-        SELECT * FROM snapshots 
-        WHERE profile_id = ? AND id < ? 
+        SELECT * FROM snapshots
+        WHERE profile_id = ? AND id < ?
         ORDER BY id DESC LIMIT 1
     """, (change['profile_id'], change['snapshot_id'])).fetchone()
-    
+
     prev_raw = json.loads(prev_snapshot['raw_data']) if prev_snapshot else {}
     prev_trades = normalize_trades_for_diff(prev_raw.get('data', []))
-    
+
     # Find ALL previous snapshots to look back through history
     # We'll keep looking back until we find valid quantity data
     all_prev_snapshots = c.execute("""
-        SELECT * FROM snapshots 
-        WHERE profile_id = ? AND id < ? 
+        SELECT * FROM snapshots
+        WHERE profile_id = ? AND id < ?
         ORDER BY id DESC
     """, (change['profile_id'], change['snapshot_id'])).fetchall()
-    
+
     # Build a map of historical data for each symbol
     historical_trades = {}
     for snap in all_prev_snapshots:
@@ -666,10 +683,10 @@ def api_diff(change_id):
                 if (existing.get('quantity', 0) == 0 or existing.get('average_price', 0) == 0):
                     if trade.get('quantity', 0) != 0 and trade.get('average_price', 0) != 0:
                         historical_trades[key] = trade
-    
+
     # Calculate Diff
     diff_data = calculate_diff(prev_trades, current_trades, historical_trades)
-    
+
     # Build Detailed List for Added
     detailed_added = []
     for item in diff_data['added']:
@@ -681,7 +698,7 @@ def api_diff(change_id):
             'last_price': item.get('last_price', 0),
             'change_type': 'ADDED'
         })
-    
+
     # Build Detailed List for Removed
     detailed_removed = []
     for item in diff_data['removed']:
@@ -701,7 +718,7 @@ def api_diff(change_id):
             'exit_price': exit_price,
             'change_type': 'REMOVED'
         })
-    
+
     # Build Detailed List for Modified
     detailed_modified = []
     for item in diff_data['modified']:
@@ -721,7 +738,7 @@ def api_diff(change_id):
             'exit_price': exit_price,
             'change_type': 'MODIFIED'
         })
-    
+
     # Ensure UI can display pre-change avg price for MODIFIED entries.
     # The UI uses `diff.modified`, not `detailed_modified`, so we expose `original_average_price` there too.
     for item in diff_data.get('modified', []) or []:
@@ -738,7 +755,7 @@ def api_diff(change_id):
         'detailed_removed': detailed_removed,
         'detailed_modified': detailed_modified
     }
-    
+
     conn.close()
     return jsonify(result)
 
@@ -747,52 +764,52 @@ def api_diff(change_id):
 def daily_log(slug, date):
     conn = get_db()
     c = conn.cursor()
-    
+
     profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
     if not profile:
         conn.close()
         return jsonify({'error': 'Profile not found'}), 404
-        
+
     # Get metrics for the day to find 'start_day_pnl'
     metrics = get_daily_pnl_metrics(c, profile['id'], date)
     start_day_pnl = metrics['start_pnl']
-        
+
     # fetch all changes for the day in chronological order
     changes = c.execute("""
-        SELECT * FROM position_changes 
-        WHERE profile_id = ? AND date(timestamp) = ? 
+        SELECT * FROM position_changes
+        WHERE profile_id = ? AND date(timestamp) = ?
         ORDER BY timestamp ASC
     """, (profile['id'], date)).fetchall()
-    
+
     events = []
-    
+
     for i, change in enumerate(changes):
         # Calculate P&L at this snapshot
         snap_total, snap_booked = calculate_snapshot_pnl(c, change['snapshot_id'])
         todays_pnl = snap_total - start_day_pnl
-        
+
         # Calculate Detailed Diff (Restore "Change" column detail)
         curr_snap = c.execute("SELECT raw_data FROM snapshots WHERE id = ?", (change['snapshot_id'],)).fetchone()
         curr_raw = json.loads(curr_snap['raw_data']) if curr_snap else {}
         curr_trades = normalize_trades_for_diff(curr_raw.get('data', []))
-        
+
         # Find previous snapshot (relative to this change)
         prev_snap = c.execute("""
-            SELECT raw_data FROM snapshots 
-            WHERE profile_id = ? AND id < ? 
+            SELECT raw_data FROM snapshots
+            WHERE profile_id = ? AND id < ?
             ORDER BY id DESC LIMIT 1
         """, (profile['id'], change['snapshot_id'])).fetchone()
-        
+
         prev_raw = json.loads(prev_snap['raw_data']) if prev_snap else {}
         prev_trades = normalize_trades_for_diff(prev_raw.get('data', []))
-        
+
         # Find ALL previous snapshots to look back through history
         all_prev_snapshots = c.execute("""
-            SELECT raw_data FROM snapshots 
-            WHERE profile_id = ? AND id < ? 
+            SELECT raw_data FROM snapshots
+            WHERE profile_id = ? AND id < ?
             ORDER BY id DESC
         """, (profile['id'], change['snapshot_id'])).fetchall()
-        
+
         # Build a map of historical data for each symbol
         historical_trades = {}
         for snap in all_prev_snapshots:
@@ -808,9 +825,9 @@ def daily_log(slug, date):
                     existing = historical_trades[key]
                     if (existing.get('quantity', 0) == 0) and (trade.get('quantity', 0) != 0):
                         historical_trades[key] = trade
-        
+
         diff_data = calculate_diff(prev_trades, curr_trades, historical_trades)
-        
+
         # Build Detailed List
         detailed_changes = []
         for item in diff_data['added']:
@@ -846,18 +863,18 @@ def daily_log(slug, date):
                 'text': f"Qty: {item['old_quantity']} → {item['quantity']} ({sign}{item['quantity_diff']}){pnl_text}",
                 'color': color
             })
-            
+
         event = {
             'time': to_datetime_filter(change['timestamp']).strftime('%H:%M:%S'),
-            'type': 'Change', 
-            'changes': detailed_changes, 
+            'type': 'Change',
+            'changes': detailed_changes,
             'change_id': change['id'],
             'todays_pnl': todays_pnl,
             'booked_pnl': snap_booked
         }
-        
+
         events.append(event)
-    
+
     conn.close()
     events.reverse() # Latest first
     return jsonify({'events': events})
@@ -1018,28 +1035,28 @@ def api_profile_symbol_suggest(slug):
 def api_profile_all_underlyings(slug):
     """Get all position lifecycle events grouped by underlying symbol from all snapshots."""
     underlying_filter = (request.args.get('underlying') or '').strip().upper()
-    
+
     conn = get_db()
     c = conn.cursor()
-    
+
     profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
     if not profile:
         conn.close()
         return jsonify({'error': 'Profile not found', 'underlyings': {}}), 404
-    
+
     # Get all snapshots for this profile in chronological order
     snapshots = c.execute(
         "SELECT id, timestamp, raw_data FROM snapshots WHERE profile_id = ? ORDER BY id ASC",
         (profile['id'],),
     ).fetchall()
-    
+
     # Map snapshot -> change_id for linking to details
     changes_rows = c.execute(
         "SELECT id, snapshot_id FROM position_changes WHERE profile_id = ?",
         (profile['id'],),
     ).fetchall()
     snapshot_to_change_id = {row['snapshot_id']: row['id'] for row in changes_rows}
-    
+
     # Helper function to extract underlying from trading symbol
     def get_underlying(trading_symbol):
         """Extract underlying name from trading symbol (e.g., NIFTY2621725600PE -> NIFTY)"""
@@ -1050,27 +1067,27 @@ def api_profile_all_underlyings(slug):
         if match:
             return match.group(0).upper()
         return None
-    
+
     # Track state per key (symbol|product) using same logic as api_profile_symbol_lifecycle
     state = {}
     underlying_events = {}
     underlyings_seen = set()
-    
+
     for snap in snapshots:
         snap_id = snap['id']
         timestamp = snap['timestamp']
         change_id = snapshot_to_change_id.get(snap_id)
-        
+
         try:
             raw = json.loads(snap['raw_data'])
         except Exception:
             continue
-        
+
         trades_map = normalize_trades_for_diff(raw.get('data', []))
-        
+
         # Process all keys from current snapshot AND previously tracked keys
         all_keys_to_check = set(trades_map.keys()) | set(state.keys())
-        
+
         for key in all_keys_to_check:
             curr_trade = trades_map.get(key)
             st = state.get(key) or {
@@ -1078,7 +1095,7 @@ def api_profile_all_underlyings(slug):
                 'last_trade': None,
                 'last_good_trade': None,
             }
-            
+
             # Get symbol and underlying
             if curr_trade:
                 symbol = curr_trade.get('trading_symbol', '')
@@ -1091,46 +1108,46 @@ def api_profile_all_underlyings(slug):
                     product = prev_t.get('product', '')
                 else:
                     continue
-            
+
             underlying = get_underlying(symbol)
             if not underlying:
                 # Clean up state if no underlying
                 if key in state:
                     del state[key]
                 continue
-            
+
             underlyings_seen.add(underlying)
-            
+
             # Skip if filtering and doesn't match
             if underlying_filter and underlying != underlying_filter:
                 # Update state but don't add event
                 prev_present = bool(st.get('present'))
                 curr_present = curr_trade is not None and ((curr_trade.get('quantity', 0) or 0) != 0)
-                
+
                 if curr_trade and (curr_trade.get('quantity', 0) not in (None, 0)) and (curr_trade.get('average_price', 0) not in (None, 0)):
                     st['last_good_trade'] = curr_trade
-                
+
                 st['present'] = curr_present
                 st['last_trade'] = curr_trade if curr_trade is not None else None
                 state[key] = st
                 continue
-            
+
             if underlying not in underlying_events:
                 underlying_events[underlying] = []
-            
+
             prev_present = bool(st.get('present'))
             prev_trade_raw = st.get('last_trade')
             prev_trade = _best_effort_trade_before(prev_trade_raw, st.get('last_good_trade'))
-            
+
             curr_present = curr_trade is not None and ((curr_trade.get('quantity', 0) or 0) != 0)
-            
+
             # Update last_good_trade based on current (if good)
             if curr_trade:
                 if (curr_trade.get('quantity', 0) not in (None, 0)) and (curr_trade.get('average_price', 0) not in (None, 0)):
                     st['last_good_trade'] = curr_trade
-            
+
             event_type = None
-            
+
             if (not prev_present) and curr_present:
                 event_type = 'ENTERED'
             elif prev_present and (not curr_present):
@@ -1141,18 +1158,18 @@ def api_profile_all_underlyings(slug):
                 curr_qty = (curr_trade or {}).get('quantity', 0) or 0
                 if prev_qty != curr_qty:
                     event_type = 'MODIFIED'
-            
+
             if event_type:
                 before_qty = (prev_trade or {}).get('quantity', 0) or 0
                 after_qty = (curr_trade or {}).get('quantity', 0) or 0
-                
+
                 before_avg = (prev_trade or {}).get('average_price', 0) or 0
                 after_avg = (curr_trade or {}).get('average_price', 0) or 0
-                
+
                 after_ltp = (curr_trade or {}).get('last_price', 0) or 0
                 after_unbooked = (curr_trade or {}).get('unbooked_pnl', 0) or 0
                 after_booked = (curr_trade or {}).get('booked_profit_loss', 0) or 0
-                
+
                 # Exit metrics come from the last snapshot where trade existed
                 exit_pnl = 0
                 exit_price = 0
@@ -1205,12 +1222,12 @@ def api_profile_all_underlyings(slug):
                     'implied_fill_qty': implied_fill_qty,
                     'implied_fill_price': implied_fill_price,
                 })
-            
+
             # Persist updated state
             st['present'] = curr_present
             st['last_trade'] = curr_trade if curr_trade is not None else None
             state[key] = st
-    
+
     # Sort events by timestamp (latest first) for each underlying
     for underlying in underlying_events:
         underlying_events[underlying].sort(key=lambda e: e['timestamp'], reverse=True)
@@ -1448,7 +1465,7 @@ def normalize_trades_for_diff(positions_data):
         for t in p.get('trades', []):
             # Create a unique key for the instrument
             key = f"{t.get('trading_symbol')}|{t.get('product')}"
-            
+
             # Get quantity - try multiple field names
             qty = t.get('quantity') or t.get('qty') or t.get('net_qty') or t.get('net_quantity') or 0
             # Get average price - try multiple field names
@@ -1458,7 +1475,7 @@ def normalize_trades_for_diff(positions_data):
             # Get P&L fields
             unbooked = t.get('unbooked_pnl') or t.get('unbookedpnl') or t.get('unbooked') or 0
             booked = t.get('booked_profit_loss') or t.get('bookedprofitloss') or t.get('booked_pnl') or t.get('bookedpnl') or 0
-            
+
             if key not in trades_map:
                 trades_map[key] = {
                     'trading_symbol': t.get('trading_symbol'),
@@ -1476,7 +1493,7 @@ def normalize_trades_for_diff(positions_data):
                 if last_p: trades_map[key]['last_price'] = last_p
                 trades_map[key]['unbooked_pnl'] = unbooked
                 trades_map[key]['booked_profit_loss'] = booked
-    
+
     return trades_map
 
 def _fetch_underlying_events(c, profile_id, underlying_filter):
@@ -1708,12 +1725,12 @@ def _parse_expiry_from_symbol(trading_symbol):
 
 def _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type, expiry_key, consolidated_trades):
     """Build a system prompt using pre-consolidated trade data from the frontend."""
-    
+
     if scope_type == 'expiry' and expiry_key:
         scope_label = f"Expiry: {expiry_key}"
     else:
         scope_label = "All Expiries"
-    
+
     lines = [
         f"TRADER PROFILE: {profile_name}",
         f"UNDERLYING: {underlying}",
@@ -1723,7 +1740,7 @@ def _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type,
         "(This is the exact consolidated view the user is currently seeing in their browser)",
         "",
     ]
-    
+
     if not consolidated_trades or len(consolidated_trades) == 0:
         lines.append("No consolidated trade data provided.")
     else:
@@ -1739,7 +1756,7 @@ def _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type,
             ltp = trade.get('ltp', 0)
             total_pnl = trade.get('totalExitPnl', 0)
             unbooked_pnl = trade.get('unbookedPnl', 0)
-            
+
             status = "OPEN" if is_open else "CLOSED"
             lines.append(f"[{symbol} | {product}] - {status}")
             lines.append(f"  Entry Date: {entry_date}")
@@ -1747,7 +1764,7 @@ def _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type,
                 lines.append(f"  Exit Date: {exit_date}")
             lines.append(f"  Net Quantity: {net_qty}")
             lines.append(f"  Avg Entry Price: ₹{avg_entry:.2f}")
-            
+
             if is_open:
                 lines.append(f"  LTP: ₹{ltp:.2f}")
                 lines.append(f"  Total Exit P&L: ₹{total_pnl:+,.2f}")
@@ -1755,15 +1772,15 @@ def _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type,
             else:
                 lines.append(f"  Avg Exit Price: ₹{avg_exit:.2f}")
                 lines.append(f"  Total Exit P&L: ₹{total_pnl:+,.2f}")
-            
+
             lines.append("")
-    
+
     # Summary statistics
     total_booked_pnl = sum(t.get('totalExitPnl', 0) for t in consolidated_trades if not t.get('isOpen', False))
     total_unbooked_pnl = sum(t.get('unbookedPnl', 0) for t in consolidated_trades if t.get('isOpen', False))
     open_count = sum(1 for t in consolidated_trades if t.get('isOpen', False))
     closed_count = sum(1 for t in consolidated_trades if not t.get('isOpen', False))
-    
+
     lines.append("=== SUMMARY ===")
     lines.append(f"Total Symbols: {len(consolidated_trades)}")
     lines.append(f"Open Positions: {open_count}")
@@ -1772,13 +1789,13 @@ def _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type,
     lines.append(f"Total Unrealized P&L: ₹{total_unbooked_pnl:+,.2f}")
     lines.append("")
     lines.append("You are an expert trading analyst. Help the user understand their trades and performance.")
-    
+
     return "\n".join(lines)
 
 
 def _build_ai_system_prompt(c, profile_id, profile_name, underlying, scope_type, expiry_key, consolidated_trades=None):
     """Build a structured system prompt with full trade context for Claude.
-    
+
     If consolidated_trades is provided (from frontend), use that directly instead of
     fetching and computing from database. This ensures the AI sees exactly what the user sees.
     """
@@ -1786,7 +1803,7 @@ def _build_ai_system_prompt(c, profile_id, profile_name, underlying, scope_type,
     # Use pre-consolidated trades from frontend if provided
     if consolidated_trades:
         return _build_prompt_from_consolidated_trades(profile_name, underlying, scope_type, expiry_key, consolidated_trades)
-    
+
     # Fallback to original behavior: fetch from database
     events_by_underlying = _fetch_underlying_events(c, profile_id, underlying)
     all_events = events_by_underlying.get(underlying, [])
@@ -1949,17 +1966,17 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
     """
     if historical_trades is None:
         historical_trades = {}
-        
+
     added = []
     removed = []
     modified = []
-    
+
     all_keys = set(prev_map.keys()) | set(curr_map.keys())
-    
+
     for key in all_keys:
         p = prev_map.get(key)
         c = curr_map.get(key)
-        
+
         if not p:
             # Added - position exists in current but not in previous
             c['change_type'] = 'ADDED'
@@ -2039,12 +2056,12 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
             # Check for modification (quantity change)
             if p['quantity'] != c['quantity']:
                 c['change_type'] = 'MODIFIED'
-                
+
                 # Get original quantity from prev_map, or fall back to historical_trades if qty is 0
                 original_qty = p.get('quantity', 0)
                 original_avg_price = p.get('average_price', 0)
                 original_last_price = p.get('last_price', 0)
-                
+
                 # If prev_map has qty=0 or avg_price=0, try to get data from historical_trades
                 if (original_qty == 0 or original_avg_price == 0) and historical_trades:
                     hist = historical_trades.get(key)
@@ -2055,14 +2072,14 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
                             original_avg_price = hist.get('average_price', 0)
                         if original_last_price == 0:
                             original_last_price = hist.get('last_price', 0)
-                
+
                 c['old_quantity'] = p['quantity']
                 c['quantity_diff'] = c['quantity'] - p['quantity']
-                
+
                 # Store original quantity before change
                 c['original_quantity'] = original_qty
                 c['original_average_price'] = original_avg_price
-                
+
                 # --- Implied modification fill price (best-effort) ---
                 # We cannot know exact broker fills from snapshots, but we can derive the *implied*
                 # average price for the net quantity change between snapshots using weighted-average math.
@@ -2108,16 +2125,16 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
                 # We detect reduction as:
                 # - Long position: old_qty > 0 and new_qty < old_qty (sold some)
                 # - Short position: old_qty < 0 and new_qty > old_qty (bought back some, i.e., abs(new_qty) < abs(old_qty))
-                
+
                 q0 = p.get('quantity', 0) or 0
                 q1 = c.get('quantity', 0) or 0
                 is_reducing = (q0 > 0 and q1 < q0) or (q0 < 0 and q1 > q0)
-                
+
                 if is_reducing:
                     # First check if broker provided booked_profit_loss directly
                     # Some brokers provide this field when positions are reduced
                     broker_booked_pnl = c.get('booked_profit_loss', 0) or 0
-                    
+
                     if broker_booked_pnl != 0:
                         # Use broker-provided booked P&L (most accurate)
                         c['booked_pnl'] = broker_booked_pnl
@@ -2140,15 +2157,15 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
                         # Calculate booked P&L using the implied fill price
                         # Quantity that was closed (always positive for calculation)
                         closed_qty = abs(q0 - q1)
-                        
+
                         # Original entry price (from history or previous snapshot)
                         entry_price = original_avg_price if original_avg_price not in (None, 0) else (p.get('average_price', 0) or 0)
-                        
+
                         # Exit price is the implied fill price
                         # Special case: If position is fully exited (q1 == 0) and implied fill price is same as entry
                         # (broker didn't update avg), use LTP as best approximation
                         exit_price = c.get('implied_fill_price', 0) or 0
-                        
+
                         # If fully exited and exit_price equals entry_price (broker didn't update), use LTP
                         if q1 == 0 and exit_price != 0 and abs(exit_price - entry_price) < 0.01:
                             # Use LTP as exit price instead
@@ -2156,7 +2173,7 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
                             if ltp > 0:
                                 exit_price = ltp
                                 c['implied_fill_price'] = ltp  # Update for display consistency
-                        
+
                         if entry_price and exit_price and closed_qty:
                             # For long positions (q0 > 0): Booked P&L = (Exit - Entry) * Qty
                             # For short positions (q0 < 0): Booked P&L = (Entry - Exit) * Qty
@@ -2168,7 +2185,7 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
                             else:
                                 # Short position being reduced (buying back)
                                 booked_pnl = (entry_price - exit_price) * closed_qty
-                            
+
                             c['booked_pnl'] = booked_pnl
                             c['exit_pnl'] = booked_pnl  # Keep exit_pnl for backward compatibility
                             c['exit_price'] = exit_price
@@ -2181,13 +2198,13 @@ def calculate_diff(prev_map, curr_map, historical_trades=None):
                     c['booked_pnl'] = 0
                     c['exit_pnl'] = 0
                     c['exit_price'] = 0
-                
+
                 # Update average_price for display if we found it from history
                 if original_avg_price and not c.get('average_price'):
                     c['average_price'] = original_avg_price
-                
+
                 modified.append(c)
-                
+
     return {
         'added': added,
         'removed': removed,
@@ -2200,30 +2217,30 @@ def search_instruments():
     """Search instruments from master_contract table for autocomplete"""
     query = request.args.get('q', '').strip().upper()
     limit = request.args.get('limit', 20)
-    
+
     try:
         limit = int(limit)
         limit = max(5, min(100, limit))
     except:
         limit = 20
-    
+
     if not query:
         return jsonify({'results': []})
-    
+
     conn = get_db()
     c = conn.cursor()
-    
+
     # Search by trading_symbol or name
     results = c.execute("""
         SELECT instrument_token, trading_symbol, name, exchange, instrument_type, expiry, strike, lot_size
         FROM master_contract
         WHERE UPPER(trading_symbol) LIKE ? OR UPPER(name) LIKE ?
-        ORDER BY 
+        ORDER BY
             CASE WHEN UPPER(trading_symbol) LIKE ? THEN 1 ELSE 2 END,
             trading_symbol
         LIMIT ?
     """, (f'{query}%', f'%{query}%', f'{query}%', limit)).fetchall()
-    
+
     instruments = []
     for row in results:
         instruments.append({
@@ -2237,7 +2254,7 @@ def search_instruments():
             'lot_size': row['lot_size'],
             'display': f"{row['trading_symbol']} ({row['exchange']}) - {row['name']}"
         })
-    
+
     conn.close()
     return jsonify({'results': instruments})
 
@@ -2246,13 +2263,13 @@ def search_instruments():
 def get_index_instrument():
     """Get instrument token for an underlying index (e.g., NIFTY -> NIFTY 50)"""
     underlying = request.args.get('underlying', '').strip().upper()
-    
+
     if not underlying:
         return jsonify({'success': False, 'error': 'underlying parameter is required'}), 400
-    
+
     conn = get_db()
     c = conn.cursor()
-    
+
     # Map underlying names to their index names in master_contract
     index_mapping = {
         'NIFTY': 'NIFTY 50',
@@ -2262,10 +2279,10 @@ def get_index_instrument():
         'SENSEX': 'SENSEX',
         'BANKEX': 'BANKEX',
     }
-    
+
     # Get the index name to search for
     index_name = index_mapping.get(underlying, underlying)
-    
+
     # Search for the index instrument
     # Prioritize NSE exchange, instrument_type = 'INDEX' or 'EQ'
     result = c.execute("""
@@ -2273,8 +2290,8 @@ def get_index_instrument():
         FROM master_contract
         WHERE (UPPER(name) = ? OR UPPER(trading_symbol) = ?)
         AND exchange IN ('NSE', 'BSE', 'INDICES')
-        ORDER BY 
-            CASE 
+        ORDER BY
+            CASE
                 WHEN instrument_type = 'INDEX' THEN 1
                 WHEN exchange = 'NSE' AND instrument_type = 'EQ' THEN 2
                 WHEN exchange = 'BSE' THEN 3
@@ -2282,9 +2299,9 @@ def get_index_instrument():
             END
         LIMIT 1
     """, (index_name, underlying)).fetchone()
-    
+
     conn.close()
-    
+
     if result:
         return jsonify({
             'success': True,
@@ -2308,14 +2325,14 @@ def fetch_historical_data():
     try:
         import requests
         from datetime import datetime as dt
-        
+
         data = request.get_json()
         enctoken = data.get('enctoken', '').strip() if isinstance(data.get('enctoken'), str) else str(data.get('enctoken', ''))
         instrument_token = str(data.get('instrument_token', ''))  # Convert to string (can be int or string)
         from_date = data.get('from_date', '').strip() if isinstance(data.get('from_date'), str) else str(data.get('from_date', ''))
         to_date = data.get('to_date', '').strip() if isinstance(data.get('to_date'), str) else str(data.get('to_date', ''))
         interval = data.get('interval', 'day').strip() if isinstance(data.get('interval', 'day'), str) else str(data.get('interval', 'day'))
-        
+
         # Validation
         if not enctoken:
             return jsonify({'success': False, 'error': 'Enctoken is required'}), 400
@@ -2323,41 +2340,41 @@ def fetch_historical_data():
             return jsonify({'success': False, 'error': 'Instrument token is required'}), 400
         if not from_date or not to_date:
             return jsonify({'success': False, 'error': 'Date range is required'}), 400
-        
+
         # Validate date format (YYYY-MM-DD)
         try:
             dt.strptime(from_date, '%Y-%m-%d')
             dt.strptime(to_date, '%Y-%m-%d')
         except ValueError:
             return jsonify({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
-        
+
         # Construct URL (based on kite_trade.py)
         url = f"https://kite.zerodha.com/oms/instruments/historical/{instrument_token}/{interval}"
         params = {
             'from': from_date,
             'to': to_date
         }
-        
+
         headers = {
             'Authorization': f'enctoken {enctoken}',
             'User-Agent': 'Mozilla/5.0'
         }
-        
+
         print(f"Fetching historical data: {url} with params {params}")
-        
+
         response = requests.get(url, params=params, headers=headers, timeout=30)
-        
+
         if response.status_code == 403:
             return jsonify({'success': False, 'error': 'Invalid enctoken or unauthorized access'}), 403
-        
+
         response.raise_for_status()
-        
+
         result = response.json()
-        
+
         # Extract candles data
         if 'data' in result and 'candles' in result['data']:
             candles = result['data']['candles']
-            
+
             # Format candles for display
             formatted_data = []
             for candle in candles:
@@ -2370,7 +2387,7 @@ def fetch_historical_data():
                     'close': candle[4],
                     'volume': candle[5] if len(candle) > 5 else 0
                 })
-            
+
             return jsonify({
                 'success': True,
                 'data': formatted_data,
@@ -2378,7 +2395,7 @@ def fetch_historical_data():
             })
         else:
             return jsonify({'success': False, 'error': 'No data found in response'}), 404
-            
+
     except requests.exceptions.RequestException as e:
         print(f"Network error fetching historical data: {e}")
         return jsonify({'success': False, 'error': f'Network error: {str(e)}'}), 500
@@ -2415,16 +2432,16 @@ def scraper_status():
     try:
         conn = get_db()
         c = conn.cursor()
-        
+
         # Get last update timestamp
         last_updated_row = c.execute("SELECT MAX(timestamp) FROM latest_snapshots").fetchone()
         last_updated = last_updated_row[0] if last_updated_row else None
-        
+
         conn.close()
-        
+
         # Determine status
         is_market_hours = is_market_open()
-        
+
         status = {
             'running': False,
             'market_open': is_market_hours,
@@ -2433,7 +2450,7 @@ def scraper_status():
             'time_since_update': None,
             'auto_start_in': None  # New field for countdown
         }
-        
+
         # Check if we're in the auto-start waiting period
         if APP_START_TIME:
             elapsed_since_start = (now_ist() - APP_START_TIME).total_seconds()
@@ -2444,7 +2461,7 @@ def scraper_status():
                 status['status_text'] = f'Auto-starting in {remaining} seconds...'
                 status['running'] = False
                 return jsonify(status)
-        
+
         if not is_market_hours:
             status['status_text'] = 'Market Closed - Scraper Paused'
             status['running'] = False
@@ -2455,7 +2472,7 @@ def scraper_status():
                 last_dt = last_dt.replace(tzinfo=IST)
             time_diff = (now_ist() - last_dt).total_seconds()
             status['time_since_update'] = time_diff
-            
+
             if time_diff <= 180:  # Less than 3 minutes
                 status['running'] = True
                 status['status_text'] = 'Running'
@@ -2465,9 +2482,9 @@ def scraper_status():
         else:
             status['running'] = False
             status['status_text'] = 'No data yet - Scraper may be starting'
-        
+
         return jsonify(status)
-        
+
     except Exception as e:
         return jsonify({
             'error': str(e),
@@ -2487,23 +2504,23 @@ def delete_date(date):
     try:
         conn = get_db()
         c = conn.cursor()
-        
+
         # 1. Delete position_changes for this date
         c.execute("DELETE FROM position_changes WHERE date(timestamp) = ?", (date,))
         changes_deleted = c.rowcount
-        
+
         # 2. Delete snapshots for this date
         # Note: Be careful if snapshots are shared (unlikely in this design) or used by latest_snapshots
         # latest_snapshots is separate, so current state is preserved.
         c.execute("DELETE FROM snapshots WHERE date(timestamp) = ?", (date,))
         snaps_deleted = c.rowcount
-        
+
         conn.commit()
         conn.close()
-        
+
         print(f"Deleted data for {date}: {changes_deleted} changes, {snaps_deleted} snapshots.")
         return jsonify({'success': True, 'message': f"Deleted {changes_deleted} changes and {snaps_deleted} snapshots."})
-        
+
     except Exception as e:
         print(f"Error deleting data for {date}: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2518,16 +2535,16 @@ def get_subscriptions():
         profile_slug = request.args.get('profile_slug')
         if not profile_slug:
             return jsonify({'error': 'profile_slug is required'}), 400
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         # Get profile_id
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
         if not profile:
             return jsonify({'error': 'Profile not found'}), 404
         profile_id = profile['id']
-        
+
         # Get all subscriptions
         subscriptions = c.execute("""
             SELECT id, subscription_type, underlying, expiry, position_identifier, created_at
@@ -2535,9 +2552,9 @@ def get_subscriptions():
             WHERE profile_id = ?
             ORDER BY created_at DESC
         """, (profile_id,)).fetchall()
-        
+
         conn.close()
-        
+
         result = []
         for sub in subscriptions:
             result.append({
@@ -2548,9 +2565,9 @@ def get_subscriptions():
                 'position_identifier': json.loads(sub['position_identifier']) if sub['position_identifier'] else None,
                 'created_at': sub['created_at']
             })
-        
+
         return jsonify({'success': True, 'subscriptions': result})
-        
+
     except Exception as e:
         print(f"Error getting subscriptions: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2566,19 +2583,19 @@ def subscribe():
         underlying = data.get('underlying')
         expiry = data.get('expiry')
         position_identifier = data.get('position_identifier')  # dict with symbol, product, strike, option_type
-        
+
         if not profile_slug or not subscription_type:
             return jsonify({'error': 'profile_slug and subscription_type are required'}), 400
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         # Get profile_id
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
         if not profile:
             return jsonify({'error': 'Profile not found'}), 404
         profile_id = profile['id']
-        
+
         # Validate subscription type
         if subscription_type == 'underlying' and not underlying:
             return jsonify({'error': 'underlying is required for underlying subscription'}), 400
@@ -2586,10 +2603,10 @@ def subscribe():
             return jsonify({'error': 'underlying and expiry are required for expiry subscription'}), 400
         elif subscription_type == 'position' and not position_identifier:
             return jsonify({'error': 'position_identifier is required for position subscription'}), 400
-        
+
         # Convert position_identifier to JSON string
         position_id_str = json.dumps(position_identifier) if position_identifier else None
-        
+
         # Insert subscription (UNIQUE constraint will prevent duplicates)
         try:
             c.execute("""
@@ -2599,12 +2616,12 @@ def subscribe():
             conn.commit()
             subscription_id = c.lastrowid
             conn.close()
-            
+
             return jsonify({'success': True, 'message': 'Subscription created successfully', 'subscription_id': subscription_id})
         except sqlite3.IntegrityError:
             conn.close()
             return jsonify({'success': False, 'message': 'Already subscribed to this item'})
-        
+
     except Exception as e:
         print(f"Error creating subscription: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2616,27 +2633,539 @@ def unsubscribe():
     try:
         data = request.get_json()
         subscription_id = data.get('subscription_id')
-        
+
         if not subscription_id:
             return jsonify({'error': 'subscription_id is required'}), 400
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         # Delete subscription
         c.execute("DELETE FROM subscriptions WHERE id = ?", (subscription_id,))
         deleted = c.rowcount
         conn.commit()
         conn.close()
-        
+
         if deleted > 0:
             return jsonify({'success': True, 'message': 'Unsubscribed successfully'})
         else:
             return jsonify({'success': False, 'message': 'Subscription not found'})
-        
+
     except Exception as e:
         print(f"Error unsubscribing: {e}")
         return jsonify({'error': str(e)}), 500
+
+# ==================== OPENALGO HELPERS ====================
+
+def _to_float(value):
+    """Best-effort number parsing for notification payload values."""
+    if value in (None, ''):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+def normalize_openalgo_host(host):
+    host = (host or '').strip()
+    if not host:
+        return ''
+    if not host.startswith(('http://', 'https://')):
+        host = f"http://{host}"
+    return host.rstrip('/')
+
+def is_valid_host_url(host):
+    parsed = urlparse(host)
+    return bool(parsed.scheme in ('http', 'https') and parsed.netloc)
+
+def mask_api_key(api_key):
+    key = api_key or ''
+    if len(key) <= 8:
+        return '*' * len(key)
+    return f"{key[:6]}...{key[-4:]}"
+
+MONTHS = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
+MON3_TO_NUM = {m: i for i, m in enumerate(MONTHS.split("|"), 1)}
+MON_CODE_TO_NUM = {str(i): i for i in range(1, 10)} | {"O": 10, "N": 11, "D": 12}
+NUM_TO_MON3 = {v: k for k, v in MON3_TO_NUM.items()}
+
+def _build_profile_holiday_api_url(host):
+    normalized_host = normalize_openalgo_host(host)
+    if not normalized_host:
+        return ''
+    if OPENALGO_HOLIDAYS_PATH.startswith(('http://', 'https://')):
+        return OPENALGO_HOLIDAYS_PATH
+    path = OPENALGO_HOLIDAYS_PATH if OPENALGO_HOLIDAYS_PATH.startswith('/') else f"/{OPENALGO_HOLIDAYS_PATH}"
+    return f"{normalized_host}{path}"
+
+def _get_holiday_api_url(year, holiday_api_url=None):
+    base_url = (holiday_api_url or MARKET_HOLIDAYS_API_URL).strip()
+    if not base_url:
+        return ''
+    if '{year}' in base_url:
+        return base_url.format(year=year)
+    separator = '&' if '?' in base_url else '?'
+    return f"{base_url}{separator}year={year}"
+
+def _get_nfo_trading_holidays(year, holiday_api_url=None, holiday_api_key=None):
+    holiday_url = _get_holiday_api_url(year, holiday_api_url=holiday_api_url)
+    cache_key = (year, holiday_url)
+    with MARKET_HOLIDAY_CACHE_LOCK:
+        if cache_key in MARKET_HOLIDAY_CACHE:
+            return MARKET_HOLIDAY_CACHE[cache_key]
+
+    holidays = set()
+    if not holiday_url:
+        with MARKET_HOLIDAY_CACHE_LOCK:
+            MARKET_HOLIDAY_CACHE[cache_key] = holidays
+        return holidays
+
+    effective_api_key = holiday_api_key if holiday_api_key is not None else MARKET_HOLIDAYS_API_KEY
+    payload = {'year': year}
+    if effective_api_key:
+        payload['apikey'] = effective_api_key
+
+    try:
+        response = http_requests.post(holiday_url, json=payload, timeout=6)
+        response.raise_for_status()
+    except http_requests.RequestException as exc:
+        # Fallback to GET for providers that do not accept POST for holidays endpoint.
+        params = {'year': year}
+        if effective_api_key:
+            params['apikey'] = effective_api_key
+        try:
+            response = http_requests.get(holiday_url, params=params, timeout=6)
+            response.raise_for_status()
+        except http_requests.RequestException as get_exc:
+            print(f"[OpenAlgo] Failed to fetch holidays for {year}: {exc} | GET fallback failed: {get_exc}")
+            with MARKET_HOLIDAY_CACHE_LOCK:
+                MARKET_HOLIDAY_CACHE[cache_key] = holidays
+            return holidays
+
+    try:
+        payload = response.json()
+    except ValueError:
+        print(f"[OpenAlgo] Invalid holiday JSON for {year} from {holiday_url}")
+        with MARKET_HOLIDAY_CACHE_LOCK:
+            MARKET_HOLIDAY_CACHE[cache_key] = holidays
+        return holidays
+
+    for item in payload.get('data', []):
+        if item.get('holiday_type') != 'TRADING_HOLIDAY':
+            continue
+        closed_exchanges = item.get('closed_exchanges') or []
+        if 'NFO' not in closed_exchanges:
+            continue
+        day_str = item.get('date')
+        if not day_str:
+            continue
+        try:
+            holidays.add(date.fromisoformat(day_str))
+        except ValueError:
+            continue
+
+    with MARKET_HOLIDAY_CACHE_LOCK:
+        MARKET_HOLIDAY_CACHE[cache_key] = holidays
+    return holidays
+
+def _resolve_last_trading_day_of_month(base, year, month, holiday_api_url=None, holiday_api_key=None):
+    del base  # Reserved for custom exchange-specific logic in future.
+    last_day = calendar.monthrange(year, month)[1]
+    nfo_holidays = _get_nfo_trading_holidays(
+        year,
+        holiday_api_url=holiday_api_url,
+        holiday_api_key=holiday_api_key
+    )
+    candidate = date(year, month, last_day)
+    while candidate.weekday() >= 5 or candidate in nfo_holidays:
+        candidate = candidate - timedelta(days=1)
+    return candidate.day
+
+def convert_broker_symbol_to_openalgo_symbol(
+    symbol: str,
+    holiday_api_url: Optional[str] = None,
+    holiday_api_key: Optional[str] = None
+) -> str:
+    s = symbol.strip().upper()
+    if ":" in s:
+        _, s = s.split(":", 1)
+
+    m = re.fullmatch(rf"([A-Z0-9]+?)(\d{{2}})({MONTHS})(\d+(?:\.\d+)?)(CE|PE)", s)
+    if m:
+        base, yy, mon3, strike, opt = m.groups()
+        year = 2000 + int(yy)
+        month = MON3_TO_NUM[mon3]
+        day = _resolve_last_trading_day_of_month(
+            base,
+            year,
+            month,
+            holiday_api_url=holiday_api_url,
+            holiday_api_key=holiday_api_key
+        )
+        if strike.endswith(".0"):
+            strike = strike[:-2]
+        return f"{base}{day:02d}{mon3}{yy}{strike}{opt}"
+
+    m = re.fullmatch(r"([A-Z0-9]+?)(\d{2})([1-9OND])(\d{2})(\d+(?:\.\d+)?)(CE|PE)", s)
+    if m:
+        base, yy, mcode, dd, strike, opt = m.groups()
+        year = 2000 + int(yy)
+        month = MON_CODE_TO_NUM[mcode]
+        mon3 = NUM_TO_MON3[month]
+        day = int(dd)
+        if not 1 <= day <= calendar.monthrange(year, month)[1]:
+            raise ValueError(f"Invalid day in symbol: {symbol}")
+        if strike.endswith(".0"):
+            strike = strike[:-2]
+        return f"{base}{day:02d}{mon3}{yy}{strike}{opt}"
+
+    raise ValueError(f"Unsupported Zerodha option symbol format: {symbol}")
+
+def infer_openalgo_action(notification_type, notification_data, message):
+    implied_side = (notification_data.get('implied_fill_side') or '').strip().upper()
+    if implied_side in ('BUY', 'SELL'):
+        return implied_side
+
+    qty_diff = _to_float(notification_data.get('quantity_diff'))
+    if qty_diff is not None and qty_diff != 0:
+        return 'BUY' if qty_diff > 0 else 'SELL'
+
+    qty = _to_float(notification_data.get('quantity'))
+    if qty is not None and qty != 0:
+        if notification_type == 'exited_position':
+            return 'SELL' if qty > 0 else 'BUY'
+        return 'BUY' if qty > 0 else 'SELL'
+
+    upper_msg = (message or '').upper()
+    if ' BUY ' in f" {upper_msg} ":
+        return 'BUY'
+    if ' SELL ' in f" {upper_msg} ":
+        return 'SELL'
+
+    if notification_type == 'exited_position':
+        return 'SELL'
+    return 'BUY'
+
+def infer_openalgo_quantity(notification_type, notification_data):
+    implied_qty = _to_float(notification_data.get('implied_fill_qty'))
+    if implied_qty is not None and implied_qty != 0:
+        return max(1, int(abs(implied_qty)))
+
+    qty_diff = _to_float(notification_data.get('quantity_diff'))
+    if qty_diff is not None and qty_diff != 0:
+        return max(1, int(abs(qty_diff)))
+
+    quantity = _to_float(notification_data.get('quantity'))
+    if quantity is not None and quantity != 0:
+        return max(1, int(abs(quantity)))
+
+    old_quantity = _to_float(notification_data.get('old_quantity'))
+    if notification_type in ('modified_position', 'quantity_change') and old_quantity is not None and quantity is not None:
+        calculated_diff = quantity - old_quantity
+        if calculated_diff != 0:
+            return max(1, int(abs(calculated_diff)))
+
+    return 1
+
+def extract_notification_symbol(notification_data, message):
+    symbol = (notification_data.get('symbol') or '').strip().upper()
+    if symbol:
+        return symbol
+
+    upper_message = (message or '').upper()
+    symbol_match = re.search(r'\b[A-Z]{2,}\d[A-Z0-9]*(?:CE|PE)\b', upper_message)
+    return symbol_match.group(0) if symbol_match else ''
+
+def build_openalgo_order_hint(notification_type, notification_data, message):
+    broker_symbol = extract_notification_symbol(notification_data, message)
+    openalgo_symbol = ''
+    if broker_symbol:
+        try:
+            openalgo_symbol = convert_broker_symbol_to_openalgo_symbol(broker_symbol)
+        except ValueError:
+            openalgo_symbol = broker_symbol
+    action = infer_openalgo_action(notification_type, notification_data, message)
+    quantity = infer_openalgo_quantity(notification_type, notification_data)
+    return {
+        'broker_symbol': broker_symbol,
+        'openalgo_symbol': openalgo_symbol,
+        'action': action,
+        'quantity': quantity,
+        'exchange': 'NFO',
+        'product': 'NRML',
+        'pricetype': 'MARKET',
+        'strategy': 'from sensibull tracker',
+        'price': '0'
+    }
+
+def check_openalgo_host(host):
+    normalized_host = normalize_openalgo_host(host)
+    health_url = f"{normalized_host}/api/v1/placeorder"
+    try:
+        response = http_requests.get(health_url, timeout=3)
+        return {
+            'alive': True,
+            'checked_url': health_url,
+            'status_code': response.status_code
+        }
+    except http_requests.RequestException as exc:
+        return {
+            'alive': False,
+            'checked_url': health_url,
+            'error': str(exc)
+        }
+
+# ==================== OPENALGO API ROUTES ====================
+
+@app.route('/api/openalgo/profiles', methods=['GET'])
+@login_required
+def api_get_openalgo_profiles():
+    """Get all active OpenAlgo profiles."""
+    conn = get_db()
+    c = conn.cursor()
+
+    profiles = c.execute("""
+        SELECT id, profile_name, host, api_key, is_active, created_at, updated_at
+        FROM openalgo_profiles
+        WHERE is_active = 1
+        ORDER BY profile_name
+    """).fetchall()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'profiles': [{
+            'id': row['id'],
+            'profile_name': row['profile_name'],
+            'host': row['host'],
+            'api_key_masked': mask_api_key(row['api_key']),
+            'is_active': bool(row['is_active']),
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at']
+        } for row in profiles]
+    })
+
+@app.route('/api/openalgo/profiles', methods=['POST'])
+@login_required
+def api_create_openalgo_profile():
+    """Create an OpenAlgo profile."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+
+    profile_name = (data.get('profile_name') or '').strip()
+    host = normalize_openalgo_host(data.get('host'))
+    api_key = (data.get('api_key') or '').strip()
+
+    if not profile_name:
+        return jsonify({'success': False, 'error': 'Profile name is required'}), 400
+    if not host:
+        return jsonify({'success': False, 'error': 'Host is required'}), 400
+    if not is_valid_host_url(host):
+        return jsonify({'success': False, 'error': 'Host must be a valid http/https URL'}), 400
+    if not api_key:
+        return jsonify({'success': False, 'error': 'API key is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        c.execute("""
+            INSERT INTO openalgo_profiles (profile_name, host, api_key, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, 1, ?, ?)
+        """, (profile_name, host, api_key, now_ist().isoformat(), now_ist().isoformat()))
+        conn.commit()
+        profile_id = c.lastrowid
+        created = c.execute("""
+            SELECT id, profile_name, host, api_key, is_active, created_at, updated_at
+            FROM openalgo_profiles
+            WHERE id = ?
+        """, (profile_id,)).fetchone()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'message': 'OpenAlgo profile created successfully',
+            'profile': {
+                'id': created['id'],
+                'profile_name': created['profile_name'],
+                'host': created['host'],
+                'api_key_masked': mask_api_key(created['api_key']),
+                'is_active': bool(created['is_active']),
+                'created_at': created['created_at'],
+                'updated_at': created['updated_at']
+            }
+        })
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile name already exists'}), 400
+    except sqlite3.Error as exc:
+        conn.close()
+        return jsonify({'success': False, 'error': f'Database error: {str(exc)}'}), 500
+
+@app.route('/api/openalgo/host_status', methods=['GET'])
+@login_required
+def api_openalgo_host_status():
+    """Check if OpenAlgo host is reachable for the selected profile."""
+    profile_id = request.args.get('profile_id', type=int)
+    if not profile_id:
+        return jsonify({'success': False, 'error': 'profile_id is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    profile = c.execute("""
+        SELECT id, profile_name, host
+        FROM openalgo_profiles
+        WHERE id = ? AND is_active = 1
+    """, (profile_id,)).fetchone()
+    conn.close()
+
+    if not profile:
+        return jsonify({'success': False, 'error': 'OpenAlgo profile not found'}), 404
+
+    health = check_openalgo_host(profile['host'])
+    return jsonify({
+        'success': True,
+        'profile': {
+            'id': profile['id'],
+            'profile_name': profile['profile_name'],
+            'host': profile['host']
+        },
+        'health': health
+    })
+
+@app.route('/api/openalgo/place_order', methods=['POST'])
+@login_required
+def api_openalgo_place_order():
+    """Place an OpenAlgo order using selected OpenAlgo profile and notification."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+
+    openalgo_profile_id = data.get('openalgo_profile_id')
+    notification_id = data.get('notification_id')
+
+    if not openalgo_profile_id:
+        return jsonify({'success': False, 'error': 'openalgo_profile_id is required'}), 400
+    if not notification_id:
+        return jsonify({'success': False, 'error': 'notification_id is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    profile = c.execute("""
+        SELECT id, profile_name, host, api_key
+        FROM openalgo_profiles
+        WHERE id = ? AND is_active = 1
+    """, (openalgo_profile_id,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'success': False, 'error': 'OpenAlgo profile not found'}), 404
+
+    notif = c.execute("""
+        SELECT id, message, notification_type, notification_data
+        FROM notifications
+        WHERE id = ?
+    """, (notification_id,)).fetchone()
+    conn.close()
+    if not notif:
+        return jsonify({'success': False, 'error': 'Notification not found'}), 404
+
+    notification_data = json.loads(notif['notification_data']) if notif['notification_data'] else {}
+    hint = build_openalgo_order_hint(notif['notification_type'], notification_data, notif['message'])
+
+    broker_symbol = hint['broker_symbol']
+    profile_holiday_api_url = _build_profile_holiday_api_url(profile['host'])
+    inferred_symbol_for_profile = ''
+    if broker_symbol:
+        try:
+            inferred_symbol_for_profile = convert_broker_symbol_to_openalgo_symbol(
+                broker_symbol,
+                holiday_api_url=profile_holiday_api_url,
+                holiday_api_key=profile['api_key']
+            )
+        except ValueError:
+            inferred_symbol_for_profile = ''
+
+    requested_openalgo_symbol = (data.get('openalgo_symbol') or '').strip().upper()
+    openalgo_symbol = (
+        requested_openalgo_symbol
+        or inferred_symbol_for_profile
+        or (hint['openalgo_symbol'] or '').strip().upper()
+    )
+    action = (data.get('action') or hint['action']).strip().upper()
+    try:
+        quantity = int(data.get('quantity') or hint['quantity'])
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'quantity must be an integer'}), 400
+
+    if not openalgo_symbol:
+        return jsonify({'success': False, 'error': 'Could not infer symbol from notification'}), 400
+    if action not in ('BUY', 'SELL'):
+        return jsonify({'success': False, 'error': 'action must be BUY or SELL'}), 400
+    if quantity <= 0:
+        return jsonify({'success': False, 'error': 'quantity must be greater than 0'}), 400
+
+    host = normalize_openalgo_host(profile['host'])
+    order_url = f"{host}/api/v1/placeorder"
+    order_payload = {
+        'apikey': profile['api_key'],
+        'symbol': openalgo_symbol,
+        'exchange': 'NFO',
+        'action': action,
+        'product': 'NRML',
+        'pricetype': 'MARKET',
+        'strategy': 'from sensibull tracker',
+        'quantity': str(quantity),
+        'price': '0'
+    }
+
+    try:
+        response = http_requests.post(
+            order_url,
+            headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+            json=order_payload,
+            timeout=12
+        )
+        try:
+            response_data = response.json()
+        except ValueError:
+            response_data = {'raw_response': response.text}
+
+        success = response.ok
+        return jsonify({
+            'success': success,
+            'message': 'Order placed successfully' if success else 'OpenAlgo rejected order',
+            'request': {
+                'notification_id': notif['id'],
+                'broker_symbol': broker_symbol,
+                'openalgo_symbol': openalgo_symbol,
+                'action': action,
+                'quantity': quantity,
+                'openalgo_profile_id': profile['id'],
+                'openalgo_profile_name': profile['profile_name'],
+                'host': host,
+                'holiday_api_url': profile_holiday_api_url or MARKET_HOLIDAYS_API_URL
+            },
+            'order_payload': order_payload,
+            'response_status_code': response.status_code,
+            'response_data': response_data
+        }), (200 if success else 502)
+    except http_requests.RequestException as exc:
+        return jsonify({
+            'success': False,
+            'message': 'Failed to reach OpenAlgo host',
+            'error': str(exc),
+            'request': {
+                'notification_id': notif['id'],
+                'broker_symbol': broker_symbol,
+                'openalgo_symbol': openalgo_symbol,
+                'action': action,
+                'quantity': quantity,
+                'openalgo_profile_id': profile['id'],
+                'openalgo_profile_name': profile['profile_name'],
+                'host': host,
+                'holiday_api_url': profile_holiday_api_url or MARKET_HOLIDAYS_API_URL
+            },
+            'order_payload': order_payload
+        }), 502
 
 # ==================== NOTIFICATION API ROUTES ====================
 
@@ -2648,16 +3177,16 @@ def get_notifications():
         profile_slug = request.args.get('profile_slug')
         if not profile_slug:
             return jsonify({'error': 'profile_slug is required'}), 400
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         # Get profile_id
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
         if not profile:
             return jsonify({'error': 'Profile not found'}), 404
         profile_id = profile['id']
-        
+
         # Get all notifications
         notifications = c.execute("""
             SELECT id, subscription_id, message, notification_type, notification_data, created_at, is_read
@@ -2665,23 +3194,30 @@ def get_notifications():
             WHERE profile_id = ?
             ORDER BY created_at DESC
         """, (profile_id,)).fetchall()
-        
+
         conn.close()
-        
+
         result = []
         for notif in notifications:
+            notification_data = json.loads(notif['notification_data']) if notif['notification_data'] else {}
+            openalgo_hint = build_openalgo_order_hint(
+                notif['notification_type'],
+                notification_data,
+                notif['message']
+            )
             result.append({
                 'id': notif['id'],
                 'subscription_id': notif['subscription_id'],
                 'message': notif['message'],
                 'notification_type': notif['notification_type'],
-                'notification_data': json.loads(notif['notification_data']) if notif['notification_data'] else None,
+                'notification_data': notification_data,
+                'openalgo_hint': openalgo_hint,
                 'created_at': notif['created_at'],
                 'is_read': notif['is_read'] == 1
             })
-        
+
         return jsonify({'success': True, 'notifications': result})
-        
+
     except Exception as e:
         print(f"Error getting notifications: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2694,27 +3230,27 @@ def get_unread_count():
         profile_slug = request.args.get('profile_slug')
         if not profile_slug:
             return jsonify({'error': 'profile_slug is required'}), 400
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         # Get profile_id
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
         if not profile:
             return jsonify({'error': 'Profile not found'}), 404
         profile_id = profile['id']
-        
+
         # Get unread count
         count = c.execute("""
             SELECT COUNT(*) as count
             FROM notifications
             WHERE profile_id = ? AND is_read = 0
         """, (profile_id,)).fetchone()
-        
+
         conn.close()
-        
+
         return jsonify({'success': True, 'unread_count': count['count']})
-        
+
     except Exception as e:
         print(f"Error getting unread count: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2728,33 +3264,33 @@ def mark_notification_read():
         notification_id = data.get('notification_id')
         mark_all = data.get('mark_all', False)
         profile_slug = data.get('profile_slug')
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         if mark_all:
             if not profile_slug:
                 return jsonify({'error': 'profile_slug is required for mark_all'}), 400
-            
+
             # Get profile_id
             profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
             if not profile:
                 return jsonify({'error': 'Profile not found'}), 404
             profile_id = profile['id']
-            
+
             c.execute("UPDATE notifications SET is_read = 1 WHERE profile_id = ?", (profile_id,))
         else:
             if not notification_id:
                 return jsonify({'error': 'notification_id is required'}), 400
-            
+
             c.execute("UPDATE notifications SET is_read = 1 WHERE id = ?", (notification_id,))
-        
+
         updated = c.rowcount
         conn.commit()
         conn.close()
-        
+
         return jsonify({'success': True, 'updated': updated})
-        
+
     except Exception as e:
         print(f"Error marking notification as read: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2766,23 +3302,23 @@ def delete_notification():
     try:
         data = request.get_json()
         notification_id = data.get('notification_id')
-        
+
         if not notification_id:
             return jsonify({'error': 'notification_id is required'}), 400
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         c.execute("DELETE FROM notifications WHERE id = ?", (notification_id,))
         deleted = c.rowcount
         conn.commit()
         conn.close()
-        
+
         if deleted > 0:
             return jsonify({'success': True, 'message': 'Notification deleted successfully'})
         else:
             return jsonify({'success': False, 'message': 'Notification not found'})
-        
+
     except Exception as e:
         print(f"Error deleting notification: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2797,25 +3333,25 @@ def get_preferences():
         profile_slug = request.args.get('profile_slug')
         if not profile_slug:
             return jsonify({'error': 'profile_slug is required'}), 400
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         # Get profile_id
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
         if not profile:
             return jsonify({'error': 'Profile not found'}), 404
         profile_id = profile['id']
-        
+
         # Get preferences
         prefs = c.execute("""
             SELECT notification_sound
             FROM user_preferences
             WHERE profile_id = ?
         """, (profile_id,)).fetchone()
-        
+
         conn.close()
-        
+
         if prefs:
             return jsonify({
                 'success': True,
@@ -2831,7 +3367,7 @@ def get_preferences():
                     'notification_sound': 'default'
                 }
             })
-        
+
     except Exception as e:
         print(f"Error getting preferences: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2844,19 +3380,19 @@ def update_preferences():
         data = request.get_json()
         profile_slug = data.get('profile_slug')
         notification_sound = data.get('notification_sound')
-        
+
         if not profile_slug:
             return jsonify({'error': 'profile_slug is required'}), 400
-        
+
         conn = get_db()
         c = conn.cursor()
-        
+
         # Get profile_id
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
         if not profile:
             return jsonify({'error': 'Profile not found'}), 404
         profile_id = profile['id']
-        
+
         # Upsert preferences
         c.execute("""
             INSERT INTO user_preferences (profile_id, notification_sound, created_at, updated_at)
@@ -2865,12 +3401,12 @@ def update_preferences():
                 notification_sound = excluded.notification_sound,
                 updated_at = excluded.updated_at
         """, (profile_id, notification_sound, now_ist().isoformat(), now_ist().isoformat()))
-        
+
         conn.commit()
         conn.close()
-        
+
         return jsonify({'success': True, 'message': 'Preferences updated successfully'})
-        
+
     except Exception as e:
         print(f"Error updating preferences: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2907,9 +3443,9 @@ def api_get_profiles():
     """Get all profiles with stats"""
     conn = get_db()
     c = conn.cursor()
-    
+
     profiles = c.execute("""
-        SELECT 
+        SELECT
             p.id,
             p.slug,
             p.name,
@@ -2922,9 +3458,9 @@ def api_get_profiles():
         FROM profiles p
         ORDER BY p.slug
     """).fetchall()
-    
+
     conn.close()
-    
+
     return jsonify({
         'success': True,
         'profiles': [dict(p) for p in profiles]
@@ -2937,23 +3473,23 @@ def api_validate_profile():
     """Validate if a profile exists on Sensibull"""
     data = request.json
     slug = data.get('slug', '').strip()
-    
+
     if not slug:
         return jsonify({'success': False, 'error': 'Username is required'}), 400
-    
+
     # Check if profile already exists in database
     conn = get_db()
     c = conn.cursor()
     existing = c.execute("SELECT id FROM profiles WHERE slug = ?", (slug,)).fetchone()
     conn.close()
-    
+
     if existing:
         return jsonify({'success': False, 'error': 'Profile already exists'}), 400
-    
+
     # Validate on Sensibull
     import requests
     url = f"https://web.sensibull.com/portfolio/positions?username={slug}"
-    
+
     try:
         response = requests.head(url, timeout=10, allow_redirects=True)
         if response.status_code == 200:
@@ -2971,46 +3507,46 @@ def api_add_profile():
     data = request.get_json()
     if not data:
         return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
-    
+
     slug = data.get('slug', '').strip()
-    
+
     if not slug:
         return jsonify({'success': False, 'error': 'Username is required'}), 400
-    
+
     # Validate slug format (alphanumeric and hyphens only)
     import re
     if not re.match(r'^[a-z0-9-]+$', slug):
         return jsonify({'success': False, 'error': 'Invalid username format'}), 400
-    
+
     conn = get_db()
     c = conn.cursor()
-    
+
     try:
         # Construct URL
         url = f"https://web.sensibull.com/portfolio/positions?username={slug}"
         name = slug.replace('-', ' ').title()
-        
+
         c.execute("""
             INSERT INTO profiles (slug, name, url, source_url, is_active, added_at)
             VALUES (?, ?, ?, ?, 1, datetime('now'))
         """, (slug, name, url, url))
-        
+
         conn.commit()
         profile_id = c.lastrowid
-        
+
         profile = c.execute("""
             SELECT id, slug, name, source_url, is_active, added_at
             FROM profiles WHERE id = ?
         """, (profile_id,)).fetchone()
-        
+
         conn.close()
-        
+
         return jsonify({
             'success': True,
             'message': 'Profile added successfully',
             'profile': dict(profile)
         })
-        
+
     except sqlite3.IntegrityError:
         conn.close()
         return jsonify({'success': False, 'error': 'Profile already exists'}), 400
@@ -3025,17 +3561,17 @@ def api_toggle_profile(profile_id):
     """Toggle profile active status"""
     conn = get_db()
     c = conn.cursor()
-    
+
     profile = c.execute("SELECT is_active FROM profiles WHERE id = ?", (profile_id,)).fetchone()
     if not profile:
         conn.close()
         return jsonify({'success': False, 'error': 'Profile not found'}), 404
-    
+
     new_status = 0 if profile['is_active'] else 1
     c.execute("UPDATE profiles SET is_active = ? WHERE id = ?", (new_status, profile_id))
     conn.commit()
     conn.close()
-    
+
     return jsonify({
         'success': True,
         'message': 'Profile ' + ('enabled' if new_status else 'disabled'),
@@ -3048,15 +3584,15 @@ def api_toggle_profile(profile_id):
 def api_delete_profile(profile_id):
     """Delete profile (soft or hard delete)"""
     soft = request.args.get('soft', 'false').lower() == 'true'
-    
+
     conn = get_db()
     c = conn.cursor()
-    
+
     profile = c.execute("SELECT slug FROM profiles WHERE id = ?", (profile_id,)).fetchone()
     if not profile:
         conn.close()
         return jsonify({'success': False, 'error': 'Profile not found'}), 404
-    
+
     if soft:
         # Soft delete - just disable
         c.execute("UPDATE profiles SET is_active = 0 WHERE id = ?", (profile_id,))
@@ -3065,10 +3601,10 @@ def api_delete_profile(profile_id):
         # Hard delete - remove completely
         c.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
         message = 'Profile deleted permanently'
-    
+
     conn.commit()
     conn.close()
-    
+
     return jsonify({
         'success': True,
         'message': message
@@ -3103,11 +3639,11 @@ def export_download():
     """Download the database file"""
     from flask import send_file
     from database import DB_PATH
-    
+
     if not os.path.exists(DB_PATH):
         flash('Database file not found!', 'error')
         return redirect(url_for('export_page'))
-    
+
     return send_file(
         DB_PATH,
         as_attachment=True,
@@ -3128,23 +3664,23 @@ def import_upload():
     from werkzeug.utils import secure_filename
     from database import DB_PATH
     import shutil
-    
+
     if 'database_file' not in request.files:
         return render_template('import.html', error='No file uploaded')
-    
+
     file = request.files['database_file']
-    
+
     if file.filename == '':
         return render_template('import.html', error='No file selected')
-    
+
     if not file.filename.endswith('.db'):
         return render_template('import.html', error='Only .db files are allowed')
-    
+
     try:
         # Save uploaded file to a temporary location
         temp_path = os.path.join(os.path.dirname(DB_PATH), 'tmp_upload.db')
         file.save(temp_path)
-        
+
         # Verify it's a valid SQLite database
         try:
             conn = sqlite3.connect(temp_path)
@@ -3153,17 +3689,17 @@ def import_upload():
         except Exception as e:
             os.remove(temp_path)
             return render_template('import.html', error=f'Invalid database file: {str(e)}')
-        
+
         # Backup existing database (if it exists)
         if os.path.exists(DB_PATH):
             backup_path = DB_PATH + '.backup'
             shutil.copy2(DB_PATH, backup_path)
-        
+
         # Replace the database
         shutil.move(temp_path, DB_PATH)
-        
+
         return render_template('import.html', success=True)
-        
+
     except Exception as e:
         return render_template('import.html', error=f'Import failed: {str(e)}')
 
@@ -3692,21 +4228,21 @@ def api_ai_chat():
 if __name__ == '__main__':
     # Initialize database (create tables if they don't exist)
     init_db()
-    
+
     # Clean up port before starting (in case of unclean shutdown)
     cleanup_port()
     time.sleep(0.5)  # Give OS time to release the port
-    
+
     # Register signal handlers for clean shutdown
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     # Record app start time for auto-start countdown
     APP_START_TIME = now_ist()
-    
+
     # Start monitor thread
     threading.Thread(target=monitor_scraper, daemon=True).start()
-    
+
     try:
         app.run(debug=False, host='0.0.0.0', port=PORT)
     finally:

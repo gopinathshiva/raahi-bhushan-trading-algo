@@ -1480,6 +1480,34 @@
             // Get date filter value
             const dateFilter = document.getElementById(`etf-date-${expiryId}`)?.value || '';
 
+            // Apply entry/exit date filter
+            const entryExitFilter = document.getElementById(`etf-entry-exit-filter-${expiryId}`)?.value || '';
+            let enteredExitedSymbolKeys = null;
+            if (entryExitFilter) {
+                enteredExitedSymbolKeys = new Set();
+                const bySymbol = {};
+                cached.events.forEach(e => {
+                    const key = (e.symbol || '') + '|' + (e.product || '');
+                    if (!bySymbol[key]) bySymbol[key] = [];
+                    bySymbol[key].push(e);
+                });
+                Object.entries(bySymbol).forEach(([key, events]) => {
+                    let hasEntry, hasExit;
+                    if (dateFilter) {
+                        hasEntry = events.some(e => new Date(e.timestamp).toLocaleDateString('en-CA') === dateFilter && e.type === 'ENTERED');
+                        hasExit = events.some(e => new Date(e.timestamp).toLocaleDateString('en-CA') === dateFilter && (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0));
+                    } else {
+                        hasEntry = events.some(e => e.type === 'ENTERED');
+                        hasExit = events.some(e => e.type === 'EXITED' || Number(e.after_quantity || 0) === 0);
+                    }
+                    let match = false;
+                    if (entryExitFilter === 'entered-exited') match = hasEntry && hasExit;
+                    else if (entryExitFilter === 'entered-not-exited') match = hasEntry && !hasExit;
+                    else if (entryExitFilter === 'not-entered-exited') match = !hasEntry && hasExit;
+                    if (match) enteredExitedSymbolKeys.add(key);
+                });
+            }
+
             // Apply global position-status filter
             const positionStatusFilter = document.querySelector('input[name="position-status-filter"]:checked')?.value || 'all';
             let visibleSymbolKeys = null;
@@ -1517,8 +1545,14 @@
                 if (!allPosSelected && !selectedPositions.has(sym)) return false;
                 if (typeFilter && (e.type || '') !== typeFilter) return false;
                 if (optTypeFilter && getOptionType(sym) !== optTypeFilter) return false;
-                // Apply date filter
-                if (dateFilter) {
+                if (enteredExitedSymbolKeys !== null) {
+                    if (!enteredExitedSymbolKeys.has(symKey)) return false;
+                    // When a date is selected, restrict events to that date only
+                    if (dateFilter) {
+                        const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
+                        if (eventDate !== dateFilter) return false;
+                    }
+                } else if (dateFilter) {
                     const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
                     if (eventDate !== dateFilter) return false;
                 }
@@ -1534,7 +1568,7 @@
             const hasTypeFilter = typeFilter !== '';
             const hasOptTypeFilter = optTypeFilter !== '';
             const hasPositionFilter = !allPosSelected;
-            const hasDateFilter = dateFilter !== '';
+            const hasDateFilter = dateFilter !== '' || !!entryExitFilter;
 
             if (summaryEl) {
                 if (hasTypeFilter || hasOptTypeFilter || hasDateFilter) {
@@ -1585,6 +1619,34 @@
             const typeFilter = document.getElementById(`etf-type-${expiryId}`)?.value || '';
             const optTypeFilter = document.getElementById(`etf-opttype-${expiryId}`)?.value || '';
             const dateFilter = document.getElementById(`etf-date-${expiryId}`)?.value || '';
+
+            // Apply entry/exit date filter
+            const entryExitFilter = document.getElementById(`etf-entry-exit-filter-${expiryId}`)?.value || '';
+            let enteredExitedSymbolKeys = null;
+            if (entryExitFilter) {
+                enteredExitedSymbolKeys = new Set();
+                const bySymbol = {};
+                cached.events.forEach(e => {
+                    const key = (e.symbol || '') + '|' + (e.product || '');
+                    if (!bySymbol[key]) bySymbol[key] = [];
+                    bySymbol[key].push(e);
+                });
+                Object.entries(bySymbol).forEach(([key, events]) => {
+                    let hasEntry, hasExit;
+                    if (dateFilter) {
+                        hasEntry = events.some(e => new Date(e.timestamp).toLocaleDateString('en-CA') === dateFilter && e.type === 'ENTERED');
+                        hasExit = events.some(e => new Date(e.timestamp).toLocaleDateString('en-CA') === dateFilter && (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0));
+                    } else {
+                        hasEntry = events.some(e => e.type === 'ENTERED');
+                        hasExit = events.some(e => e.type === 'EXITED' || Number(e.after_quantity || 0) === 0);
+                    }
+                    let match = false;
+                    if (entryExitFilter === 'entered-exited') match = hasEntry && hasExit;
+                    else if (entryExitFilter === 'entered-not-exited') match = hasEntry && !hasExit;
+                    else if (entryExitFilter === 'not-entered-exited') match = !hasEntry && hasExit;
+                    if (match) enteredExitedSymbolKeys.add(key);
+                });
+            }
 
             const posOptionsDiv = document.getElementById(`etf-pos-options-${expiryId}`);
             const posCheckboxes = posOptionsDiv ? posOptionsDiv.querySelectorAll('input[type="checkbox"][data-pos]') : [];
@@ -1652,8 +1714,13 @@
                 if (!allPosSelected && !selectedPositions.has(sym)) return false;
                 if (typeFilter && (e.type || '') !== typeFilter) return false;
                 if (optTypeFilter && getOptionType(sym) !== optTypeFilter) return false;
-                // Apply date filter
-                if (dateFilter) {
+                if (enteredExitedSymbolKeys !== null) {
+                    if (!enteredExitedSymbolKeys.has(symKey)) return false;
+                    if (dateFilter) {
+                        const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
+                        if (eventDate !== dateFilter) return false;
+                    }
+                } else if (dateFilter) {
                     const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
                     if (eventDate !== dateFilter) return false;
                 }
@@ -1669,7 +1736,7 @@
             const hasTypeFilter = typeFilter !== '';
             const hasOptTypeFilter = optTypeFilter !== '';
             const hasPositionFilter = !allPosSelected;
-            const hasDateFilter = dateFilter !== '';
+            const hasDateFilter = dateFilter !== '' || !!entryExitFilter;
 
             if (summaryEl) {
                 if (hasTypeFilter || hasOptTypeFilter || hasDateFilter) {
@@ -2277,6 +2344,12 @@
                         <option value="">All Dates</option>
                         ${dateOptionsHtml}
                     </select>
+                    <select id="cons-entry-exit-filter-${expiryId}" onchange="handleConsolidatedFilterChange('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em;" title="Filter by entry/exit on selected date">
+                        <option value="">All Entry/Exit</option>
+                        <option value="entered-exited">Entered &amp; Exited</option>
+                        <option value="entered-not-exited">Entered &amp; Not Exited</option>
+                        <option value="not-entered-exited">Not Entered but Exited</option>
+                    </select>
                     <span id="cons-count-${expiryId}" style="font-size:0.82em; color:#666;"></span>
                 </div>
                 <div id="cons-summary-${expiryId}"></div>
@@ -2376,6 +2449,34 @@
             const optTypeFilter = document.getElementById(`cons-opttype-${expiryId}`)?.value || '';
             const dateFilter = document.getElementById(`cons-date-${expiryId}`)?.value || '';
 
+            // Apply entry/exit date filter
+            const entryExitFilter = document.getElementById(`cons-entry-exit-filter-${expiryId}`)?.value || '';
+            let enteredExitedSymbolKeys = null;
+            if (entryExitFilter) {
+                enteredExitedSymbolKeys = new Set();
+                const bySymbol = {};
+                cached.events.forEach(e => {
+                    const key = (e.symbol || '') + '|' + (e.product || '');
+                    if (!bySymbol[key]) bySymbol[key] = [];
+                    bySymbol[key].push(e);
+                });
+                Object.entries(bySymbol).forEach(([key, events]) => {
+                    let hasEntry, hasExit;
+                    if (dateFilter) {
+                        hasEntry = events.some(e => new Date(e.timestamp).toLocaleDateString('en-CA') === dateFilter && e.type === 'ENTERED');
+                        hasExit = events.some(e => new Date(e.timestamp).toLocaleDateString('en-CA') === dateFilter && (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0));
+                    } else {
+                        hasEntry = events.some(e => e.type === 'ENTERED');
+                        hasExit = events.some(e => e.type === 'EXITED' || Number(e.after_quantity || 0) === 0);
+                    }
+                    let match = false;
+                    if (entryExitFilter === 'entered-exited') match = hasEntry && hasExit;
+                    else if (entryExitFilter === 'entered-not-exited') match = hasEntry && !hasExit;
+                    else if (entryExitFilter === 'not-entered-exited') match = !hasEntry && hasExit;
+                    if (match) enteredExitedSymbolKeys.add(key);
+                });
+            }
+
             const posOptionsDiv = document.getElementById(`cons-pos-options-${expiryId}`);
             const posCheckboxes = posOptionsDiv ? posOptionsDiv.querySelectorAll('input[type="checkbox"][data-pos]') : [];
             const selectedPositions = new Set([...posCheckboxes].filter(cb => cb.checked).map(cb => cb.dataset.pos));
@@ -2384,10 +2485,17 @@
             // Filter events first
             let filteredEvents = cached.events.filter(e => {
                 const sym = e.symbol || '';
+                const symKey = sym + '|' + (e.product || '');
                 if (!allPosSelected && !selectedPositions.has(sym)) return false;
                 if (typeFilter && (e.type || '') !== typeFilter) return false;
                 if (optTypeFilter && getOptionType(sym) !== optTypeFilter) return false;
-                if (dateFilter) {
+                if (enteredExitedSymbolKeys !== null) {
+                    if (!enteredExitedSymbolKeys.has(symKey)) return false;
+                    if (dateFilter) {
+                        const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
+                        if (eventDate !== dateFilter) return false;
+                    }
+                } else if (dateFilter) {
                     const eventDate = new Date(e.timestamp).toLocaleDateString('en-CA');
                     if (eventDate !== dateFilter) return false;
                 }
@@ -2442,7 +2550,7 @@
             if (summaryEl) {
                 const hasTypeFilter = typeFilter !== '';
                 const hasOptTypeFilter = optTypeFilter !== '';
-                const hasDateFilter = dateFilter !== '';
+                const hasDateFilter = dateFilter !== '' || !!entryExitFilter;
                 const hasPositionFilter = !allPosSelected;
 
                 if (hasTypeFilter || hasOptTypeFilter || hasDateFilter || hasPositionFilter) {
@@ -2819,6 +2927,12 @@
                                         </select>
                                         <select id="etf-date-${expiryId}" onchange="filterExpiryTable('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em; min-width:140px;">
                                             <option value="">All Dates</option>
+                                        </select>
+                                        <select id="etf-entry-exit-filter-${expiryId}" onchange="filterExpiryTable('${expiryId}')" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.85em;" title="Filter by entry/exit on selected date">
+                                            <option value="">All Entry/Exit</option>
+                                            <option value="entered-exited">Entered &amp; Exited</option>
+                                            <option value="entered-not-exited">Entered &amp; Not Exited</option>
+                                            <option value="not-entered-exited">Not Entered but Exited</option>
                                         </select>
                                         <span id="etf-count-${expiryId}" style="font-size:0.82em; color:#666;"></span>
                                     </div>
@@ -4941,43 +5055,183 @@
             });
         }
 
-        // Show toast notification
-        function showToast(message, type = 'success') {
-            const toast = document.createElement('div');
-            toast.style.cssText = `
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                background: ${type === 'success' ? '#4caf50' : type === 'error' ? '#f44336' : '#2196F3'};
-                color: white;
-                padding: 15px 20px;
-                border-radius: 5px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-                z-index: 10000;
-                animation: slideIn 0.3s;
-            `;
-            toast.innerHTML = message;
-            document.body.appendChild(toast);
+        const TOAST_AUTO_DISMISS_MS = 8000;
+        let toastQueue = [];
+        let activeToastTimeout = null;
+        let activeToastId = null;
+        let nextToastId = 1;
 
-            setTimeout(() => {
-                toast.style.animation = 'slideOut 0.3s';
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
+        function getToastStackElement() {
+            let stack = document.getElementById('daily-toast-stack');
+            if (!stack) {
+                stack = document.createElement('div');
+                stack.id = 'daily-toast-stack';
+                stack.className = 'toast-stack';
+                stack.setAttribute('aria-live', 'polite');
+                stack.setAttribute('aria-atomic', 'false');
+                document.body.appendChild(stack);
+            }
+            return stack;
         }
 
-        // Add CSS animations
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes slideIn {
-                from { transform: translateX(100%); }
-                to { transform: translateX(0); }
+        function ensureToastStyles() {
+            if (document.getElementById('daily-toast-stack-style')) return;
+
+            const style = document.createElement('style');
+            style.id = 'daily-toast-stack-style';
+            style.textContent = `
+                .toast-stack {
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    z-index: 10000;
+                    display: none;
+                    flex-direction: column;
+                    align-items: flex-end;
+                    gap: 10px;
+                    max-width: min(420px, calc(100vw - 24px));
+                }
+                .toast-card {
+                    position: relative;
+                    color: #fff;
+                    padding: 14px 44px 12px 16px;
+                    border-radius: 8px;
+                    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
+                    width: 360px;
+                    max-width: calc(100vw - 40px);
+                    line-height: 1.5;
+                    animation: toastSlideIn 0.25s ease-out;
+                }
+                .toast-card.queued {
+                    opacity: 0.85;
+                    transform: scale(0.98);
+                }
+                .toast-card.success {
+                    background: #4caf50;
+                }
+                .toast-card.error {
+                    background: #f44336;
+                }
+                .toast-card.info {
+                    background: #2196F3;
+                }
+                .toast-dismiss {
+                    position: absolute;
+                    top: 8px;
+                    right: 8px;
+                    width: 24px;
+                    height: 24px;
+                    border: 0;
+                    border-radius: 50%;
+                    background: rgba(255, 255, 255, 0.2);
+                    color: #fff;
+                    cursor: pointer;
+                    font-size: 16px;
+                    line-height: 1;
+                    padding: 0;
+                }
+                .toast-dismiss:hover {
+                    background: rgba(255, 255, 255, 0.35);
+                }
+                .toast-status {
+                    margin-top: 8px;
+                    font-size: 0.75rem;
+                    opacity: 0.9;
+                }
+                @keyframes toastSlideIn {
+                    from { transform: translateX(100%); }
+                    to { transform: translateX(0); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        function clearActiveToastTimer() {
+            if (activeToastTimeout) {
+                clearTimeout(activeToastTimeout);
+                activeToastTimeout = null;
             }
-            @keyframes slideOut {
-                from { transform: translateX(0); }
-                to { transform: translateX(100%); }
+            activeToastId = null;
+        }
+
+        function maybeStartActiveToastTimer() {
+            if (toastQueue.length === 0) {
+                clearActiveToastTimer();
+                return;
             }
-        `;
-        document.head.appendChild(style);
+
+            const activeToast = toastQueue[0];
+            if (activeToastId === activeToast.id && activeToastTimeout) {
+                return;
+            }
+
+            if (activeToastTimeout) {
+                clearTimeout(activeToastTimeout);
+            }
+
+            activeToastId = activeToast.id;
+            activeToastTimeout = setTimeout(() => {
+                removeToast(activeToast.id);
+            }, TOAST_AUTO_DISMISS_MS);
+        }
+
+        function removeToast(toastId) {
+            const toastIndex = toastQueue.findIndex(toast => toast.id === toastId);
+            if (toastIndex === -1) return;
+
+            const wasActiveToast = toastIndex === 0;
+            toastQueue.splice(toastIndex, 1);
+
+            if (wasActiveToast) {
+                clearActiveToastTimer();
+            }
+
+            renderToastStack();
+            maybeStartActiveToastTimer();
+        }
+
+        function renderToastStack() {
+            const stack = getToastStackElement();
+            stack.innerHTML = '';
+
+            if (toastQueue.length === 0) {
+                stack.style.display = 'none';
+                return;
+            }
+
+            stack.style.display = 'flex';
+
+            toastQueue.forEach((toast, index) => {
+                const card = document.createElement('div');
+                const visibilityClass = index === 0 ? 'active' : 'queued';
+                card.className = `toast-card ${toast.type} ${visibilityClass}`;
+
+                const waitingCount = toastQueue.length - 1;
+                const statusText = index === 0
+                    ? `Auto dismisses in ${TOAST_AUTO_DISMISS_MS / 1000}s${waitingCount > 0 ? ` | ${waitingCount} waiting` : ''}`
+                    : 'Queued';
+
+                card.innerHTML = `
+                    <button class="toast-dismiss" type="button" aria-label="Dismiss notification" title="Dismiss notification">&times;</button>
+                    <div class="toast-body">${toast.message}</div>
+                    <div class="toast-status">${statusText}</div>
+                `;
+
+                card.querySelector('.toast-dismiss').addEventListener('click', () => {
+                    removeToast(toast.id);
+                });
+
+                stack.appendChild(card);
+            });
+        }
+
+        // Show toast notification
+        function showToast(message, type = 'success') {
+            ensureToastStyles();
+            toastQueue.push({ id: nextToastId++, message, type });
+            renderToastStack();
+            maybeStartActiveToastTimer();
+        }
 
         // Initialize on page load
         loadSubscriptions();

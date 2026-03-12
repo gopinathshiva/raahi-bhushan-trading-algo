@@ -146,6 +146,19 @@ def init_db():
             last_login DATETIME
         )
     ''')
+
+    # Table to store OpenAlgo API profiles
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS openalgo_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_name TEXT UNIQUE NOT NULL,
+            host TEXT NOT NULL,
+            api_key TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
     # Table to store AI chat history per profile + scope
     c.execute('''

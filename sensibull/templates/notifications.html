@@ -160,6 +160,121 @@
             background: #f0f0f0;
         }
 
+        .openalgo-btn {
+            border: 1px solid #6f42c1;
+            background: #f4ecff;
+            color: #5a32a3;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.82em;
+            font-weight: 600;
+        }
+
+        .openalgo-btn:hover {
+            background: #ead8ff;
+        }
+
+        .openalgo-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1500;
+            background: rgba(0, 0, 0, 0.45);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .openalgo-modal.show {
+            display: flex;
+        }
+
+        .openalgo-modal-content {
+            width: min(620px, 92vw);
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+            padding: 18px;
+        }
+
+        .openalgo-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .openalgo-field label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .openalgo-field input,
+        .openalgo-field select {
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 8px;
+            font-size: 13px;
+        }
+
+        .openalgo-field input[readonly] {
+            background: #f8f9fa;
+        }
+
+        .openalgo-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .openalgo-status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .openalgo-status.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            display: block;
+        }
+
+        .openalgo-status.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            display: block;
+        }
+
+        .openalgo-host {
+            font-size: 12px;
+            margin-top: 8px;
+            color: #666;
+        }
+
+        .openalgo-host .ok {
+            color: #1e7e34;
+            font-weight: 600;
+        }
+
+        .openalgo-host .bad {
+            color: #b21f2d;
+            font-weight: 600;
+        }
+
+        @media (max-width: 640px) {
+            .openalgo-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         /* Subscriptions Tab */
         .subscription-item {
             background: #fff;
@@ -315,46 +430,85 @@
             background: #5a6268;
         }
 
-        .toast {
+        .toast-stack {
             position: fixed;
             bottom: 20px;
             right: 20px;
-            background: #323232;
-            color: white;
-            padding: 15px 20px;
-            border-radius: 5px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
             z-index: 1000;
             display: none;
-            animation: slideIn 0.3s;
-            max-width: 360px;
-            min-width: 260px;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+            max-width: min(420px, calc(100vw - 24px));
+        }
+
+        .toast-card {
+            position: relative;
+            background: #323232;
+            color: #fff;
+            padding: 14px 44px 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
+            width: 360px;
+            max-width: calc(100vw - 40px);
             line-height: 1.5;
+            animation: slideIn 0.25s ease-out;
         }
 
-        .toast.show {
-            display: block;
+        .toast-card.queued {
+            opacity: 0.85;
+            transform: scale(0.98);
         }
 
-        .toast.success {
+        .toast-dismiss {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 24px;
+            height: 24px;
+            border: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .toast-dismiss:hover {
+            background: rgba(255, 255, 255, 0.35);
+        }
+
+        .toast-status {
+            margin-top: 8px;
+            font-size: 0.75rem;
+            opacity: 0.9;
+        }
+
+        .toast-card.success {
             background: #4caf50;
         }
 
-        .toast.error {
+        .toast-card.error {
             background: #f44336;
         }
 
+        .toast-card.info {
+            background: #2196f3;
+        }
+
         /* Notification-type specific toast colours */
-        .toast.new_position {
+        .toast-card.new_position {
             background: #1976d2;   /* blue — new entry */
         }
 
-        .toast.exited_position {
+        .toast-card.exited_position {
             background: #e53935;   /* red — exited */
         }
 
-        .toast.modified_position,
-        .toast.quantity_change {
+        .toast-card.modified_position,
+        .toast-card.quantity_change {
             background: #f57c00;   /* orange — modified */
         }
 
@@ -441,7 +595,44 @@
         </div>
     </div>
 
-    <div id="toast" class="toast"></div>
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+
+    <div id="openalgo-modal" class="openalgo-modal" onclick="closeOpenAlgoModal(event)">
+        <div class="openalgo-modal-content" onclick="event.stopPropagation();">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="margin:0;">⚡ Place OpenAlgo Order</h3>
+                <button onclick="closeOpenAlgoModal()" style="background:none; border:none; cursor:pointer; font-size:20px;">&times;</button>
+            </div>
+            <div class="openalgo-host" id="openalgo-host-status">Checking host status...</div>
+            <div class="openalgo-grid">
+                <div class="openalgo-field">
+                    <label for="openalgo-profile-select">OpenAlgo Profile</label>
+                    <select id="openalgo-profile-select" onchange="checkSelectedOpenAlgoHost()"></select>
+                </div>
+                <div class="openalgo-field">
+                    <label for="openalgo-action">Order Type</label>
+                    <input id="openalgo-action" type="text" readonly />
+                </div>
+                <div class="openalgo-field">
+                    <label for="openalgo-broker-symbol">Symbol</label>
+                    <input id="openalgo-broker-symbol" type="text" readonly />
+                </div>
+                <div class="openalgo-field">
+                    <label for="openalgo-symbol">OpenAlgo Symbol</label>
+                    <input id="openalgo-symbol" type="text" readonly />
+                </div>
+                <div class="openalgo-field">
+                    <label for="openalgo-quantity">Lot Size / Quantity</label>
+                    <input id="openalgo-quantity" type="text" readonly />
+                </div>
+            </div>
+            <div class="openalgo-actions">
+                <button class="action-btn secondary" onclick="closeOpenAlgoModal()">Cancel</button>
+                <button class="action-btn" id="openalgo-place-btn" onclick="placeOpenAlgoOrder()">Place Order</button>
+            </div>
+            <div id="openalgo-order-status" class="openalgo-status"></div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -451,38 +642,100 @@
         let currentSound = 'default';
         let notificationsData = [];
         let subscriptionsData = [];
+        let openAlgoProfiles = [];
+        let selectedOpenAlgoNotification = null;
         let lastNotificationCount = 0;
         let notificationCheckInterval = null;
 
-        // Toast queue: one toast at a time, minimum 5s gap between toasts
+        const TOAST_AUTO_DISMISS_MS = 8000;
         let toastQueue = [];
-        let toastBusy = false;
+        let activeToastTimeout = null;
+        let activeToastId = null;
+        let nextToastId = 1;
 
         function enqueueToast(message, type = 'success') {
-            toastQueue.push({ message, type });
-            processToastQueue();
+            toastQueue.push({ id: nextToastId++, message, type });
+            renderToastStack();
+            maybeStartActiveToastTimer();
         }
 
-        function processToastQueue() {
-            if (toastBusy || toastQueue.length === 0) return;
-            toastBusy = true;
-            const { message, type } = toastQueue.shift();
-            _showToast(message, type);
+        function clearActiveToastTimer() {
+            if (activeToastTimeout) {
+                clearTimeout(activeToastTimeout);
+                activeToastTimeout = null;
+            }
+            activeToastId = null;
         }
 
-        function _showToast(message, type) {
-            const toast = document.getElementById('toast');
-            toast.innerHTML = message;
-            // type can be 'success', 'error', 'new_position', 'exited_position', 'modified_position'
-            toast.className = `toast ${type} show`;
-            // Show for 5s, then hide and immediately process next in queue
-            setTimeout(() => {
-                toast.classList.remove('show');
-                setTimeout(() => {
-                    toastBusy = false;
-                    processToastQueue();
-                }, 400); // short pause for hide animation before next toast
-            }, 5000); // 5s display duration
+        function maybeStartActiveToastTimer() {
+            if (toastQueue.length === 0) {
+                clearActiveToastTimer();
+                return;
+            }
+
+            const activeToast = toastQueue[0];
+            if (activeToastId === activeToast.id && activeToastTimeout) {
+                return;
+            }
+
+            if (activeToastTimeout) {
+                clearTimeout(activeToastTimeout);
+            }
+
+            activeToastId = activeToast.id;
+            activeToastTimeout = setTimeout(() => {
+                removeToast(activeToast.id);
+            }, TOAST_AUTO_DISMISS_MS);
+        }
+
+        function removeToast(toastId) {
+            const toastIndex = toastQueue.findIndex(toast => toast.id === toastId);
+            if (toastIndex === -1) return;
+
+            const wasActiveToast = toastIndex === 0;
+            toastQueue.splice(toastIndex, 1);
+
+            if (wasActiveToast) {
+                clearActiveToastTimer();
+            }
+
+            renderToastStack();
+            maybeStartActiveToastTimer();
+        }
+
+        function renderToastStack() {
+            const stack = document.getElementById('toast-stack');
+            stack.innerHTML = '';
+
+            if (toastQueue.length === 0) {
+                stack.style.display = 'none';
+                return;
+            }
+
+            stack.style.display = 'flex';
+
+            toastQueue.forEach((toast, index) => {
+                const card = document.createElement('div');
+                const visibilityClass = index === 0 ? 'active' : 'queued';
+                card.className = `toast-card ${toast.type} ${visibilityClass}`;
+
+                const waitingCount = toastQueue.length - 1;
+                const statusText = index === 0
+                    ? `Auto dismisses in ${TOAST_AUTO_DISMISS_MS / 1000}s${waitingCount > 0 ? ` | ${waitingCount} waiting` : ''}`
+                    : 'Queued';
+
+                card.innerHTML = `
+                    <button class="toast-dismiss" type="button" aria-label="Dismiss notification" title="Dismiss notification">&times;</button>
+                    <div class="toast-body">${toast.message}</div>
+                    <div class="toast-status">${statusText}</div>
+                `;
+
+                card.querySelector('.toast-dismiss').addEventListener('click', () => {
+                    removeToast(toast.id);
+                });
+
+                stack.appendChild(card);
+            });
         }
 
         // Tab Switching
@@ -645,6 +898,171 @@
             }
         }
 
+        function getOpenAlgoHint(notif) {
+            return notif.openalgo_hint || {};
+        }
+
+        function renderOpenAlgoActionCell(notif) {
+            const hint = getOpenAlgoHint(notif);
+            if (!hint.broker_symbol || !hint.quantity) {
+                return '<td><span style="color:#888; font-size:0.85em;">N/A</span></td>';
+            }
+            return `
+                <td>
+                    <button class="openalgo-btn" onclick="openOpenAlgoModal(${notif.id}); event.stopPropagation();">
+                        Place Order
+                    </button>
+                </td>
+            `;
+        }
+
+        async function loadOpenAlgoProfiles() {
+            try {
+                const response = await fetch('/api/openalgo/profiles');
+                const data = await response.json();
+                if (!data.success) {
+                    openAlgoProfiles = [];
+                    return;
+                }
+                openAlgoProfiles = data.profiles || [];
+            } catch (error) {
+                console.error('Error loading OpenAlgo profiles:', error);
+                openAlgoProfiles = [];
+            }
+        }
+
+        function setOpenAlgoStatus(message, type = 'success') {
+            const statusNode = document.getElementById('openalgo-order-status');
+            statusNode.className = `openalgo-status ${type}`;
+            statusNode.style.display = 'block';
+            statusNode.innerHTML = message;
+        }
+
+        function resetOpenAlgoStatus() {
+            const statusNode = document.getElementById('openalgo-order-status');
+            statusNode.className = 'openalgo-status';
+            statusNode.style.display = 'none';
+            statusNode.innerHTML = '';
+        }
+
+        function populateOpenAlgoProfileSelect() {
+            const select = document.getElementById('openalgo-profile-select');
+            if (!openAlgoProfiles.length) {
+                select.innerHTML = '<option value="">No OpenAlgo profiles found</option>';
+                return;
+            }
+            select.innerHTML = openAlgoProfiles.map(profile => `
+                <option value="${profile.id}">${profile.profile_name} — ${profile.host}</option>
+            `).join('');
+        }
+
+        async function openOpenAlgoModal(notificationId) {
+            selectedOpenAlgoNotification = notificationsData.find(n => n.id === notificationId) || null;
+            if (!selectedOpenAlgoNotification) {
+                showToast('Notification not found', 'error');
+                return;
+            }
+
+            await loadOpenAlgoProfiles();
+            populateOpenAlgoProfileSelect();
+
+            const hint = getOpenAlgoHint(selectedOpenAlgoNotification);
+            document.getElementById('openalgo-broker-symbol').value = hint.broker_symbol || '';
+            document.getElementById('openalgo-symbol').value = hint.openalgo_symbol || '';
+            document.getElementById('openalgo-action').value = hint.action || '';
+            document.getElementById('openalgo-quantity').value = hint.quantity || '';
+            resetOpenAlgoStatus();
+
+            const modal = document.getElementById('openalgo-modal');
+            modal.classList.add('show');
+            await checkSelectedOpenAlgoHost();
+        }
+
+        function closeOpenAlgoModal(event) {
+            if (event && event.target && event.target.id !== 'openalgo-modal') {
+                return;
+            }
+            document.getElementById('openalgo-modal').classList.remove('show');
+            selectedOpenAlgoNotification = null;
+        }
+
+        async function checkSelectedOpenAlgoHost() {
+            const select = document.getElementById('openalgo-profile-select');
+            const hostStatusNode = document.getElementById('openalgo-host-status');
+            const profileId = select.value;
+
+            if (!profileId) {
+                hostStatusNode.innerHTML = '<span class="bad">No OpenAlgo profile selected. Create one in the OpenAlgo screen.</span>';
+                return;
+            }
+
+            hostStatusNode.textContent = 'Checking host status...';
+            try {
+                const response = await fetch(`/api/openalgo/host_status?profile_id=${profileId}`);
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    hostStatusNode.innerHTML = `<span class="bad">Host check failed: ${data.error || 'Unknown error'}</span>`;
+                    return;
+                }
+
+                const health = data.health || {};
+                if (health.alive) {
+                    hostStatusNode.innerHTML = `<span class="ok">Host reachable</span> (${data.profile.host})`;
+                } else {
+                    hostStatusNode.innerHTML = `<span class="bad">Host unreachable</span>: ${health.error || 'No response'}`;
+                }
+            } catch (error) {
+                console.error('Error checking OpenAlgo host:', error);
+                hostStatusNode.innerHTML = '<span class="bad">Host check failed due to network error.</span>';
+            }
+        }
+
+        async function placeOpenAlgoOrder() {
+            if (!selectedOpenAlgoNotification) {
+                setOpenAlgoStatus('No notification selected.', 'error');
+                return;
+            }
+
+            const profileId = document.getElementById('openalgo-profile-select').value;
+            if (!profileId) {
+                setOpenAlgoStatus('Please select an OpenAlgo profile.', 'error');
+                return;
+            }
+
+            const placeBtn = document.getElementById('openalgo-place-btn');
+            placeBtn.disabled = true;
+            try {
+                const hint = getOpenAlgoHint(selectedOpenAlgoNotification);
+                const response = await fetch('/api/openalgo/place_order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        openalgo_profile_id: parseInt(profileId, 10),
+                        notification_id: selectedOpenAlgoNotification.id,
+                        openalgo_symbol: hint.openalgo_symbol,
+                        action: hint.action,
+                        quantity: hint.quantity
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    const errMsg = data.error || data.message || 'Order placement failed';
+                    setOpenAlgoStatus(`❌ ${errMsg}`, 'error');
+                    showToast(`OpenAlgo order failed: ${errMsg}`, 'error');
+                    return;
+                }
+
+                setOpenAlgoStatus(`✅ Order placed successfully. Status code: ${data.response_status_code}`, 'success');
+                showToast('OpenAlgo order placed successfully', 'success');
+            } catch (error) {
+                console.error('Error placing OpenAlgo order:', error);
+                setOpenAlgoStatus(`❌ ${error.message}`, 'error');
+                showToast('Failed to place OpenAlgo order', 'error');
+            } finally {
+                placeBtn.disabled = false;
+            }
+        }
+
         function renderNotifications() {
             const container = document.getElementById('notifications-list');
             
@@ -687,6 +1105,7 @@
                                 Qty: ${qty}<br>
                                 <span style="color:#666; font-size:0.85em;">Avg: ₹${avgPrice} | LTP: ₹${ltp}</span>
                             </td>
+                            ${renderOpenAlgoActionCell(notif)}
                         </tr>
                     `;
                 } else if (type === 'exited_position') {
@@ -708,6 +1127,7 @@
                                 Qty: ${originalQty} → 0<br>
                                 <span style="color:${pnlColor}; font-size:0.85em; font-weight:bold;">Avg Price: ₹${avgPrice} | Exit P&L: ₹${exitPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
                             </td>
+                            ${renderOpenAlgoActionCell(notif)}
                         </tr>
                     `;
                 } else if (type === 'modified_position' || type === 'quantity_change') {
@@ -753,6 +1173,7 @@
                                 Qty: ${oldQty} → <b>${newQty}</b> (${sign}${qtyDiff})<br>
                                 <span style="color:#666; font-size:0.85em;">Avg (Before): ₹${oldAvgPrice} | Avg (Current): ₹${avgPrice} | LTP: ₹${ltp} | Unbooked P&L: <span style="color:${pnlColor}">₹${unbookedPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></span>${impliedFillHtml}
                             </td>
+                            ${renderOpenAlgoActionCell(notif)}
                         </tr>
                     `;
                 } else {
@@ -761,7 +1182,7 @@
                     typeText = type.toUpperCase();
                     tableHtml = `
                         <tr style="background-color: ${rowColor};">
-                            <td colspan="4">${notif.message}</td>
+                            <td colspan="5">${notif.message}</td>
                         </tr>
                     `;
                 }
@@ -798,6 +1219,7 @@
                                     <th>Symbol</th>
                                     <th>Product</th>
                                     <th>Change</th>
+                                    <th>OpenAlgo</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1119,7 +1541,7 @@
                 setTimeout(() => {
                     testResult.style.background = '#d4edda';
                     testResult.style.border = '1px solid #28a745';
-                    testResult.innerHTML = '✅ <strong>Success!</strong> Sound played and 3 sample toasts queued (one per notification type).<br><small>Watch the bottom-right corner — toasts appear one at a time with a 5s gap.</small>';
+                    testResult.innerHTML = '✅ <strong>Success!</strong> Sound played and 3 sample toasts queued (one per notification type).<br><small>Watch the bottom-right corner — queued toasts stack, and each toast auto-dismisses only when it reaches the front.</small>';
                 }, 600);
             } catch (error) {
                 testResult.style.background = '#f8d7da';
@@ -1132,6 +1554,7 @@
         // Initialize on page load
         window.addEventListener('DOMContentLoaded', () => {
             loadNotifications();
+            loadOpenAlgoProfiles();
             startNotificationChecking();
         });
 

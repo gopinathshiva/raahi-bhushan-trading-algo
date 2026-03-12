@@ -73,6 +73,23 @@ def migrate_database():
         migrations_applied += 1
         print("    ✓ Created 'ai_chat_history' table")
 
+    # Migration 5: Create openalgo_profiles table if missing
+    if not table_exists(c, 'openalgo_profiles'):
+        print("  - Creating 'openalgo_profiles' table...")
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS openalgo_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_name TEXT UNIQUE NOT NULL,
+                host TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        migrations_applied += 1
+        print("    ✓ Created 'openalgo_profiles' table")
+
     # Commit all changes
     conn.commit()
     conn.close()

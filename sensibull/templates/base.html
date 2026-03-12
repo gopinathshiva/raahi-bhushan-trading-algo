@@ -242,6 +242,12 @@
                 </a>
             </li>
             <li>
+                <a href="{{ url_for('openalgo_profiles_page') }}"
+                   class="{{ 'active' if request.endpoint == 'openalgo_profiles_page' else '' }}">
+                    ⚡ OpenAlgo
+                </a>
+            </li>
+            <li>
                 <a href="{{ url_for('historical_data') }}"
                    class="{{ 'active' if request.endpoint == 'historical_data' else '' }}">
                     📈 Historical Data
