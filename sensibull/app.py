@@ -114,6 +114,30 @@ def to_datetime_filter(value):
         except:
             return value
 
+@app.template_filter('fmt_inr')
+def fmt_inr_filter(value, decimals=1):
+    """Format a number in the Indian numbering system (e.g. 12,34,567.0)."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    sign = '-' if value < 0 else ''
+    abs_val = abs(value)
+    int_part = int(abs_val)
+    dec_val = round(abs_val - int_part, decimals)
+    dec_str = (f'.{int(round(dec_val * (10 ** decimals))):0{decimals}d}') if decimals > 0 else ''
+    s = str(int_part)
+    if len(s) <= 3:
+        formatted = s
+    else:
+        formatted = s[-3:]
+        s = s[:-3]
+        while s:
+            formatted = s[-2:] + ',' + formatted
+            s = s[:-2]
+    return sign + formatted + dec_str
+
+
 def is_market_open():
     """Check if Indian stock market is open (in IST timezone)"""
     now = now_ist()
@@ -1035,6 +1059,7 @@ def api_profile_symbol_suggest(slug):
 def api_profile_all_underlyings(slug):
     """Get all position lifecycle events grouped by underlying symbol from all snapshots."""
     underlying_filter = (request.args.get('underlying') or '').strip().upper()
+    date_filter = (request.args.get('date') or '').strip()  # e.g. '2026-03-13'
 
     conn = get_db()
     c = conn.cursor()
@@ -1044,11 +1069,17 @@ def api_profile_all_underlyings(slug):
         conn.close()
         return jsonify({'error': 'Profile not found', 'underlyings': {}}), 404
 
-    # Get all snapshots for this profile in chronological order
-    snapshots = c.execute(
-        "SELECT id, timestamp, raw_data FROM snapshots WHERE profile_id = ? ORDER BY id ASC",
-        (profile['id'],),
-    ).fetchall()
+    # Get snapshots for this profile in chronological order, optionally filtered by date
+    if date_filter:
+        snapshots = c.execute(
+            "SELECT id, timestamp, raw_data FROM snapshots WHERE profile_id = ? AND date(timestamp) = ? ORDER BY id ASC",
+            (profile['id'], date_filter),
+        ).fetchall()
+    else:
+        snapshots = c.execute(
+            "SELECT id, timestamp, raw_data FROM snapshots WHERE profile_id = ? ORDER BY id ASC",
+            (profile['id'],),
+        ).fetchall()
 
     # Map snapshot -> change_id for linking to details
     changes_rows = c.execute(
@@ -1254,6 +1285,17 @@ def api_profile_all_underlyings(slug):
         for evt in evts:
             evt['lot_size'] = lot_size_map.get(evt['symbol'], 0)
 
+    # Compute snapshot-accurate Net P&L from the final state (last_trade from latest snapshot).
+    # This matches the Daily Timeline's Current P&L calculation which sums unbooked_pnl +
+    # booked_profit_loss directly from the latest snapshot, not from change events.
+    snapshot_booked = 0.0
+    snapshot_unbooked = 0.0
+    for st in state.values():
+        if st.get('present') and st.get('last_trade'):
+            t = st['last_trade']
+            snapshot_booked += t.get('booked_profit_loss', 0) or 0
+            snapshot_unbooked += t.get('unbooked_pnl', 0) or 0
+
     conn.close()
 
     return jsonify({
@@ -1261,6 +1303,9 @@ def api_profile_all_underlyings(slug):
         'underlyings': sorted_underlyings,
         'events': underlying_events,
         'filter': underlying_filter or None,
+        'snapshot_booked_pnl': snapshot_booked,
+        'snapshot_unbooked_pnl': snapshot_unbooked,
+        'snapshot_net_pnl': snapshot_booked + snapshot_unbooked,
     })
 
 
@@ -3167,6 +3212,54 @@ def api_openalgo_place_order():
             'order_payload': order_payload
         }), 502
 
+# ==================== MASTER CONTRACT STRIKE INFO ====================
+
+@app.route('/api/master_contract/strike_info', methods=['GET'])
+@login_required
+def api_master_contract_strike_info():
+    """Return strike size and available strikes for a broker symbol from master contract."""
+    broker_symbol = (request.args.get('broker_symbol') or '').strip().upper()
+    if not broker_symbol:
+        return jsonify({'success': False, 'error': 'broker_symbol is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    instrument = c.execute("""
+        SELECT trading_symbol, name, expiry, strike, lot_size, instrument_type
+        FROM master_contract
+        WHERE trading_symbol = ?
+    """, (broker_symbol,)).fetchone()
+
+    if not instrument:
+        conn.close()
+        return jsonify({'success': False, 'error': f'Symbol {broker_symbol} not found in master contract'}), 404
+
+    strikes_rows = c.execute("""
+        SELECT DISTINCT strike
+        FROM master_contract
+        WHERE name = ? AND expiry = ? AND instrument_type = ?
+        ORDER BY strike ASC
+    """, (instrument['name'], instrument['expiry'], instrument['instrument_type'])).fetchall()
+    conn.close()
+
+    strike_list = [row['strike'] for row in strikes_rows]
+    strike_size = None
+    if len(strike_list) >= 2:
+        gaps = [strike_list[i + 1] - strike_list[i] for i in range(len(strike_list) - 1)]
+        strike_size = int(min(gaps))
+
+    return jsonify({
+        'success': True,
+        'broker_symbol': broker_symbol,
+        'current_strike': instrument['strike'],
+        'strike_size': strike_size,
+        'lot_size': instrument['lot_size'],
+        'available_strikes': strike_list,
+        'name': instrument['name'],
+        'expiry': instrument['expiry'],
+        'instrument_type': instrument['instrument_type']
+    })
+
 # ==================== NOTIFICATION API ROUTES ====================
 
 @app.route('/api/notifications', methods=['GET'])
@@ -3294,6 +3387,115 @@ def mark_notification_read():
     except Exception as e:
         print(f"Error marking notification as read: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notifications/simulate_events', methods=['GET'])
+@login_required
+def get_simulate_events():
+    """Return recent position_changes available for notification simulation"""
+    try:
+        profile_slug = request.args.get('profile_slug')
+        if not profile_slug:
+            return jsonify({'error': 'profile_slug is required'}), 400
+
+        conn = get_db()
+        c = conn.cursor()
+
+        profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+        if not profile:
+            conn.close()
+            return jsonify({'error': 'Profile not found'}), 404
+        profile_id = profile['id']
+
+        changes = c.execute("""
+            SELECT pc.id, pc.snapshot_id, pc.timestamp, pc.diff_summary
+            FROM position_changes pc
+            WHERE pc.profile_id = ?
+              AND pc.diff_summary != 'Initial Snapshot'
+              AND EXISTS (
+                  SELECT 1 FROM snapshots s
+                  WHERE s.profile_id = pc.profile_id AND s.id < pc.snapshot_id
+              )
+            ORDER BY pc.timestamp DESC
+            LIMIT 50
+        """, (profile_id,)).fetchall()
+        conn.close()
+
+        return jsonify({'success': True, 'events': [dict(c) for c in changes]})
+
+    except Exception as e:
+        print(f"Error getting simulate events: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/notifications/simulate', methods=['POST'])
+@login_required
+def simulate_notifications():
+    """Replay a historical position change through generate_notifications_for_changes"""
+    try:
+        from scraper import generate_notifications_for_changes
+
+        data = request.get_json()
+        profile_slug = data.get('profile_slug')
+        change_id = data.get('change_id')
+
+        if not profile_slug or not change_id:
+            return jsonify({'error': 'profile_slug and change_id are required'}), 400
+
+        conn = get_db()
+        c = conn.cursor()
+
+        profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (profile_slug,)).fetchone()
+        if not profile:
+            conn.close()
+            return jsonify({'error': 'Profile not found'}), 404
+        profile_id = profile['id']
+
+        change = c.execute("""
+            SELECT snapshot_id FROM position_changes WHERE id = ? AND profile_id = ?
+        """, (change_id, profile_id)).fetchone()
+        if not change:
+            conn.close()
+            return jsonify({'error': 'Change event not found'}), 404
+
+        after_snapshot_id = change['snapshot_id']
+
+        after_snap = c.execute("SELECT raw_data FROM snapshots WHERE id = ?", (after_snapshot_id,)).fetchone()
+        before_snap = c.execute("""
+            SELECT raw_data FROM snapshots
+            WHERE profile_id = ? AND id < ?
+            ORDER BY id DESC LIMIT 1
+        """, (profile_id, after_snapshot_id)).fetchone()
+
+        if not after_snap or not before_snap:
+            conn.close()
+            return jsonify({'error': 'Could not find before/after snapshots for this event'}), 404
+
+        before_data = json.loads(before_snap['raw_data'])
+        after_data = json.loads(after_snap['raw_data'])
+
+        # Record the max notification id before simulation
+        max_id_row = c.execute("SELECT COALESCE(MAX(id), 0) FROM notifications WHERE profile_id = ?", (profile_id,)).fetchone()
+        max_id_before = max_id_row[0]
+
+        generate_notifications_for_changes(conn, profile_id, before_data, after_data)
+
+        new_notifs = c.execute("""
+            SELECT id, message, notification_type, notification_data, created_at
+            FROM notifications
+            WHERE profile_id = ? AND id > ?
+            ORDER BY id ASC
+        """, (profile_id, max_id_before)).fetchall()
+
+        conn.close()
+
+        created = [dict(n) for n in new_notifs]
+        return jsonify({'success': True, 'created': len(created), 'notifications': created})
+
+    except Exception as e:
+        import traceback
+        print(f"Error simulating notifications: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/notifications/delete', methods=['POST'])
 @login_required

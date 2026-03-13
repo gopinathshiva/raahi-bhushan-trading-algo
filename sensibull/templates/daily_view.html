@@ -363,28 +363,28 @@
                 <div class="metric-title">Start of Day P&L</div>
                 <div
                     class="metric-value {{ 'val-pos' if metrics.start_pnl > 0 else 'val-neg' if metrics.start_pnl < 0 else 'val-neu' }}">
-                    {{ "{:,.1f}".format(metrics.start_pnl) }}
+                    ₹{{ metrics.start_pnl | fmt_inr }}
                 </div>
             </div>
             <div class="metric-box">
                 <div class="metric-title">Current P&L</div>
                 <div
                     class="metric-value {{ 'val-pos' if metrics.current_pnl > 0 else 'val-neg' if metrics.current_pnl < 0 else 'val-neu' }}">
-                    {{ "{:,.1f}".format(metrics.current_pnl) }}
+                    ₹{{ metrics.current_pnl | fmt_inr }}
                 </div>
             </div>
             <div class="metric-box">
                 <div class="metric-title">Today's P&L (Change)</div>
                 <div
                     class="metric-value {{ 'val-pos' if metrics.todays_pnl > 0 else 'val-neg' if metrics.todays_pnl < 0 else 'val-neu' }}">
-                    {{ "{:,.1f}".format(metrics.todays_pnl) }}
+                    ₹{{ metrics.todays_pnl | fmt_inr }}
                 </div>
             </div>
             <div class="metric-box">
                 <div class="metric-title">Booked P&L</div>
                 <div
                     class="metric-value {{ 'val-pos' if metrics.booked_pnl > 0 else 'val-neg' if metrics.booked_pnl < 0 else 'val-neu' }}">
-                    {{ "{:,.1f}".format(metrics.booked_pnl) }}
+                    ₹{{ metrics.booked_pnl | fmt_inr }}
                 </div>
             </div>
         </div>
@@ -489,9 +489,13 @@
                 <label style="cursor:pointer; user-select:none; color:#888;">
                     <input type="radio" name="position-status-filter" value="closed" style="margin-right:5px;" />Closed Only
                 </label>
+                <label style="cursor:pointer; user-select:none; color:#6c757d; margin-left:10px; border-left:1px solid #ddd; padding-left:14px;">
+                    <input type="checkbox" id="date-filter-checkbox" style="margin-right:5px;" />This Date Only
+                </label>
             </div>
             <div id="underlying-status" class="search-help"></div>
-            <div id="underlying-groups-container" style="margin-top: 20px;">
+            <div id="underlying-summary-cards" class="metrics-container" style="margin-top: 20px; display: none;"></div>
+            <div id="underlying-groups-container" style="margin-top: 10px;">
                 <!-- Collapsible groups will be inserted here -->
             </div>
         </div>
@@ -1366,6 +1370,11 @@
             const underlyingFilter = (filterSelect?.value || '').trim();
             const params = new URLSearchParams();
             if (underlyingFilter) params.set('underlying', underlyingFilter);
+            const dateFilterCheckbox = document.getElementById('date-filter-checkbox');
+            if (dateFilterCheckbox && dateFilterCheckbox.checked) {
+                const datePart = window.location.pathname.split('/')[3];
+                if (datePart) params.set('date', datePart);
+            }
 
             try {
                 const res = await fetch('/api/profile_all_underlyings/' + slug + '?' + params.toString());
@@ -1402,9 +1411,14 @@
                 if (status) status.textContent = `Found ${underlyings.length} underlyings with ${totalEvents} total events.`;
 
                 // Cache the data for re-rendering when toggle changes
-                _cachedUnderlyingsData = { underlyings, events };
-                
-                renderUnderlyingGroups(underlyings, events);
+                const snapshotPnl = {
+                    booked: data.snapshot_booked_pnl ?? null,
+                    unbooked: data.snapshot_unbooked_pnl ?? null,
+                    net: data.snapshot_net_pnl ?? null,
+                };
+                _cachedUnderlyingsData = { underlyings, events, snapshotPnl };
+
+                renderUnderlyingGroups(underlyings, events, snapshotPnl);
                 
                 // Update subscription indicators after rendering buttons
                 updateSubscriptionIndicators();
@@ -1415,7 +1429,7 @@
 
         function reRenderUnderlyingGroups() {
             if (_cachedUnderlyingsData) {
-                renderUnderlyingGroups(_cachedUnderlyingsData.underlyings, _cachedUnderlyingsData.events);
+                renderUnderlyingGroups(_cachedUnderlyingsData.underlyings, _cachedUnderlyingsData.events, _cachedUnderlyingsData.snapshotPnl);
                 // Update subscription indicators after re-rendering
                 updateSubscriptionIndicators();
             }
@@ -2671,10 +2685,63 @@
             }
         }
 
-        function renderUnderlyingGroups(underlyings, events) {
+        function renderUnderlyingSummaryCards(underlyings, events, snapshotPnl) {
+            const cardsEl = document.getElementById('underlying-summary-cards');
+            if (!cardsEl) return;
+
+            // Aggregate all events across all underlyings
+            const allEvents = [];
+            underlyings.forEach(u => allEvents.push(...(events[u] || [])));
+            if (allEvents.length === 0) { cardsEl.style.display = 'none'; return; }
+
+            const stats = computeGroupStats(allEvents);
+            const pnlClass = v => v > 0 ? 'val-pos' : (v < 0 ? 'val-neg' : 'val-neu');
+            const fmt = v => '₹' + fmtNum(v, 0);
+
+            // Booked P&L: use event-based stats (accumulates realized P&L from trade events,
+            // matches Daily Timeline's Booked P&L).
+            // Net P&L: use snapshot-accurate value from backend — this is summed directly from
+            // the latest snapshot's unbooked_pnl + booked_profit_loss, matching Daily Timeline's
+            // Current P&L exactly.
+            // Unbooked P&L: derived as Net - Booked so all three cards are internally consistent.
+            const bookedPnl = stats.bookedPnl;
+            const netPnl = (snapshotPnl && snapshotPnl.net !== null) ? snapshotPnl.net : (stats.bookedPnl + stats.unbookedPnl);
+            const unbookedPnl = netPnl - bookedPnl;
+
+            cardsEl.innerHTML = `
+                <div class="metric-box">
+                    <div class="metric-title">Total Positions</div>
+                    <div class="metric-value val-neu">${stats.symbols}</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Open Positions</div>
+                    <div class="metric-value" style="color:#28a745;">${stats.active}</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Closed Positions</div>
+                    <div class="metric-value" style="color:#888;">${stats.closed}</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Total Booked P&amp;L</div>
+                    <div class="metric-value ${pnlClass(bookedPnl)}">${fmt(bookedPnl)}</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Total Unbooked P&amp;L</div>
+                    <div class="metric-value ${pnlClass(unbookedPnl)}">${fmt(unbookedPnl)}</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Net P&amp;L</div>
+                    <div class="metric-value ${pnlClass(netPnl)}">${fmt(netPnl)}</div>
+                </div>
+            `;
+            cardsEl.style.display = 'flex';
+        }
+
+        function renderUnderlyingGroups(underlyings, events, snapshotPnl) {
             const container = document.getElementById('underlying-groups-container');
             if (!container) return;
 
+            renderUnderlyingSummaryCards(underlyings, events, snapshotPnl);
             container.innerHTML = '';
 
             underlyings.forEach(underlying => {
@@ -2882,8 +2949,8 @@
                                         data-subscribe-btn="true"
                                         data-subscribe-type="expiry"
                                         data-subscribe-underlying="${underlying}"
-                                        data-subscribe-expiry="${expiryDateStr}"
-                                        onclick="event.stopPropagation(); toggleSubscription('expiry', '${underlying}', '${expiryDateStr}', null);"
+                                        data-subscribe-expiry="${expiryIso}"
+                                        onclick="event.stopPropagation(); toggleSubscription('expiry', '${underlying}', '${expiryIso}', null);"
                                         style="padding: 4px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         🔕 Subscribe
                                     </button>
@@ -3097,6 +3164,15 @@
                     reRenderUnderlyingGroups();
                 });
             });
+
+            // Date filter checkbox — reloads from API with date param
+            const dateFilterCheckbox = document.getElementById('date-filter-checkbox');
+            if (dateFilterCheckbox) {
+                dateFilterCheckbox.addEventListener('change', function() {
+                    _underlyingTradesLoaded = false;
+                    loadUnderlyingTrades();
+                });
+            }
 
             const isNoPositionChangeSummary = (text) => {
                 text = (text || '').trim();

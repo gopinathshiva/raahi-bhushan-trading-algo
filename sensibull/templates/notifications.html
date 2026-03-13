@@ -592,6 +592,20 @@
                 </button>
                 <div id="test-result" style="margin-top: 15px; padding: 10px; border-radius: 5px; display: none;"></div>
             </div>
+
+            <div class="settings-section" style="margin-top: 20px;">
+                <h3 style="margin-bottom: 8px;">🧪 Test Notifications via Timeline Event</h3>
+                <p style="color: #666; margin-bottom: 15px; font-size: 0.92em;">Pick a recorded change event from the daily timeline and replay it through your active subscriptions. Any matched subscriptions will create real notifications visible in the Notifications tab.</p>
+                <div style="margin-bottom: 10px;">
+                    <select id="simulate-event-select" style="width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9em;">
+                        <option value="">— Loading events… —</option>
+                    </select>
+                </div>
+                <button class="action-btn" onclick="runSimulation()" id="simulate-btn" disabled style="width: 100%;">
+                    ▶ Run Simulation
+                </button>
+                <div id="simulate-result" style="margin-top: 14px; display: none;"></div>
+            </div>
         </div>
     </div>
 
@@ -618,11 +632,24 @@
                     <input id="openalgo-broker-symbol" type="text" readonly />
                 </div>
                 <div class="openalgo-field">
-                    <label for="openalgo-symbol">OpenAlgo Symbol</label>
-                    <input id="openalgo-symbol" type="text" readonly />
+                    <label for="openalgo-strike-offset">Strike Offset <span style="color:#888; font-size:0.8em;">(+OTM / −ITM, 0 = no change)</span></label>
+                    <input id="openalgo-strike-offset" type="number" value="0" oninput="updateStrikeOffsetPreview()" />
                 </div>
                 <div class="openalgo-field">
-                    <label for="openalgo-quantity">Lot Size / Quantity</label>
+                    <label for="openalgo-strike-size">Strike Size <span style="color:#888; font-size:0.8em;">(auto-detected)</span></label>
+                    <input id="openalgo-strike-size" type="number" min="1" placeholder="e.g. 50" oninput="updateStrikeOffsetPreview()" />
+                </div>
+                <div class="openalgo-field" style="grid-column: 1 / -1;">
+                    <label for="openalgo-symbol">OpenAlgo Symbol</label>
+                    <input id="openalgo-symbol" type="text" readonly />
+                    <div id="openalgo-strike-warning" style="display:none; color:#e67e22; font-size:0.85em; margin-top:4px;"></div>
+                </div>
+                <div class="openalgo-field">
+                    <label for="openalgo-lots">Lots</label>
+                    <input id="openalgo-lots" type="number" min="1" value="1" oninput="updateLotQuantity()" />
+                </div>
+                <div class="openalgo-field">
+                    <label for="openalgo-quantity">Quantity (units)</label>
                     <input id="openalgo-quantity" type="text" readonly />
                 </div>
             </div>
@@ -645,6 +672,8 @@
         let openAlgoProfiles = [];
         let selectedOpenAlgoNotification = null;
         let lastNotificationCount = 0;
+        let baseOpenAlgoSymbol = '';
+        let strikeInfo = null;
         let notificationCheckInterval = null;
 
         const TOAST_AUTO_DISMISS_MS = 8000;
@@ -752,6 +781,7 @@
                 loadSubscriptions();
             } else if (tabName === 'settings') {
                 loadSettings();
+                loadSimulateEvents();
             }
         }
 
@@ -956,6 +986,80 @@
             `).join('');
         }
 
+        async function fetchStrikeInfo(brokerSymbol) {
+            try {
+                const response = await fetch(`/api/master_contract/strike_info?broker_symbol=${encodeURIComponent(brokerSymbol)}`);
+                const data = await response.json();
+                return data.success ? data : null;
+            } catch (e) {
+                console.error('Error fetching strike info:', e);
+                return null;
+            }
+        }
+
+        function computeOffsetSymbol(baseSymbol, offset, strikeSize) {
+            const MONTHS = 'JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC';
+            const pattern = new RegExp(`^([A-Z]+)(\\d{2})(${MONTHS})(\\d{2})(\\d+)(CE|PE)$`);
+            const m = baseSymbol.toUpperCase().match(pattern);
+            if (!m) return null;
+            const [, base, dd, mon, yy, strikeStr, opt] = m;
+            const currentStrike = parseInt(strikeStr, 10);
+            const delta = offset * strikeSize;
+            // CE: positive offset = higher strike (OTM); PE: positive offset = lower strike (OTM)
+            const newStrike = opt === 'CE' ? currentStrike + delta : currentStrike - delta;
+            if (newStrike <= 0) return null;
+            return `${base}${dd}${mon}${yy}${newStrike}${opt}`;
+        }
+
+        function updateStrikeOffsetPreview() {
+            const offset = parseInt(document.getElementById('openalgo-strike-offset').value || '0', 10);
+            const strikeSize = parseInt(document.getElementById('openalgo-strike-size').value || '0', 10);
+            const symbolInput = document.getElementById('openalgo-symbol');
+            const warningDiv = document.getElementById('openalgo-strike-warning');
+
+            if (!baseOpenAlgoSymbol) return;
+
+            if (offset === 0 || !strikeSize) {
+                symbolInput.value = baseOpenAlgoSymbol;
+                warningDiv.style.display = 'none';
+                return;
+            }
+
+            const newSymbol = computeOffsetSymbol(baseOpenAlgoSymbol, offset, strikeSize);
+            if (!newSymbol) {
+                symbolInput.value = baseOpenAlgoSymbol;
+                warningDiv.textContent = '⚠ Could not compute offset symbol — check symbol format';
+                warningDiv.style.display = 'block';
+                return;
+            }
+
+            symbolInput.value = newSymbol;
+
+            // Validate new strike against master contract data
+            if (strikeInfo && strikeInfo.available_strikes && strikeInfo.available_strikes.length > 0) {
+                const MONTHS = 'JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC';
+                const pattern = new RegExp(`^([A-Z]+)(\\d{2})(${MONTHS})(\\d{2})(\\d+)(CE|PE)$`);
+                const m = newSymbol.match(pattern);
+                if (m) {
+                    const newStrike = parseFloat(m[5]);
+                    const available = strikeInfo.available_strikes.map(s => parseFloat(s));
+                    if (!available.includes(newStrike)) {
+                        warningDiv.textContent = `⚠ Strike ${newStrike} not found in master contract for this expiry`;
+                        warningDiv.style.display = 'block';
+                        return;
+                    }
+                }
+            }
+            warningDiv.style.display = 'none';
+        }
+
+        function updateLotQuantity() {
+            const lots = parseInt(document.getElementById('openalgo-lots').value || '1', 10);
+            const lotSize = strikeInfo && strikeInfo.lot_size ? strikeInfo.lot_size : null;
+            const quantity = lotSize ? lots * lotSize : lots;
+            document.getElementById('openalgo-quantity').value = quantity;
+        }
+
         async function openOpenAlgoModal(notificationId) {
             selectedOpenAlgoNotification = notificationsData.find(n => n.id === notificationId) || null;
             if (!selectedOpenAlgoNotification) {
@@ -967,14 +1071,37 @@
             populateOpenAlgoProfileSelect();
 
             const hint = getOpenAlgoHint(selectedOpenAlgoNotification);
+            baseOpenAlgoSymbol = hint.openalgo_symbol || '';
+            strikeInfo = null;
             document.getElementById('openalgo-broker-symbol').value = hint.broker_symbol || '';
-            document.getElementById('openalgo-symbol').value = hint.openalgo_symbol || '';
+            document.getElementById('openalgo-symbol').value = baseOpenAlgoSymbol;
             document.getElementById('openalgo-action').value = hint.action || '';
+            document.getElementById('openalgo-quantity').value = hint.quantity || '';
+            document.getElementById('openalgo-strike-offset').value = '0';
+            document.getElementById('openalgo-strike-size').value = '';
+            document.getElementById('openalgo-strike-warning').style.display = 'none';
+            document.getElementById('openalgo-lots').value = '1';
             document.getElementById('openalgo-quantity').value = hint.quantity || '';
             resetOpenAlgoStatus();
 
             const modal = document.getElementById('openalgo-modal');
             modal.classList.add('show');
+
+            // Fetch strike info in background to populate strike size and lot size
+            if (hint.broker_symbol) {
+                fetchStrikeInfo(hint.broker_symbol).then(info => {
+                    strikeInfo = info;
+                    if (info && info.strike_size) {
+                        document.getElementById('openalgo-strike-size').value = info.strike_size;
+                    }
+                    if (info && info.lot_size && hint.quantity) {
+                        const lots = Math.round(hint.quantity / info.lot_size) || 1;
+                        document.getElementById('openalgo-lots').value = lots;
+                    }
+                    updateLotQuantity();
+                });
+            }
+
             await checkSelectedOpenAlgoHost();
         }
 
@@ -1033,15 +1160,17 @@
             placeBtn.disabled = true;
             try {
                 const hint = getOpenAlgoHint(selectedOpenAlgoNotification);
+                const resolvedSymbol = document.getElementById('openalgo-symbol').value || hint.openalgo_symbol;
+                const resolvedQuantity = parseInt(document.getElementById('openalgo-quantity').value, 10) || hint.quantity;
                 const response = await fetch('/api/openalgo/place_order', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         openalgo_profile_id: parseInt(profileId, 10),
                         notification_id: selectedOpenAlgoNotification.id,
-                        openalgo_symbol: hint.openalgo_symbol,
+                        openalgo_symbol: resolvedSymbol,
                         action: hint.action,
-                        quantity: hint.quantity
+                        quantity: resolvedQuantity
                     })
                 });
                 const data = await response.json();
@@ -1504,6 +1633,96 @@
         function showToast(message, type = 'success') {
             // Route all toasts through the queue for consistent behaviour
             enqueueToast(message, type);
+        }
+
+        // ==================== SIMULATION ====================
+
+        async function loadSimulateEvents() {
+            const select = document.getElementById('simulate-event-select');
+            const btn = document.getElementById('simulate-btn');
+            if (!select) return;
+            select.innerHTML = '<option value="">— Loading… —</option>';
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/notifications/simulate_events?profile_slug=${PROFILE_SLUG}`);
+                const data = await res.json();
+                if (!data.success || !data.events.length) {
+                    select.innerHTML = '<option value="">— No events available —</option>';
+                    return;
+                }
+                select.innerHTML = '<option value="">— Pick a change event —</option>';
+                data.events.forEach(ev => {
+                    const dt = new Date(ev.timestamp);
+                    const label = `${dt.toLocaleDateString('en-IN', {day:'2-digit', month:'short', year:'numeric'})}  ${dt.toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit', second:'2-digit'})}  —  ${ev.diff_summary || 'Change'}`;
+                    const opt = document.createElement('option');
+                    opt.value = ev.id;
+                    opt.textContent = label;
+                    select.appendChild(opt);
+                });
+                select.onchange = () => { btn.disabled = !select.value; };
+            } catch (e) {
+                select.innerHTML = '<option value="">— Failed to load events —</option>';
+            }
+        }
+
+        async function runSimulation() {
+            const select = document.getElementById('simulate-event-select');
+            const resultDiv = document.getElementById('simulate-result');
+            const btn = document.getElementById('simulate-btn');
+            const changeId = select.value;
+            if (!changeId) return;
+
+            btn.disabled = true;
+            btn.textContent = '⏳ Running…';
+            resultDiv.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/notifications/simulate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profile_slug: PROFILE_SLUG, change_id: parseInt(changeId) })
+                });
+                const data = await res.json();
+
+                resultDiv.style.display = 'block';
+                if (!data.success) {
+                    resultDiv.style.background = '#fde8e8';
+                    resultDiv.style.border = '1px solid #e57373';
+                    resultDiv.style.padding = '12px';
+                    resultDiv.style.borderRadius = '4px';
+                    resultDiv.innerHTML = `<strong>Error:</strong> ${data.error}`;
+                } else if (data.created === 0) {
+                    resultDiv.style.background = '#fff8e1';
+                    resultDiv.style.border = '1px solid #ffc107';
+                    resultDiv.style.padding = '12px';
+                    resultDiv.style.borderRadius = '4px';
+                    resultDiv.innerHTML = `<strong>No notifications generated.</strong><br><span style="color:#888; font-size:0.9em;">No active subscriptions matched the changes in this event. Check your subscriptions tab.</span>`;
+                } else {
+                    resultDiv.style.background = '#e8f5e9';
+                    resultDiv.style.border = '1px solid #66bb6a';
+                    resultDiv.style.padding = '12px';
+                    resultDiv.style.borderRadius = '4px';
+                    const rows = data.notifications.map(n => {
+                        const nd = n.notification_data ? JSON.parse(n.notification_data) : {};
+                        const sym = nd.symbol || '—';
+                        const typeLabel = { new_position: '🟢 New', exited_position: '🔴 Exited', modified_position: '🟡 Modified', quantity_change: '🟡 Qty Change' }[n.notification_type] || n.notification_type;
+                        return `<li style="margin-bottom:4px;">${typeLabel} &nbsp;<strong>${sym}</strong> &mdash; ${n.message}</li>`;
+                    }).join('');
+                    resultDiv.innerHTML = `<strong>✓ ${data.created} notification${data.created > 1 ? 's' : ''} created</strong> — check the Notifications tab.<ul style="margin:8px 0 0 16px; padding:0; font-size:0.9em;">${rows}</ul>`;
+                    playNotificationSound();
+                    if (data.notifications.length) loadNotifications();
+                }
+            } catch (e) {
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = '#fde8e8';
+                resultDiv.style.border = '1px solid #e57373';
+                resultDiv.style.padding = '12px';
+                resultDiv.style.borderRadius = '4px';
+                resultDiv.innerHTML = `<strong>Error:</strong> ${e.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '▶ Run Simulation';
+            }
         }
 
         // Test notification sound
