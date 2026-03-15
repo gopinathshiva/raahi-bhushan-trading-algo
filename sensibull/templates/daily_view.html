@@ -8,6 +8,7 @@
 {% endblock %}
 
 {% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
     body { background: #fafafa; }
 
@@ -624,6 +625,53 @@
                 </div>
                 <div id="chart-canvas" style="width:100%; height:100%;"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- PnL by Expiry Modal -->
+    <div id="pnl-expiry-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:11000; overflow-y:auto;">
+        <div style="background:#fff; margin:3vh auto; padding:24px; width:min(900px,96vw); border-radius:10px;
+                    box-shadow:0 6px 24px rgba(0,0,0,0.2); position:relative;">
+
+            <!-- Header -->
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px;">
+                <div>
+                    <h3 id="pem-title" style="margin:0 0 4px; font-size:1.15em; color:#333;">PnL by Expiry</h3>
+                    <div id="pem-meta" style="font-size:0.82em; color:#888;"></div>
+                </div>
+                <button onclick="closePnlExpiryModal()"
+                        style="background:none;border:none;font-size:1.6em;cursor:pointer;color:#666;line-height:1;padding:0 4px;">&times;</button>
+            </div>
+
+            <!-- Underlying tabs (shown when multiple underlyings) -->
+            <div id="pem-tabs" style="display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid #dee2e6; flex-wrap:wrap;"></div>
+
+            <!-- Status -->
+            <div id="pem-status" style="font-size:13px; color:#666; margin-bottom:8px; min-height:16px;"></div>
+
+            <!-- Chart -->
+            <div style="position:relative; height:280px; margin-bottom:20px;">
+                <canvas id="pem-chart"></canvas>
+            </div>
+
+            <!-- Table -->
+            <div style="overflow-x:auto;">
+                <table id="pem-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+                    <thead>
+                        <tr style="background:#f8f9fa;">
+                            <th style="padding:9px 12px; text-align:left; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Expiry</th>
+                            <th style="padding:9px 12px; text-align:right; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Total PnL</th>
+                            <th style="padding:9px 12px; text-align:right; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Unbooked</th>
+                            <th style="padding:9px 12px; text-align:right; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Booked</th>
+                            <th style="padding:9px 12px; text-align:right; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Trades</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pem-tbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Trade detail accordion -->
+            <div id="pem-trade-detail" style="margin-top:18px;"></div>
         </div>
     </div>
 
@@ -2867,8 +2915,17 @@
                     openAIChatPanel(underlying, 'underlying', '', underlying + ' — All Expiries');
                 };
 
+                const pnlExpiryBtn = document.createElement('button');
+                pnlExpiryBtn.innerHTML = '📈 PnL by Expiry';
+                pnlExpiryBtn.style.cssText = 'padding:6px 12px; background:#17a2b8; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9em;';
+                pnlExpiryBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openPnlExpiryModal(underlying);
+                };
+
                 buttonsDiv.appendChild(subscribeBtn);
                 buttonsDiv.appendChild(chartBtn);
+                buttonsDiv.appendChild(pnlExpiryBtn);
                 buttonsDiv.appendChild(aiBtn);
                 buttonsDiv.appendChild(toggleSpan);
 
@@ -6113,4 +6170,259 @@
             <button class="ai-send-btn" id="ai-send-btn" onclick="sendAIMessage()">Send</button>
         </div>
     </div>
+
+    <!-- ── PnL by Expiry Modal JS ── -->
+    <script>
+    (function() {
+        const SLUG = '{{ slug }}';
+        const DATE = '{{ date }}';
+        let _pemChart = null;
+        let _pemData  = null;   // full API response
+        let _pemActiveUnderlying = null;
+
+        // Palette
+        const PALETTE = [
+            '#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f',
+            '#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'
+        ];
+
+        window.openPnlExpiryModal = function(underlying) {
+            _pemActiveUnderlying = underlying;
+            document.getElementById('pnl-expiry-modal').style.display = 'block';
+            document.getElementById('pem-status').textContent = 'Loading…';
+            document.getElementById('pem-tabs').innerHTML     = '';
+            document.getElementById('pem-tbody').innerHTML    = '';
+            document.getElementById('pem-trade-detail').innerHTML = '';
+            document.getElementById('pem-title').textContent = 'PnL by Expiry — ' + underlying;
+            document.getElementById('pem-meta').textContent  = '';
+
+            if (_pemData) {
+                renderPem(underlying);
+                return;
+            }
+
+            fetch(`/api/profile/${SLUG}/pnl_by_expiry/${DATE}`)
+                .then(r => r.json())
+                .then(json => {
+                    if (!json.success) throw new Error(json.error || 'API error');
+                    _pemData = json;
+                    renderPem(underlying);
+                })
+                .catch(e => {
+                    document.getElementById('pem-status').textContent = 'Error: ' + e.message;
+                });
+        };
+
+        function renderPem(activeUnderlying) {
+            const json = _pemData;
+            const underlyingKeys = Object.keys(json.underlyings).sort();
+
+            document.getElementById('pem-meta').textContent =
+                `Snapshot at ${json.snapshot_time} on ${json.date}`;
+
+            // Build underlying tabs if more than one
+            const tabsEl = document.getElementById('pem-tabs');
+            tabsEl.innerHTML = '';
+            if (underlyingKeys.length > 1) {
+                underlyingKeys.forEach(u => {
+                    const btn = document.createElement('button');
+                    btn.textContent = u;
+                    btn.style.cssText = `padding:7px 18px; border:none; background:none; cursor:pointer;
+                        font-size:13px; font-weight:500; color:${u === activeUnderlying ? '#007bff' : '#666'};
+                        border-bottom:3px solid ${u === activeUnderlying ? '#007bff' : 'transparent'};
+                        margin-bottom:-2px; transition:all 0.15s;`;
+                    btn.onclick = () => {
+                        _pemActiveUnderlying = u;
+                        document.getElementById('pem-title').textContent = 'PnL by Expiry — ' + u;
+                        renderPem(u);
+                    };
+                    tabsEl.appendChild(btn);
+                });
+                tabsEl.style.display = 'flex';
+            } else {
+                tabsEl.style.display = 'none';
+            }
+
+            const expiryData = json.underlyings[activeUnderlying] || {};
+            const expiries   = Object.keys(expiryData).sort();
+
+            document.getElementById('pem-status').textContent = '';
+
+            if (!expiries.length) {
+                document.getElementById('pem-status').textContent = 'No trade data for this underlying.';
+                destroyPemChart();
+                document.getElementById('pem-tbody').innerHTML = '';
+                return;
+            }
+
+            // ── Chart ──
+            destroyPemChart();
+            const labels = expiries;
+            const values = expiries.map(e => expiryData[e].pnl);
+            const colors = values.map(v => v >= 0 ? 'rgba(40,167,69,0.8)' : 'rgba(220,53,69,0.8)');
+            const ctx = document.getElementById('pem-chart').getContext('2d');
+            _pemChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'PnL per Expiry',
+                        data: values,
+                        backgroundColor: colors,
+                        borderWidth: 0,
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => ' ' + fmtInr(ctx.parsed.y),
+                                afterLabel: ctx => {
+                                    const ed = expiryData[expiries[ctx.dataIndex]];
+                                    return [
+                                        `  Unbooked: ${fmtInr(ed.unbooked_pnl)}`,
+                                        `  Booked:   ${fmtInr(ed.booked_pnl)}`,
+                                        `  Trades:   ${ed.trades.length}`,
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+                        y: {
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            ticks: { callback: v => '₹' + v.toLocaleString('en-IN') }
+                        }
+                    },
+                    onClick: (_evt, els) => {
+                        if (els.length) showTradeDetail(activeUnderlying, expiries[els[0].index]);
+                    },
+                    onHover: (e, els) => {
+                        e.native.target.style.cursor = els.length ? 'pointer' : 'default';
+                    }
+                }
+            });
+
+            // ── Table ──
+            const tbody = document.getElementById('pem-tbody');
+            const totalPnl = expiries.reduce((s, e) => s + expiryData[e].pnl, 0);
+            tbody.innerHTML = expiries.map((expiry, i) => {
+                const ed = expiryData[expiry];
+                const pc = ed.pnl > 0 ? '#28a745' : ed.pnl < 0 ? '#dc3545' : '#999';
+                return `<tr style="cursor:pointer;" onclick="window._pemShowDetail('${activeUnderlying}','${expiry}')"
+                            onmouseover="this.style.background='#f8f9fa'" onmouseout="this.style.background=''">
+                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6;">
+                        <span style="font-weight:600;">${expiry}</span>
+                        <span style="margin-left:8px; font-size:11px; color:#888;">${ed.trades.length} trade${ed.trades.length!==1?'s':''}</span>
+                    </td>
+                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6; text-align:right; font-weight:700; color:${pc};">${fmtInr(ed.pnl)}</td>
+                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6; text-align:right; color:${ed.unbooked_pnl>=0?'#28a745':'#dc3545'};">${fmtInr(ed.unbooked_pnl)}</td>
+                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6; text-align:right; color:${ed.booked_pnl>=0?'#28a745':'#dc3545'};">${fmtInr(ed.booked_pnl)}</td>
+                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6; text-align:right; color:#666;">${ed.trades.length}</td>
+                </tr>`;
+            }).join('') +
+            `<tr style="background:#f8f9fa; font-weight:700;">
+                <td style="padding:9px 12px;">Total</td>
+                <td style="padding:9px 12px; text-align:right; color:${totalPnl>=0?'#28a745':'#dc3545'};">${fmtInr(totalPnl)}</td>
+                <td colspan="3"></td>
+            </tr>`;
+
+            document.getElementById('pem-trade-detail').innerHTML = '';
+        }
+
+        // Expose to onclick in table row
+        window._pemShowDetail = function(underlying, expiry) {
+            showTradeDetail(underlying, expiry);
+        };
+
+        function showTradeDetail(underlying, expiry) {
+            const ed = _pemData?.underlyings?.[underlying]?.[expiry];
+            if (!ed) return;
+            const detailEl = document.getElementById('pem-trade-detail');
+
+            // Toggle: if already showing this expiry, hide it
+            if (detailEl.dataset.current === expiry && detailEl.style.display !== 'none') {
+                detailEl.style.display = 'none';
+                detailEl.dataset.current = '';
+                return;
+            }
+            detailEl.dataset.current = expiry;
+            detailEl.style.display = 'block';
+
+            const sorted = [...ed.trades].sort((a, b) => {
+                // Sort CE before PE, then by strike
+                if (a.opt_type !== b.opt_type) return a.opt_type === 'CE' ? -1 : 1;
+                return Number(a.strike) - Number(b.strike);
+            });
+
+            detailEl.innerHTML = `
+                <div style="background:#f8f9fa; border-radius:6px; padding:16px; border:1px solid #e9ecef;">
+                    <div style="font-weight:600; font-size:14px; color:#333; margin-bottom:12px;">
+                        Trades — ${expiry} <span style="color:#888; font-weight:400; font-size:12px;">(click row to toggle)</span>
+                    </div>
+                    <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+                        <thead>
+                            <tr style="background:#e9ecef;">
+                                <th style="padding:7px 10px; text-align:left; font-weight:600; border-bottom:1px solid #dee2e6;">Symbol</th>
+                                <th style="padding:7px 10px; text-align:center; font-weight:600; border-bottom:1px solid #dee2e6;">Type</th>
+                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Strike</th>
+                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Qty</th>
+                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Avg</th>
+                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">LTP</th>
+                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Total PnL</th>
+                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Unbooked</th>
+                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Booked</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${sorted.map(t => {
+                                const pc = t.pnl > 0 ? '#28a745' : t.pnl < 0 ? '#dc3545' : '#999';
+                                const typeBg = t.opt_type === 'CE' ? '#cce5ff' : t.opt_type === 'PE' ? '#f8d7da' : '#e2e3e5';
+                                const typeColor = t.opt_type === 'CE' ? '#004085' : t.opt_type === 'PE' ? '#721c24' : '#383d41';
+                                return `<tr onmouseover="this.style.background='#fff'" onmouseout="this.style.background=''">
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; font-family:monospace; font-size:11.5px;">${t.symbol}</td>
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:center;">
+                                        <span style="background:${typeBg};color:${typeColor};padding:2px 7px;border-radius:3px;font-size:11px;font-weight:700;">${t.opt_type||'—'}</span>
+                                    </td>
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right;">${t.strike||'—'}</td>
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right;">${t.qty}</td>
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right;">${fmtInr(t.avg_price)}</td>
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right;">${fmtInr(t.ltp)}</td>
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right; font-weight:700; color:${pc};">${fmtInr(t.pnl)}</td>
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right; color:${t.unbooked>=0?'#28a745':'#dc3545'};">${fmtInr(t.unbooked)}</td>
+                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right; color:${t.booked>=0?'#28a745':'#dc3545'};">${fmtInr(t.booked)}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>`;
+        }
+
+        window.closePnlExpiryModal = function() {
+            document.getElementById('pnl-expiry-modal').style.display = 'none';
+        };
+
+        // Close on backdrop click
+        document.getElementById('pnl-expiry-modal').addEventListener('click', function(e) {
+            if (e.target === this) closePnlExpiryModal();
+        });
+
+        function destroyPemChart() {
+            if (_pemChart) { _pemChart.destroy(); _pemChart = null; }
+        }
+
+        function fmtInr(n) {
+            if (n == null) return '—';
+            const abs = Math.abs(n);
+            return (n < 0 ? '−' : '') + '₹' + abs.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+        }
+
+        // Reset cache when navigating (page load)
+        _pemData = null;
+    })();
+    </script>
+
 {% endblock %}

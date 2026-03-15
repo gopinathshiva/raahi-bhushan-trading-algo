@@ -275,6 +275,81 @@
             }
         }
 
+        /* Watch Expiry Panel */
+        .watch-expiry-panel {
+            background: #fff;
+            padding: 18px 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #007bff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-radius: 0 4px 4px 0;
+        }
+
+        .watch-expiry-panel h3 {
+            margin: 0 0 6px 0;
+            font-size: 1em;
+            color: #333;
+        }
+
+        .watch-expiry-panel .panel-desc {
+            font-size: 0.85em;
+            color: #666;
+            margin: 0 0 14px 0;
+        }
+
+        .watch-form-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .watch-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 140px;
+        }
+
+        .watch-field label {
+            font-size: 0.78em;
+            color: #555;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .watch-field select {
+            padding: 8px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.9em;
+            background: #fafafa;
+        }
+
+        .watch-field select:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .test-notify-btn {
+            padding: 6px 12px;
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffc107;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.82em;
+            font-weight: 600;
+            margin-right: 6px;
+            white-space: nowrap;
+        }
+
+        .test-notify-btn:hover {
+            background: #ffe8a1;
+        }
+
         /* Subscriptions Tab */
         .subscription-item {
             background: #fff;
@@ -548,6 +623,27 @@
 
         <!-- Subscriptions Tab -->
         <div id="subscriptions-tab" class="tab-content">
+            <!-- Watch Expiry Panel -->
+            <div class="watch-expiry-panel">
+                <h3>Watch New Expiry</h3>
+                <p class="panel-desc">Subscribe to an expiry before any positions open. You'll get notified the moment a position is opened for this expiry.</p>
+                <div class="watch-form-row">
+                    <div class="watch-field">
+                        <label>Underlying</label>
+                        <select id="watch-underlying-select" onchange="onWatchUnderlyingChange()">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                    <div class="watch-field">
+                        <label>Expiry</label>
+                        <select id="watch-expiry-select" disabled>
+                            <option value="">Select underlying first</option>
+                        </select>
+                    </div>
+                    <button class="action-btn" onclick="addWatchExpiry()" id="watch-add-btn" disabled style="flex-shrink:0;">+ Watch</button>
+                </div>
+            </div>
+
             <div id="subscriptions-list">
                 <div class="empty-state">Loading subscriptions...</div>
             </div>
@@ -1425,11 +1521,12 @@
         }
 
         // Load Subscriptions
+        let watchUnderlyingsLoaded = false;
         async function loadSubscriptions() {
             try {
                 const response = await fetch(`/api/subscriptions?profile_slug=${PROFILE_SLUG}`);
                 const data = await response.json();
-                
+
                 if (data.success) {
                     subscriptionsData = data.subscriptions;
                     renderSubscriptions();
@@ -1440,13 +1537,17 @@
                 console.error('Error loading subscriptions:', error);
                 showToast('Error loading subscriptions', 'error');
             }
+            if (!watchUnderlyingsLoaded) {
+                watchUnderlyingsLoaded = true;
+                loadWatchUnderlyings();
+            }
         }
 
         function renderSubscriptions() {
             const container = document.getElementById('subscriptions-list');
-            
+
             if (subscriptionsData.length === 0) {
-                container.innerHTML = '<div class="empty-state">No active subscriptions. Go to your profile page to subscribe to underlyings or positions!</div>';
+                container.innerHTML = '<div class="empty-state">No active subscriptions yet. Use the panel above to watch an expiry, or go to your profile page to subscribe to underlyings or positions.</div>';
                 return;
             }
 
@@ -1455,11 +1556,14 @@
                 if (sub.subscription_type === 'underlying') {
                     details = `Underlying: <strong>${sub.underlying}</strong>`;
                 } else if (sub.subscription_type === 'expiry') {
-                    details = `${sub.underlying} - Expiry: <strong>${sub.expiry}</strong>`;
+                    details = `${sub.underlying} - Expiry: <strong>${formatExpiryDisplay(sub.expiry)}</strong>`;
                 } else if (sub.subscription_type === 'position' && sub.position_identifier) {
                     details = `Position: <strong>${sub.position_identifier.symbol}</strong> (${sub.position_identifier.product})`;
                 }
 
+                const testBtn = sub.subscription_type === 'expiry'
+                    ? `<button class="test-notify-btn" onclick="testSubscriptionNotify(${sub.id})">Test</button>`
+                    : '';
                 return `
                     <div class="subscription-item">
                         <div class="subscription-info">
@@ -1469,10 +1573,111 @@
                             </div>
                             <div class="subscription-time">Subscribed on ${formatTime(sub.created_at)}</div>
                         </div>
-                        <button class="unsubscribe-btn" onclick="unsubscribe(${sub.id})">Unsubscribe</button>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            ${testBtn}
+                            <button class="unsubscribe-btn" onclick="unsubscribe(${sub.id})">Unsubscribe</button>
+                        </div>
                     </div>
                 `;
             }).join('');
+        }
+
+        function formatExpiryDisplay(expiry) {
+            if (!expiry) return expiry;
+            const d = new Date(expiry + 'T00:00:00');
+            return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
+        }
+
+        async function loadWatchUnderlyings() {
+            try {
+                const res = await fetch('/api/master_contract/watch_underlyings');
+                const data = await res.json();
+                const select = document.getElementById('watch-underlying-select');
+                if (data.success && data.underlyings.length > 0) {
+                    select.innerHTML = '<option value="">— Select Underlying —</option>' +
+                        data.underlyings.map(u => `<option value="${u}">${u}</option>`).join('');
+                } else {
+                    select.innerHTML = '<option value="">No data — download master contract first</option>';
+                }
+            } catch (e) {
+                console.error('Error loading underlyings:', e);
+            }
+        }
+
+        async function onWatchUnderlyingChange() {
+            const underlying = document.getElementById('watch-underlying-select').value;
+            const expirySelect = document.getElementById('watch-expiry-select');
+            const addBtn = document.getElementById('watch-add-btn');
+
+            expirySelect.innerHTML = '<option value="">Loading...</option>';
+            expirySelect.disabled = true;
+            addBtn.disabled = true;
+
+            if (!underlying) {
+                expirySelect.innerHTML = '<option value="">Select underlying first</option>';
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/master_contract/watch_expiries?underlying=${encodeURIComponent(underlying)}`);
+                const data = await res.json();
+                if (data.success && data.expiries.length > 0) {
+                    expirySelect.innerHTML = '<option value="">— Select Expiry —</option>' +
+                        data.expiries.map(e => `<option value="${e}">${formatExpiryDisplay(e)}</option>`).join('');
+                    expirySelect.disabled = false;
+                    expirySelect.onchange = () => { addBtn.disabled = !expirySelect.value; };
+                } else {
+                    expirySelect.innerHTML = '<option value="">No expiries found</option>';
+                }
+            } catch (e) {
+                console.error('Error loading expiries:', e);
+                expirySelect.innerHTML = '<option value="">Error loading expiries</option>';
+            }
+        }
+
+        async function addWatchExpiry() {
+            const underlying = document.getElementById('watch-underlying-select').value;
+            const expiry = document.getElementById('watch-expiry-select').value;
+            if (!underlying || !expiry) return;
+
+            try {
+                const res = await fetch('/api/subscriptions/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profile_slug: PROFILE_SLUG, subscription_type: 'expiry', underlying, expiry })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Now watching ${underlying} ${formatExpiryDisplay(expiry)}`, 'success');
+                    document.getElementById('watch-expiry-select').value = '';
+                    document.getElementById('watch-add-btn').disabled = true;
+                    loadSubscriptions();
+                } else {
+                    showToast(data.message || 'Already watching this expiry', 'error');
+                }
+            } catch (e) {
+                console.error('Error adding watch:', e);
+                showToast('Error adding watch', 'error');
+            }
+        }
+
+        async function testSubscriptionNotify(subscriptionId) {
+            try {
+                const res = await fetch('/api/subscriptions/test_notify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subscription_id: subscriptionId })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message, 'success');
+                } else {
+                    showToast(data.message || data.error || 'Test failed', 'error');
+                }
+            } catch (e) {
+                console.error('Error running test notification:', e);
+                showToast('Error running test notification', 'error');
+            }
         }
 
         async function unsubscribe(subscriptionId) {

@@ -2723,6 +2723,100 @@ def subscribe():
         print(f"Error creating subscription: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/subscriptions/test_notify', methods=['POST'])
+@login_required
+def test_subscription_notify():
+    """Fire a synthetic new_position event through the subscription to verify it works"""
+    try:
+        from scraper import generate_notifications_for_changes
+
+        data = request.get_json()
+        subscription_id = data.get('subscription_id')
+        if not subscription_id:
+            return jsonify({'error': 'subscription_id is required'}), 400
+
+        conn = get_db()
+        c = conn.cursor()
+
+        sub = c.execute("""
+            SELECT s.id, s.profile_id, s.subscription_type, s.underlying, s.expiry
+            FROM subscriptions s WHERE s.id = ?
+        """, (subscription_id,)).fetchone()
+
+        if not sub:
+            conn.close()
+            return jsonify({'error': 'Subscription not found'}), 404
+
+        if sub['subscription_type'] != 'expiry':
+            conn.close()
+            return jsonify({'error': 'Test notification is only supported for expiry subscriptions'}), 400
+
+        underlying = sub['underlying']
+        expiry = sub['expiry']
+        profile_id = sub['profile_id']
+
+        # Fabricate before (empty) and after (synthetic new position) snapshots
+        before_data = {'data': []}
+        after_data = {
+            'data': [{
+                'trading_symbol': underlying,
+                'trades': [{
+                    'trading_symbol': f'{underlying}TEST0000CE',
+                    'quantity': 50,
+                    'average_price': 100.0,
+                    'last_price': 100.0,
+                    'unbooked_pnl': 0.0,
+                    'booked_profit_loss': 0.0,
+                    'product': 'MIS',
+                    'instrument_info': {
+                        'expiry': expiry,
+                        'strike': 0.0,
+                        'instrument_type': 'CE'
+                    }
+                }]
+            }]
+        }
+
+        max_id_row = c.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM notifications WHERE profile_id = ?", (profile_id,)
+        ).fetchone()
+        max_id_before = max_id_row[0]
+
+        generate_notifications_for_changes(conn, profile_id, before_data, after_data)
+
+        # Prefix message with [TEST] so the user can tell it apart
+        new_notifs = c.execute(
+            "SELECT id, notification_data FROM notifications WHERE profile_id = ? AND id > ?",
+            (profile_id, max_id_before)
+        ).fetchall()
+
+        for notif in new_notifs:
+            c.execute("UPDATE notifications SET message = '[TEST] ' || message WHERE id = ?", (notif['id'],))
+            try:
+                nd = json.loads(notif['notification_data']) if notif['notification_data'] else {}
+                nd['is_test'] = True
+                c.execute("UPDATE notifications SET notification_data = ? WHERE id = ?",
+                          (json.dumps(nd), notif['id']))
+            except Exception:
+                pass
+
+        conn.commit()
+        conn.close()
+
+        if new_notifs:
+            return jsonify({'success': True,
+                            'message': f'Test notification created — subscription for {underlying} {expiry} is working correctly.',
+                            'count': len(new_notifs)})
+        else:
+            return jsonify({'success': False,
+                            'message': 'No notification generated. The subscription did not match the test event — check your subscription details.'})
+
+    except Exception as e:
+        import traceback
+        print(f"Error creating test notification: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/subscriptions/unsubscribe', methods=['POST'])
 @login_required
 def unsubscribe():
@@ -3312,6 +3406,71 @@ def api_master_contract_strike_info():
         'instrument_type': instrument['instrument_type']
     })
 
+@app.route('/api/master_contract/watch_underlyings')
+@login_required
+def api_watch_underlyings():
+    """Get distinct underlying symbols available in master_contract for NFO futures"""
+    import re
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        rows = c.execute("""
+            SELECT DISTINCT trading_symbol FROM master_contract
+            WHERE exchange = 'NFO' AND instrument_type = 'FUT'
+            ORDER BY trading_symbol
+        """).fetchall()
+        conn.close()
+        underlyings = set()
+        for row in rows:
+            m = re.match(r'^([A-Z0-9&-]+)\d{2}[A-Z]{3}FUT$', row['trading_symbol'])
+            if m:
+                underlyings.add(m.group(1))
+        return jsonify({'success': True, 'underlyings': sorted(underlyings)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/master_contract/watch_expiries')
+@login_required
+def api_watch_expiries():
+    """Get distinct future expiry dates for a given underlying from master_contract"""
+    underlying = (request.args.get('underlying') or '').strip().upper()
+    if not underlying:
+        return jsonify({'error': 'underlying is required'}), 400
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        # Resolve the master_contract `name` for this underlying via its FUT symbol
+        fut_row = c.execute("""
+            SELECT name FROM master_contract
+            WHERE exchange = 'NFO' AND instrument_type = 'FUT'
+            AND trading_symbol LIKE ?
+            ORDER BY expiry ASC
+            LIMIT 1
+        """, (underlying + '%',)).fetchone()
+        if fut_row:
+            rows = c.execute("""
+                SELECT DISTINCT expiry FROM master_contract
+                WHERE name = ? AND exchange = 'NFO'
+                AND instrument_type IN ('CE', 'PE')
+                AND expiry > date('now')
+                ORDER BY expiry ASC
+            """, (fut_row['name'],)).fetchall()
+        else:
+            rows = c.execute("""
+                SELECT DISTINCT expiry FROM master_contract
+                WHERE trading_symbol LIKE ? AND exchange = 'NFO'
+                AND instrument_type IN ('CE', 'PE')
+                AND expiry > date('now')
+                ORDER BY expiry ASC
+            """, (underlying + '%',)).fetchall()
+        conn.close()
+        expiries = [row['expiry'] for row in rows if row['expiry']]
+        return jsonify({'success': True, 'expiries': expiries})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ==================== NOTIFICATION API ROUTES ====================
 
 @app.route('/api/notifications', methods=['GET'])
@@ -3863,6 +4022,337 @@ def api_delete_profile(profile_id):
         'success': True,
         'message': message
     })
+
+
+@app.route('/api/profile/<slug>/pnl_history')
+@login_required
+def api_profile_pnl_history(slug):
+    """Return daily PnL for a profile over a date range."""
+    from_date = request.args.get('from')
+    to_date   = request.args.get('to')
+
+    today_str = now_ist().strftime('%Y-%m-%d')
+
+    if not to_date:
+        to_date = today_str
+    if not from_date:
+        # default last 30 days
+        from_dt = now_ist() - timedelta(days=29)
+        from_date = from_dt.strftime('%Y-%m-%d')
+
+    try:
+        from_dt = datetime.strptime(from_date, '%Y-%m-%d').date()
+        to_dt   = datetime.strptime(to_date,   '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    if from_dt > to_dt:
+        return jsonify({'error': 'from date must be <= to date'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    # Build list of all dates in range
+    days = []
+    cur = from_dt
+    while cur <= to_dt:
+        days.append(cur.strftime('%Y-%m-%d'))
+        cur += timedelta(days=1)
+
+    result = []
+    cumulative = 0.0
+    for d in days:
+        metrics = get_daily_pnl_metrics(c, profile['id'], d)
+        daily_pnl = round(metrics['todays_pnl'], 2)
+        cumulative = round(cumulative + daily_pnl, 2)
+        result.append({
+            'date':       d,
+            'daily_pnl':  daily_pnl,
+            'cumulative': cumulative,
+        })
+
+    conn.close()
+    return jsonify({'success': True, 'data': result, 'slug': slug})
+
+
+@app.route('/api/profile/<slug>/pnl_snapshots')
+@login_required
+def api_profile_pnl_snapshots(slug):
+    """Return PnL at each snapshot, optionally resampled by interval.
+
+    Query params:
+        from  - YYYY-MM-DD (default: today)
+        to    - YYYY-MM-DD (default: today)
+        interval - raw | 5m | 15m | 30m | 1h | 4h | 1d (default: raw)
+    """
+    from_date = request.args.get('from', now_ist().strftime('%Y-%m-%d'))
+    to_date   = request.args.get('to',   now_ist().strftime('%Y-%m-%d'))
+    interval  = request.args.get('interval', 'raw')
+
+    interval_minutes = {
+        'raw': None, '5m': 5, '15m': 15, '30m': 30,
+        '1h': 60,    '4h': 240, '1d': 1440
+    }
+    if interval not in interval_minutes:
+        return jsonify({'error': f'Invalid interval. Choose from: {", ".join(interval_minutes)}'}), 400
+
+    try:
+        from_dt = datetime.strptime(from_date, '%Y-%m-%d')
+        to_dt   = datetime.strptime(to_date,   '%Y-%m-%d')
+        to_dt   = to_dt.replace(hour=23, minute=59, second=59)
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    if from_dt > to_dt:
+        return jsonify({'error': 'from date must be <= to date'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    # Fetch all snapshots in range using date() to handle ISO tz strings correctly
+    snapshots = c.execute("""
+        SELECT id, timestamp FROM snapshots
+        WHERE profile_id = ? AND date(timestamp) >= ? AND date(timestamp) <= ?
+        ORDER BY timestamp ASC
+    """, (profile['id'], from_date, to_date)).fetchall()
+
+    def parse_snapshot_ts(ts_str):
+        """Parse ISO timestamp stored with or without timezone, return naive datetime."""
+        ts = ts_str[:19].replace('T', ' ')   # "2024-01-15T09:30:00+05:30" → "2024-01-15 09:30:00"
+        return datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+
+    # Compute PnL for each snapshot
+    raw_points = []
+    for snap in snapshots:
+        total_pnl, _ = calculate_snapshot_pnl(c, snap['id'])
+        raw_points.append({
+            'ts':  snap['timestamp'],
+            'pnl': round(total_pnl, 2)
+        })
+
+    conn.close()
+
+    if not raw_points:
+        return jsonify({'success': True, 'data': [], 'slug': slug, 'interval': interval})
+
+    # Resample if requested
+    bucket_mins = interval_minutes[interval]
+    if bucket_mins is None:
+        # Return raw points with normalised timestamp display
+        result = []
+        for p in raw_points:
+            try:
+                dt = parse_snapshot_ts(p['ts'])
+                result.append({'timestamp': dt.strftime('%Y-%m-%d %H:%M'), 'pnl': p['pnl']})
+            except Exception:
+                result.append({'timestamp': p['ts'][:16], 'pnl': p['pnl']})
+    else:
+        # Group into time buckets; take last value in each bucket
+        from collections import OrderedDict
+        buckets = OrderedDict()
+        for p in raw_points:
+            try:
+                dt = parse_snapshot_ts(p['ts'])
+            except Exception:
+                continue
+            # Floor to bucket boundary
+            total_mins = dt.hour * 60 + dt.minute
+            bucket_start_mins = (total_mins // bucket_mins) * bucket_mins
+            bucket_dt = dt.replace(
+                hour=bucket_start_mins // 60,
+                minute=bucket_start_mins % 60,
+                second=0
+            )
+            bucket_key = bucket_dt.strftime('%Y-%m-%d %H:%M')
+            buckets[bucket_key] = p['pnl']  # last value wins
+
+        result = [{'timestamp': k, 'pnl': v} for k, v in buckets.items()]
+
+    return jsonify({'success': True, 'data': result, 'slug': slug, 'interval': interval,
+                    'count': len(result)})
+
+
+@app.route('/api/profile/<slug>/pnl_breakdown')
+@login_required
+def api_profile_pnl_breakdown(slug):
+    """Return PnL broken down by underlying or expiry.
+
+    Query params:
+        from      - YYYY-MM-DD
+        to        - YYYY-MM-DD
+        group_by  - underlying | expiry  (default: underlying)
+    Returns one entry per day with a dict of group → pnl.
+    """
+    from_date = request.args.get('from', now_ist().strftime('%Y-%m-%d'))
+    to_date   = request.args.get('to',   now_ist().strftime('%Y-%m-%d'))
+    group_by  = request.args.get('group_by', 'underlying')
+
+    if group_by not in ('underlying', 'expiry'):
+        return jsonify({'error': 'group_by must be "underlying" or "expiry"'}), 400
+
+    try:
+        from_dt = datetime.strptime(from_date, '%Y-%m-%d').date()
+        to_dt   = datetime.strptime(to_date,   '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({'error': 'Invalid date format, use YYYY-MM-DD'}), 400
+
+    if from_dt > to_dt:
+        return jsonify({'error': 'from date must be <= to date'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    # Collect all unique group keys across the whole range (for consistent chart columns)
+    all_keys = set()
+    result = []
+
+    cur = from_dt
+    while cur <= to_dt:
+        date_str = cur.strftime('%Y-%m-%d')
+
+        # Get the last snapshot for this day
+        snap = c.execute("""
+            SELECT id, raw_data FROM snapshots
+            WHERE profile_id = ? AND date(timestamp) = ?
+            ORDER BY timestamp DESC LIMIT 1
+        """, (profile['id'], date_str)).fetchone()
+
+        groups = {}
+        if snap:
+            raw = json.loads(snap['raw_data'])
+            for item in raw.get('data', []):
+                underlying = item.get('trading_symbol') or item.get('underlying', 'UNKNOWN')
+                for trade in item.get('trades', []):
+                    pnl = (trade.get('unbooked_pnl', 0) + trade.get('booked_profit_loss', 0))
+                    if group_by == 'underlying':
+                        key = underlying
+                    else:
+                        key = (trade.get('instrument_info') or {}).get('expiry', 'N/A')
+                    groups[key] = round(groups.get(key, 0) + pnl, 2)
+
+        all_keys.update(groups.keys())
+        result.append({'date': date_str, 'groups': groups})
+        cur += timedelta(days=1)
+
+    conn.close()
+    return jsonify({
+        'success':  True,
+        'data':     result,
+        'keys':     sorted(all_keys),
+        'group_by': group_by,
+        'slug':     slug
+    })
+
+
+@app.route('/api/profile/<slug>/pnl_by_expiry/<date>')
+@login_required
+def api_pnl_by_expiry(slug, date):
+    """Return PnL broken down by expiry for each underlying on a given date.
+
+    Uses the last snapshot of that date.
+    Returns:
+      {
+        underlyings: {
+          "NIFTY": {
+            "2026-03-27": { pnl, unbooked_pnl, booked_pnl, trades: [{symbol, pnl, qty, opt_type, strike}] },
+            ...
+          }
+        },
+        snapshot_time: "HH:MM"
+      }
+    """
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    snap = c.execute("""
+        SELECT id, timestamp, raw_data FROM snapshots
+        WHERE profile_id = ? AND date(timestamp) = ?
+        ORDER BY timestamp DESC LIMIT 1
+    """, (profile['id'], date)).fetchone()
+
+    conn.close()
+
+    if not snap:
+        return jsonify({'error': 'No snapshot found for this date'}), 404
+
+    raw = json.loads(snap['raw_data'])
+    result = {}
+
+    for item in raw.get('data', []):
+        underlying = item.get('trading_symbol') or item.get('underlying', 'UNKNOWN')
+        result.setdefault(underlying, {})
+
+        for trade in item.get('trades', []):
+            u_pnl  = trade.get('unbooked_pnl', 0) or 0
+            b_pnl  = trade.get('booked_profit_loss', 0) or 0
+            pnl    = u_pnl + b_pnl
+            info   = trade.get('instrument_info') or {}
+            expiry = info.get('expiry') or 'N/A'
+
+            if expiry not in result[underlying]:
+                result[underlying][expiry] = {
+                    'pnl': 0, 'unbooked_pnl': 0, 'booked_pnl': 0, 'trades': []
+                }
+
+            result[underlying][expiry]['pnl']          = round(result[underlying][expiry]['pnl'] + pnl, 2)
+            result[underlying][expiry]['unbooked_pnl']  = round(result[underlying][expiry]['unbooked_pnl'] + u_pnl, 2)
+            result[underlying][expiry]['booked_pnl']    = round(result[underlying][expiry]['booked_pnl'] + b_pnl, 2)
+            result[underlying][expiry]['trades'].append({
+                'symbol':   trade.get('trading_symbol', ''),
+                'qty':      trade.get('quantity', 0),
+                'opt_type': info.get('instrument_type', ''),
+                'strike':   info.get('strike', ''),
+                'pnl':      round(pnl, 2),
+                'unbooked': round(u_pnl, 2),
+                'booked':   round(b_pnl, 2),
+                'avg_price': trade.get('average_price', 0),
+                'ltp':      trade.get('last_price', 0),
+            })
+
+    # Parse snapshot timestamp to display time
+    ts_raw = snap['timestamp']
+    try:
+        ts_clean = ts_raw[:19].replace('T', ' ')
+        snap_dt  = datetime.strptime(ts_clean, '%Y-%m-%d %H:%M:%S')
+        snap_time = snap_dt.strftime('%H:%M:%S')
+    except Exception:
+        snap_time = ts_raw
+
+    return jsonify({'success': True, 'underlyings': result, 'snapshot_time': snap_time, 'date': date})
+
+
+@app.route('/profile/<slug>')
+@login_required
+def profile_overview(slug):
+    """Profile overview page with PnL curve."""
+    conn = get_db()
+    c = conn.cursor()
+    profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return "Profile not found", 404
+    conn.close()
+    return render_template('profile_overview.html', slug=slug, profile=profile)
 
 
 # ============================================================================

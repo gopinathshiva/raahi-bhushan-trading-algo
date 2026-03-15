@@ -1,0 +1,730 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ slug }} — PnL Curve — Sensibull Tracker{% endblock %}
+
+{% block breadcrumb %}
+<li><a href="/manage-profiles">Profiles</a></li>
+<li><span class="current">{{ slug }}</span></li>
+{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+    body { background: #f5f5f5; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+    .section {
+        background: white; padding: 24px; border-radius: 8px;
+        margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .section h2 { color: #333; font-size: 18px; margin: 0 0 16px; }
+
+    /* Mode toggle */
+    .mode-toggle {
+        display: flex; gap: 0; margin-bottom: 18px;
+        border: 1px solid #dee2e6; border-radius: 6px; overflow: hidden;
+        width: fit-content;
+    }
+    .mode-btn {
+        padding: 8px 22px; border: none; background: white;
+        font-size: 14px; font-weight: 500; cursor: pointer; color: #555;
+        transition: all 0.15s;
+    }
+    .mode-btn:not(:last-child) { border-right: 1px solid #dee2e6; }
+    .mode-btn.active { background: #007bff; color: white; }
+
+    /* Controls */
+    .controls { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 16px; }
+    .ctrl-group { display: flex; flex-direction: column; gap: 4px; }
+    .ctrl-group label { font-size: 12px; color: #666; font-weight: 500; display: flex; align-items: center; gap: 4px; }
+    .ctrl-group input[type="date"], .ctrl-group select {
+        padding: 7px 10px; border: 1px solid #ddd; border-radius: 4px;
+        font-size: 13px; color: #333; background: white;
+    }
+    .ctrl-group input[type="date"]:focus, .ctrl-group select:focus { outline: none; border-color: #007bff; }
+
+    .btn { padding: 7px 18px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
+    .btn-primary { background: #007bff; color: white; }
+    .btn-primary:hover { background: #0056b3; }
+    .btn-primary:disabled { background: #aaa; cursor: not-allowed; }
+
+    .quick-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .quick-btn {
+        padding: 5px 12px; border: 1px solid #dee2e6; background: white;
+        border-radius: 4px; font-size: 12px; cursor: pointer; color: #555; transition: all 0.15s;
+    }
+    .quick-btn:hover, .quick-btn.active { background: #007bff; color: white; border-color: #007bff; }
+
+    /* Tooltip */
+    .info-icon {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 15px; height: 15px; border-radius: 50%; background: #adb5bd;
+        color: white; font-size: 10px; font-weight: bold; cursor: pointer;
+        position: relative; user-select: none; flex-shrink: 0;
+    }
+    .tooltip-popup {
+        display: none; position: absolute; left: 20px; top: -4px;
+        background: #fff; border: 1px solid #dee2e6; border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 10px 14px;
+        width: 290px; font-size: 12px; color: #444; line-height: 1.5;
+        z-index: 200; font-weight: 400;
+    }
+    .tooltip-popup.visible { display: block; }
+    .tooltip-popup strong { color: #333; }
+
+    /* Stat cards */
+    .stat-cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
+    .stat-card {
+        flex: 1; min-width: 130px; padding: 14px 16px; border-radius: 6px;
+        background: #f8f9fa; border: 1px solid #e9ecef;
+    }
+    .stat-card .label { font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .stat-card .value { font-size: 20px; font-weight: 700; color: #333; }
+    .stat-card .value.pos { color: #28a745; }
+    .stat-card .value.neg { color: #dc3545; }
+
+    /* Chart type toggle */
+    .chart-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .toggle-btn {
+        padding: 5px 14px; border: 1px solid #dee2e6; background: white;
+        border-radius: 20px; font-size: 13px; cursor: pointer; color: #555; transition: all 0.15s;
+    }
+    .toggle-btn.active { background: #007bff; color: white; border-color: #007bff; }
+
+    .chart-wrap { position: relative; height: 340px; }
+
+    .status-msg { font-size: 13px; color: #666; margin-bottom: 8px; min-height: 18px; }
+    .status-msg.err { color: #dc3545; }
+
+    /* Breakdown section tabs */
+    .breakdown-tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #dee2e6; }
+    .breakdown-tab {
+        padding: 8px 20px; border: none; background: none; cursor: pointer;
+        font-size: 14px; font-weight: 500; color: #666;
+        border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.15s;
+    }
+    .breakdown-tab:hover { color: #007bff; }
+    .breakdown-tab.active { color: #007bff; border-bottom-color: #007bff; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; margin-top: 20px; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table th {
+        background: #f8f9fa; padding: 9px 12px; text-align: left;
+        font-weight: 600; color: #333; border-bottom: 2px solid #dee2e6;
+    }
+    .data-table td { padding: 8px 12px; border-bottom: 1px solid #dee2e6; }
+    .data-table tr:hover { background: #fafafa; }
+    .pos { color: #28a745; font-weight: 600; }
+    .neg { color: #dc3545; font-weight: 600; }
+    .zero { color: #999; }
+
+    /* Breakdown chart */
+    .bkd-chart-wrap { position: relative; height: 320px; margin-bottom: 8px; }
+
+    /* Color palette for stacked bars */
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+
+  <!-- ── Main PnL curve section ── -->
+  <div class="section">
+    <h2>📈 PnL Curve — <span style="color:#007bff;">{{ slug }}</span></h2>
+
+    <!-- Daily / Intraday mode toggle -->
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="modeDaily"    onclick="setMode('daily')">Daily</button>
+      <button class="mode-btn"        id="modeIntraday" onclick="setMode('intraday')">Intraday / Snapshot</button>
+    </div>
+
+    <!-- Daily controls -->
+    <div id="dailyControls">
+      <div class="quick-btns" id="dailyQuickBtns">
+        <button class="quick-btn"        onclick="setDailyQuick(7,  this)">7 D</button>
+        <button class="quick-btn active" onclick="setDailyQuick(30, this)">30 D</button>
+        <button class="quick-btn"        onclick="setDailyQuick(60, this)">60 D</button>
+        <button class="quick-btn"        onclick="setDailyQuick(90, this)">90 D</button>
+      </div>
+      <div class="controls">
+        <div class="ctrl-group"><label>From</label><input type="date" id="dailyFrom" /></div>
+        <div class="ctrl-group"><label>To</label><input type="date" id="dailyTo" /></div>
+        <button class="btn btn-primary" id="dailyFetchBtn" onclick="fetchDaily()">Load</button>
+      </div>
+    </div>
+
+    <!-- Intraday controls -->
+    <div id="intradayControls" style="display:none;">
+      <div class="quick-btns" id="intradayQuickBtns">
+        <button class="quick-btn active" onclick="setIntradayQuick(0, this)">Today</button>
+        <button class="quick-btn"        onclick="setIntradayQuick(1, this)">Yesterday</button>
+        <button class="quick-btn"        onclick="setIntradayQuick(7, this)">Last 7 D</button>
+      </div>
+      <div class="controls">
+        <div class="ctrl-group"><label>From</label><input type="date" id="intradayFrom" /></div>
+        <div class="ctrl-group"><label>To</label><input type="date" id="intradayTo" /></div>
+        <div class="ctrl-group">
+          <label>Interval</label>
+          <select id="intervalSelect">
+            <option value="raw">Raw (every snapshot)</option>
+            <option value="5m" selected>5 min</option>
+            <option value="15m">15 min</option>
+            <option value="30m">30 min</option>
+            <option value="1h">1 hour</option>
+            <option value="4h">4 hour</option>
+            <option value="1d">1 day</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="intradayFetchBtn" onclick="fetchIntraday()">Load</button>
+      </div>
+    </div>
+
+    <div class="status-msg" id="statusMsg"></div>
+
+    <!-- Stat cards -->
+    <div class="stat-cards" id="statCards" style="display:none;">
+      <div class="stat-card">
+        <div class="label" style="display:flex;align-items:center;gap:4px;">
+          Total PnL
+          <span class="info-icon" id="totalPnlInfo">?
+            <div class="tooltip-popup" id="totalPnlTip">
+              <strong>Total PnL</strong> is the sum of daily P&amp;L across the selected range.
+              Each day's P&amp;L = (portfolio value at day's last snapshot) − (carry‑over unbooked value from previous day).
+              It includes both <strong>realized</strong> gains/losses from trades closed that day and
+              changes in <strong>unrealized</strong> value of open positions.
+            </div>
+          </span>
+        </div>
+        <div class="value" id="statTotal">—</div>
+      </div>
+      <div class="stat-card" id="bestDayCard">
+        <div class="label">Best Day</div>
+        <div class="value pos" id="statBest">—</div>
+      </div>
+      <div class="stat-card" id="worstDayCard">
+        <div class="label">Worst Day</div>
+        <div class="value neg" id="statWorst">—</div>
+      </div>
+      <div class="stat-card" id="profDaysCard">
+        <div class="label" style="display:flex;align-items:center;gap:4px;">
+          Profitable Days
+          <span class="info-icon" id="profDaysInfo">?
+            <div class="tooltip-popup" id="profDaysTip">
+              Days where the daily P&amp;L was <strong>positive</strong> (portfolio value increased relative to previous day's close).
+              Days with zero P&amp;L (no position changes / no snapshot data) are excluded from the count.
+            </div>
+          </span>
+        </div>
+        <div class="value" id="statProfDays">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label" id="activeLabel">Active Days</div>
+        <div class="value" id="statActiveDays">—</div>
+      </div>
+    </div>
+
+    <!-- Chart type toggle (cumulative vs daily/raw) -->
+    <div class="chart-meta" id="chartMeta" style="display:none;">
+      <button class="toggle-btn active" id="btnCumulative" onclick="switchChart('cumulative')">Cumulative</button>
+      <button class="toggle-btn"        id="btnRaw"        onclick="switchChart('raw')">Daily</button>
+    </div>
+
+    <div class="chart-wrap" id="chartWrap" style="display:none;">
+      <canvas id="pnlChart"></canvas>
+    </div>
+  </div>
+
+  <!-- ── Breakdown section ── -->
+  <div class="section" id="breakdownSection" style="display:none;">
+    <h2>🔍 Breakdown <span style="font-size:13px;color:#888;font-weight:400;" id="breakdownRange"></span></h2>
+
+    <div class="breakdown-tabs">
+      <button class="breakdown-tab active" id="tabUnderlying" onclick="setBreakdownTab('underlying')">By Underlying</button>
+      <button class="breakdown-tab"        id="tabExpiry"     onclick="setBreakdownTab('expiry')">By Expiry</button>
+    </div>
+
+    <div class="status-msg" id="bkdStatus"></div>
+
+    <div class="bkd-chart-wrap"><canvas id="bkdChart"></canvas></div>
+
+    <div class="table-wrap">
+      <table class="data-table" id="bkdTable">
+        <thead><tr id="bkdTableHead"></tr></thead>
+        <tbody id="bkdTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Daily breakdown table ── -->
+  <div class="section" id="tableSection" style="display:none;">
+    <h2>📋 Breakdown</h2>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr id="tableHead"></tr></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SLUG = '{{ slug }}';
+let currentMode   = 'daily';
+let chartMode     = 'cumulative';
+let chartInst     = null;
+let bkdChartInst  = null;
+let allData       = [];
+let breakdownTab  = 'underlying';
+
+// ── Tooltip wiring ────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.info-icon').forEach(icon => {
+        const popup = icon.querySelector('.tooltip-popup');
+        if (!popup) return;
+        icon.addEventListener('click', e => {
+            e.stopPropagation();
+            document.querySelectorAll('.tooltip-popup.visible').forEach(p => {
+                if (p !== popup) p.classList.remove('visible');
+            });
+            popup.classList.toggle('visible');
+        });
+    });
+    document.addEventListener('click', () => {
+        document.querySelectorAll('.tooltip-popup.visible').forEach(p => p.classList.remove('visible'));
+    });
+});
+
+// ── Date helpers ──────────────────────────────────────────────────────
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function daysAgoStr(n) {
+    const d = new Date(); d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+}
+
+// Initialise default dates
+document.getElementById('dailyTo').value      = todayStr();
+document.getElementById('dailyFrom').value    = daysAgoStr(29);
+document.getElementById('intradayTo').value   = todayStr();
+document.getElementById('intradayFrom').value = todayStr();
+
+// ── Mode switching ────────────────────────────────────────────────────
+function setMode(mode) {
+    currentMode = mode;
+    document.getElementById('modeDaily').classList.toggle('active',    mode === 'daily');
+    document.getElementById('modeIntraday').classList.toggle('active', mode === 'intraday');
+    document.getElementById('dailyControls').style.display    = mode === 'daily'    ? '' : 'none';
+    document.getElementById('intradayControls').style.display = mode === 'intraday' ? '' : 'none';
+
+    const bestCard  = document.getElementById('bestDayCard');
+    const worstCard = document.getElementById('worstDayCard');
+    const profCard  = document.getElementById('profDaysCard');
+
+    if (mode === 'intraday') {
+        bestCard.querySelector('.label').textContent  = 'Peak PnL';
+        worstCard.querySelector('.label').textContent = 'Trough PnL';
+        profCard.style.display = 'none';
+        document.getElementById('activeLabel').textContent = 'Data Points';
+    } else {
+        bestCard.querySelector('.label').innerHTML =
+            'Best Day';
+        worstCard.querySelector('.label').textContent = 'Worst Day';
+        profCard.style.display = '';
+        document.getElementById('activeLabel').textContent = 'Active Days';
+    }
+    hideResults();
+}
+
+function hideResults() {
+    document.getElementById('statCards').style.display       = 'none';
+    document.getElementById('chartMeta').style.display      = 'none';
+    document.getElementById('chartWrap').style.display      = 'none';
+    document.getElementById('tableSection').style.display   = 'none';
+    document.getElementById('breakdownSection').style.display = 'none';
+    setStatus('');
+}
+
+// ── Quick presets ─────────────────────────────────────────────────────
+function setDailyQuick(days, btn) {
+    document.getElementById('dailyFrom').value = daysAgoStr(days - 1);
+    document.getElementById('dailyTo').value   = todayStr();
+    document.querySelectorAll('#dailyQuickBtns .quick-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    fetchDaily();
+}
+function setIntradayQuick(daysBack, btn) {
+    if (daysBack === 0) {
+        document.getElementById('intradayFrom').value = todayStr();
+        document.getElementById('intradayTo').value   = todayStr();
+    } else if (daysBack === 1) {
+        document.getElementById('intradayFrom').value = daysAgoStr(1);
+        document.getElementById('intradayTo').value   = daysAgoStr(1);
+    } else {
+        document.getElementById('intradayFrom').value = daysAgoStr(daysBack);
+        document.getElementById('intradayTo').value   = todayStr();
+    }
+    document.querySelectorAll('#intradayQuickBtns .quick-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    fetchIntraday();
+}
+
+// ── Fetch: Daily ──────────────────────────────────────────────────────
+async function fetchDaily() {
+    const from = document.getElementById('dailyFrom').value;
+    const to   = document.getElementById('dailyTo').value;
+    if (!from || !to) { setStatus('Select both dates.', true); return; }
+    const btn = document.getElementById('dailyFetchBtn');
+    btn.disabled = true; setStatus('Loading…');
+    try {
+        const r    = await fetch(`/api/profile/${SLUG}/pnl_history?from=${from}&to=${to}`);
+        const json = await r.json();
+        if (!json.success) throw new Error(json.error || 'API error');
+        allData = json.data;
+        renderDailyResults(allData);
+        setStatus('');
+        loadBreakdown(from, to);
+    } catch(e) { setStatus('Error: ' + e.message, true); }
+    finally    { btn.disabled = false; }
+}
+
+// ── Fetch: Intraday ───────────────────────────────────────────────────
+async function fetchIntraday() {
+    const from     = document.getElementById('intradayFrom').value;
+    const to       = document.getElementById('intradayTo').value;
+    const interval = document.getElementById('intervalSelect').value;
+    if (!from || !to) { setStatus('Select both dates.', true); return; }
+    const btn = document.getElementById('intradayFetchBtn');
+    btn.disabled = true; setStatus('Loading…');
+    try {
+        const r    = await fetch(`/api/profile/${SLUG}/pnl_snapshots?from=${from}&to=${to}&interval=${interval}`);
+        const json = await r.json();
+        if (!json.success) throw new Error(json.error || 'API error');
+        allData = json.data;
+        if (!allData.length) { setStatus('No snapshot data found for this range.'); return; }
+        renderIntradayResults(allData);
+        setStatus('');
+    } catch(e) { setStatus('Error: ' + e.message, true); }
+    finally    { btn.disabled = false; }
+}
+
+// ── Render: Daily ─────────────────────────────────────────────────────
+function renderDailyResults(data) {
+    if (!data.length) { setStatus('No data for this date range.'); return; }
+    const actives  = data.filter(d => d.daily_pnl !== 0);
+    const total    = data[data.length - 1].cumulative;
+    const best     = actives.length ? Math.max(...actives.map(d => d.daily_pnl)) : 0;
+    const worst    = actives.length ? Math.min(...actives.map(d => d.daily_pnl)) : 0;
+    const profDays = actives.filter(d => d.daily_pnl > 0).length;
+
+    setStatCards(total, best, worst, `${profDays} / ${actives.length}`, actives.length);
+    showResultsUI();
+    document.getElementById('btnRaw').textContent = 'Daily';
+    document.getElementById('btnCumulative').textContent = 'Cumulative';
+    chartMode = 'cumulative';
+    document.getElementById('btnCumulative').classList.add('active');
+    document.getElementById('btnRaw').classList.remove('active');
+    buildDailyChart(data, chartMode);
+
+    document.getElementById('tableHead').innerHTML =
+        `<th>Date</th>
+         <th>Daily PnL <span class="info-icon" style="vertical-align:middle;">?<div class="tooltip-popup">
+           <strong>Daily PnL</strong> = portfolio value at day's last snapshot<br>
+           minus the carry-over unbooked value from the previous day.<br><br>
+           Includes <strong>realized</strong> P&amp;L from trades closed today
+           and the <strong>change in unrealized</strong> P&amp;L on open positions.
+         </div></span></th>
+         <th>Cumulative PnL</th>`;
+    wireTooltips(document.getElementById('tableHead'));
+
+    const rows = [...data].reverse();
+    document.getElementById('tableBody').innerHTML = rows.map(d => {
+        const dc = d.daily_pnl > 0 ? 'pos' : d.daily_pnl < 0 ? 'neg' : 'zero';
+        const cc = d.cumulative  > 0 ? 'pos' : d.cumulative  < 0 ? 'neg' : 'zero';
+        return `<tr>
+            <td><a href="/profile/${SLUG}/${d.date}" style="color:#007bff;text-decoration:none;">${d.date}</a></td>
+            <td class="${dc}">${fmt(d.daily_pnl)}</td>
+            <td class="${cc}">${fmt(d.cumulative)}</td>
+        </tr>`;
+    }).join('');
+}
+
+// ── Render: Intraday ──────────────────────────────────────────────────
+function renderIntradayResults(data) {
+    const pnls   = data.map(d => d.pnl);
+    const first  = pnls[0];
+    const last   = pnls[pnls.length - 1];
+    const change = round2(last - first);
+    const peak   = Math.max(...pnls);
+    const trough = Math.min(...pnls);
+
+    setStatCards(change, peak, trough, null, data.length);
+    document.getElementById('profDaysCard').style.display = 'none';
+    showResultsUI();
+
+    document.getElementById('btnCumulative').textContent = 'Absolute PnL';
+    document.getElementById('btnRaw').textContent        = 'Change from Start';
+    chartMode = 'cumulative';
+    document.getElementById('btnCumulative').classList.add('active');
+    document.getElementById('btnRaw').classList.remove('active');
+    buildIntradayChart(data, chartMode);
+
+    document.getElementById('tableHead').innerHTML = `<th>Timestamp</th><th>PnL</th><th>Change from Start</th>`;
+    const rows = [...data].reverse();
+    document.getElementById('tableBody').innerHTML = rows.map(d => {
+        const chg = round2(d.pnl - first);
+        const pc  = chg  > 0 ? 'pos' : chg  < 0 ? 'neg' : 'zero';
+        const vc  = d.pnl > 0 ? 'pos' : d.pnl < 0 ? 'neg' : 'zero';
+        return `<tr>
+            <td>${d.timestamp}</td>
+            <td class="${vc}">${fmt(d.pnl)}</td>
+            <td class="${pc}">${fmt(chg)}</td>
+        </tr>`;
+    }).join('');
+}
+
+function showResultsUI() {
+    document.getElementById('statCards').style.display    = 'flex';
+    document.getElementById('chartMeta').style.display   = 'flex';
+    document.getElementById('chartWrap').style.display   = 'block';
+    document.getElementById('tableSection').style.display = 'block';
+}
+
+function setStatCards(total, best, worst, profDays, active) {
+    const el = document.getElementById('statTotal');
+    el.textContent = fmt(total);
+    el.className   = 'value ' + (total >= 0 ? 'pos' : 'neg');
+    document.getElementById('statBest').textContent  = fmt(best);
+    document.getElementById('statWorst').textContent = fmt(worst);
+    if (profDays !== null)
+        document.getElementById('statProfDays').textContent = profDays;
+    document.getElementById('statActiveDays').textContent = active;
+}
+
+// ── Chart switcher ────────────────────────────────────────────────────
+function switchChart(mode) {
+    chartMode = mode;
+    document.getElementById('btnCumulative').classList.toggle('active', mode === 'cumulative');
+    document.getElementById('btnRaw').classList.toggle('active',        mode === 'raw');
+    if (!allData.length) return;
+    if (currentMode === 'daily') buildDailyChart(allData, mode);
+    else                          buildIntradayChart(allData, mode);
+}
+
+function buildDailyChart(data, mode) {
+    const isCum  = (mode === 'cumulative');
+    const labels = data.map(d => d.date);
+    const values = data.map(d => isCum ? d.cumulative : d.daily_pnl);
+    const colors = values.map(v => v >= 0 ? 'rgba(40,167,69,0.8)' : 'rgba(220,53,69,0.8)');
+    if (isCum) drawLineChart('pnlChart', chartInst, labels, values, 'Cumulative PnL (₹)', inst => chartInst = inst);
+    else        drawBarChart('pnlChart', chartInst, labels, values, colors, 'Daily PnL (₹)', inst => chartInst = inst);
+}
+
+function buildIntradayChart(data, mode) {
+    const fullLabels = data.map(d => d.timestamp.length > 10 ? d.timestamp.slice(0, 16) : d.timestamp);
+    const first  = data.length ? data[0].pnl : 0;
+    const isCum  = (mode === 'cumulative');
+    const values = isCum ? data.map(d => d.pnl) : data.map(d => round2(d.pnl - first));
+    const colors = values.map(v => v >= 0 ? 'rgba(40,167,69,0.8)' : 'rgba(220,53,69,0.8)');
+    const yLabel = isCum ? 'Portfolio PnL (₹)' : 'Change from Start (₹)';
+    if (isCum) drawLineChart('pnlChart', chartInst, fullLabels, values, yLabel, inst => chartInst = inst);
+    else        drawBarChart('pnlChart', chartInst, fullLabels, values, colors, yLabel, inst => chartInst = inst);
+}
+
+// ── Breakdown: fetch & render ─────────────────────────────────────────
+let bkdData = null;
+
+async function loadBreakdown(from, to) {
+    bkdData = null;
+    const range = (from === to) ? from : `${from} → ${to}`;
+    document.getElementById('breakdownRange').textContent = range;
+    document.getElementById('bkdStatus').textContent = 'Loading breakdown…';
+    document.getElementById('breakdownSection').style.display = 'block';
+    await fetchBreakdown(from, to, breakdownTab);
+}
+
+async function setBreakdownTab(tab) {
+    breakdownTab = tab;
+    document.getElementById('tabUnderlying').classList.toggle('active', tab === 'underlying');
+    document.getElementById('tabExpiry').classList.toggle('active',     tab === 'expiry');
+    const from = currentMode === 'daily'
+        ? document.getElementById('dailyFrom').value
+        : document.getElementById('intradayFrom').value;
+    const to   = currentMode === 'daily'
+        ? document.getElementById('dailyTo').value
+        : document.getElementById('intradayTo').value;
+    await fetchBreakdown(from, to, tab);
+}
+
+async function fetchBreakdown(from, to, groupBy) {
+    document.getElementById('bkdStatus').textContent = 'Loading…';
+    try {
+        const r    = await fetch(`/api/profile/${SLUG}/pnl_breakdown?from=${from}&to=${to}&group_by=${groupBy}`);
+        const json = await r.json();
+        if (!json.success) throw new Error(json.error || 'API error');
+        bkdData = json;
+        renderBreakdown(json);
+        document.getElementById('bkdStatus').textContent = '';
+    } catch(e) {
+        document.getElementById('bkdStatus').textContent = 'Error loading breakdown: ' + e.message;
+        document.getElementById('bkdStatus').className = 'status-msg err';
+    }
+}
+
+const BKD_PALETTE = [
+    '#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f',
+    '#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac',
+    '#36b5b0','#d37295','#a0cbe8','#ffbe7d','#8cd17d'
+];
+
+function renderBreakdown(json) {
+    const keys = json.keys;   // sorted list of all group keys
+    const data = json.data;   // [{date, groups:{...}}, ...]
+
+    // Filter to only days that have any data
+    const activeDays = data.filter(d => Object.keys(d.groups).length > 0);
+    if (!activeDays.length) {
+        document.getElementById('bkdStatus').textContent = 'No position data for this range.';
+        if (bkdChartInst) { bkdChartInst.destroy(); bkdChartInst = null; }
+        document.getElementById('bkdTableBody').innerHTML = '';
+        document.getElementById('bkdTableHead').innerHTML = '';
+        return;
+    }
+
+    const labels   = activeDays.map(d => d.date);
+    const datasets = keys.map((key, i) => ({
+        label: key,
+        data:  activeDays.map(d => round2(d.groups[key] || 0)),
+        backgroundColor: BKD_PALETTE[i % BKD_PALETTE.length],
+        borderWidth: 0,
+    }));
+
+    if (bkdChartInst) { bkdChartInst.destroy(); bkdChartInst = null; }
+    const ctx = document.getElementById('bkdChart').getContext('2d');
+    bkdChartInst = new Chart(ctx, {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12 } },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`
+                    }
+                }
+            },
+            scales: {
+                x: { stacked: true, ticks: { maxTicksLimit: 15, font: { size: 11 } }, grid: { display: false } },
+                y: {
+                    stacked: true,
+                    title: { display: true, text: 'PnL (₹)', font: { size: 12 } },
+                    grid:  { color: 'rgba(0,0,0,0.05)' },
+                    ticks: { callback: v => '₹' + v.toLocaleString('en-IN') }
+                }
+            }
+        }
+    });
+
+    // Table: columns = Date + each key + Total
+    document.getElementById('bkdTableHead').innerHTML =
+        `<th>Date</th>` + keys.map(k => `<th>${k}</th>`).join('') + `<th>Total</th>`;
+
+    document.getElementById('bkdTableBody').innerHTML = [...activeDays].reverse().map(d => {
+        const total = round2(Object.values(d.groups).reduce((s, v) => s + v, 0));
+        const tc    = total > 0 ? 'pos' : total < 0 ? 'neg' : 'zero';
+        const cells = keys.map(k => {
+            const v  = round2(d.groups[k] || 0);
+            const vc = v > 0 ? 'pos' : v < 0 ? 'neg' : 'zero';
+            return `<td class="${vc}">${v !== 0 ? fmt(v) : '—'}</td>`;
+        }).join('');
+        return `<tr><td>${d.date}</td>${cells}<td class="${tc}">${fmt(total)}</td></tr>`;
+    }).join('');
+}
+
+// ── Generic chart drawers ─────────────────────────────────────────────
+function drawLineChart(canvasId, existingInst, labels, values, yLabel, setInst) {
+    if (existingInst) existingInst.destroy();
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    setInst(new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: yLabel, data: values,
+                borderColor: '#007bff', backgroundColor: 'rgba(0,123,255,0.07)',
+                borderWidth: 2,
+                pointRadius: labels.length > 100 ? 0 : labels.length > 40 ? 2 : 3,
+                pointHoverRadius: 5, fill: true, tension: 0.3,
+            }]
+        },
+        options: baseChartOptions(yLabel)
+    }));
+}
+
+function drawBarChart(canvasId, existingInst, labels, values, colors, yLabel, setInst) {
+    if (existingInst) existingInst.destroy();
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    setInst(new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{ label: yLabel, data: values, backgroundColor: colors, borderWidth: 0 }]
+        },
+        options: baseChartOptions(yLabel)
+    }));
+}
+
+function baseChartOptions(yLabel) {
+    return {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.parsed.y) } }
+        },
+        scales: {
+            x: { ticks: { maxTicksLimit: 14, font: { size: 11 } }, grid: { display: false } },
+            y: {
+                title: { display: true, text: yLabel, font: { size: 12 } },
+                grid:  { color: 'rgba(0,0,0,0.05)' },
+                ticks: { callback: v => '₹' + v.toLocaleString('en-IN') }
+            }
+        }
+    };
+}
+
+// ── Tooltip re-wiring (for dynamically created info icons) ────────────
+function wireTooltips(container) {
+    container.querySelectorAll('.info-icon').forEach(icon => {
+        const popup = icon.querySelector('.tooltip-popup');
+        if (!popup) return;
+        icon.addEventListener('click', e => {
+            e.stopPropagation();
+            document.querySelectorAll('.tooltip-popup.visible').forEach(p => {
+                if (p !== popup) p.classList.remove('visible');
+            });
+            popup.classList.toggle('visible');
+        });
+    });
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────
+function fmt(n) {
+    const abs = Math.abs(n);
+    return (n < 0 ? '−' : '') + '₹' + abs.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function round2(n) { return Math.round(n * 100) / 100; }
+function setStatus(msg, isErr) {
+    const el = document.getElementById('statusMsg');
+    el.textContent = msg;
+    el.className   = 'status-msg' + (isErr ? ' err' : '');
+}
+
+window.addEventListener('DOMContentLoaded', fetchDaily);
+</script>
+{% endblock %}
