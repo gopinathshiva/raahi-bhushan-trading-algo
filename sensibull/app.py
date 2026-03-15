@@ -1103,6 +1103,7 @@ def api_profile_all_underlyings(slug):
     state = {}
     underlying_events = {}
     underlyings_seen = set()
+    latest_underlying_price = {}  # underlying -> latest ltp seen in snapshots
 
     for snap in snapshots:
         snap_id = snap['id']
@@ -1113,6 +1114,13 @@ def api_profile_all_underlyings(slug):
             raw = json.loads(snap['raw_data'])
         except Exception:
             continue
+
+        # Track latest underlying_price from each snapshot's data array
+        for item in raw.get('data', []):
+            sym = (item.get('trading_symbol') or '').upper()
+            price = item.get('underlying_price')
+            if sym and price is not None:
+                latest_underlying_price[sym] = price
 
         trades_map = normalize_trades_for_diff(raw.get('data', []))
 
@@ -1296,6 +1304,49 @@ def api_profile_all_underlyings(slug):
             snapshot_booked += t.get('booked_profit_loss', 0) or 0
             snapshot_unbooked += t.get('unbooked_pnl', 0) or 0
 
+    # Determine prev-day close prices from the last snapshot of the previous trading day.
+    # "Previous day" relative to the date being viewed (date_filter) or today if no filter.
+    prev_underlying_price = {}
+    try:
+        if date_filter:
+            view_date = date.fromisoformat(date_filter)
+        else:
+            view_date = now_ist().date()
+        # Walk back up to 7 days to skip weekends/holidays
+        prev_date = view_date - timedelta(days=1)
+        for _ in range(7):
+            prev_snap_row = c.execute(
+                "SELECT raw_data FROM snapshots WHERE profile_id = ? AND date(timestamp) = ? ORDER BY id DESC LIMIT 1",
+                (profile['id'], prev_date.isoformat()),
+            ).fetchone()
+            if prev_snap_row:
+                try:
+                    prev_raw = json.loads(prev_snap_row['raw_data'])
+                    for item in prev_raw.get('data', []):
+                        sym = (item.get('trading_symbol') or '').upper()
+                        price = item.get('underlying_price')
+                        if sym and price is not None:
+                            prev_underlying_price[sym] = price
+                except Exception:
+                    pass
+                break
+            prev_date -= timedelta(days=1)
+    except Exception:
+        pass
+
+    # Build underlying_prices: {symbol -> {ltp, prev_close, pct_change}}
+    underlying_prices = {}
+    for sym, ltp in latest_underlying_price.items():
+        prev_close = prev_underlying_price.get(sym)
+        pct_change = None
+        if prev_close and prev_close != 0:
+            pct_change = round((ltp - prev_close) / prev_close * 100, 2)
+        underlying_prices[sym] = {
+            'ltp': ltp,
+            'prev_close': prev_close,
+            'pct_change': pct_change,
+        }
+
     conn.close()
 
     return jsonify({
@@ -1306,6 +1357,7 @@ def api_profile_all_underlyings(slug):
         'snapshot_booked_pnl': snapshot_booked,
         'snapshot_unbooked_pnl': snapshot_unbooked,
         'snapshot_net_pnl': snapshot_booked + snapshot_unbooked,
+        'underlying_prices': underlying_prices,
     })
 
 

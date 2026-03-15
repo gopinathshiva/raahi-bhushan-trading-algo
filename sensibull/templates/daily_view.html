@@ -100,6 +100,8 @@
             .underlying-title { font-weight: bold; font-size: 1.05em; }
             .underlying-count { color: #666; font-size: 0.9em; margin-left: 10px; }
             .underlying-header.active .underlying-count { color: rgba(255,255,255,0.8); }
+            .underlying-header.active .underlying-ltp { color: rgba(255,255,255,0.9) !important; }
+            .underlying-header.active .underlying-pct-change { background: rgba(255,255,255,0.2) !important; color: white !important; }
             .underlying-toggle { font-size: 1.2em; transition: transform 0.2s; }
             .underlying-toggle.expanded { transform: rotate(90deg); }
             .underlying-content { display: none; padding: 0; }
@@ -1416,9 +1418,10 @@
                     unbooked: data.snapshot_unbooked_pnl ?? null,
                     net: data.snapshot_net_pnl ?? null,
                 };
-                _cachedUnderlyingsData = { underlyings, events, snapshotPnl };
+                const underlyingPrices = data.underlying_prices || {};
+                _cachedUnderlyingsData = { underlyings, events, snapshotPnl, underlyingPrices };
 
-                renderUnderlyingGroups(underlyings, events, snapshotPnl);
+                renderUnderlyingGroups(underlyings, events, snapshotPnl, underlyingPrices);
                 
                 // Update subscription indicators after rendering buttons
                 updateSubscriptionIndicators();
@@ -1429,7 +1432,7 @@
 
         function reRenderUnderlyingGroups() {
             if (_cachedUnderlyingsData) {
-                renderUnderlyingGroups(_cachedUnderlyingsData.underlyings, _cachedUnderlyingsData.events, _cachedUnderlyingsData.snapshotPnl);
+                renderUnderlyingGroups(_cachedUnderlyingsData.underlyings, _cachedUnderlyingsData.events, _cachedUnderlyingsData.snapshotPnl, _cachedUnderlyingsData.underlyingPrices || {});
                 // Update subscription indicators after re-rendering
                 updateSubscriptionIndicators();
             }
@@ -2737,7 +2740,8 @@
             cardsEl.style.display = 'flex';
         }
 
-        function renderUnderlyingGroups(underlyings, events, snapshotPnl) {
+        function renderUnderlyingGroups(underlyings, events, snapshotPnl, underlyingPrices) {
+            underlyingPrices = underlyingPrices || {};
             const container = document.getElementById('underlying-groups-container');
             if (!container) return;
 
@@ -2797,7 +2801,21 @@
                 titleSpan.style.alignItems = 'center';
                 titleSpan.style.flexWrap = 'wrap';
                 titleSpan.style.gap = '4px';
-                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span><span class="underlying-count">(${visibleEventList.length} events)</span>${renderStatsBadge(underlyingStats, false)}`;
+                const priceInfo = underlyingPrices[underlying] || {};
+                const ltpVal = priceInfo.ltp;
+                const pctVal = priceInfo.pct_change;
+                let priceHtml = '';
+                if (ltpVal != null) {
+                    const ltpStr = ltpVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    let pctHtml = '';
+                    if (pctVal != null) {
+                        const pctSign = pctVal >= 0 ? '+' : '';
+                        const pctColor = pctVal >= 0 ? '#28a745' : '#dc3545';
+                        pctHtml = `<span class="underlying-pct-change" style="font-size:0.82em;font-weight:600;color:${pctColor};background:${pctVal >= 0 ? '#d4edda' : '#f8d7da'};padding:1px 5px;border-radius:3px;">${pctSign}${pctVal}%</span>`;
+                    }
+                    priceHtml = `<span class="underlying-ltp" style="font-size:0.88em;color:#555;font-weight:500;">₹${ltpStr}</span>${pctHtml}`;
+                }
+                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span>${priceHtml}<span class="underlying-count">(${visibleEventList.length} events)</span>${renderStatsBadge(underlyingStats, false)}`;
 
                 const buttonsDiv = document.createElement('div');
                 buttonsDiv.style.display = 'flex';
