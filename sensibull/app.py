@@ -3461,6 +3461,48 @@ def api_master_contract_strike_info():
         'instrument_type': instrument['instrument_type']
     })
 
+@app.route('/api/master_contract/lot_sizes', methods=['POST'])
+@login_required
+def api_master_contract_lot_sizes():
+    """Return lot sizes for a batch of trading symbols.
+    POST body: {"symbols": ["NIFTY25APR25000CE", ...]}
+    Falls back to underlying-prefix lookup for symbols not found (e.g. expired contracts).
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    symbols = data.get('symbols', [])
+    if not symbols:
+        return jsonify({'lot_sizes': {}})
+
+    conn = get_db()
+    c = conn.cursor()
+
+    placeholders = ','.join('?' * len(symbols))
+    rows = c.execute(
+        f"SELECT trading_symbol, lot_size FROM master_contract WHERE trading_symbol IN ({placeholders})",
+        symbols
+    ).fetchall()
+    lot_sizes = {row['trading_symbol']: row['lot_size'] for row in rows}
+
+    # Fallback for symbols not found: look up any contract for the same underlying
+    missing = [s for s in symbols if s not in lot_sizes]
+    for sym in missing:
+        # Extract underlying prefix (letters at start of symbol)
+        import re
+        m = re.match(r'^([A-Z]+)', sym)
+        if not m:
+            continue
+        underlying = m.group(1)
+        row = c.execute(
+            "SELECT lot_size FROM master_contract WHERE trading_symbol LIKE ? AND lot_size > 0 ORDER BY expiry DESC LIMIT 1",
+            (underlying + '%',)
+        ).fetchone()
+        if row:
+            lot_sizes[sym] = row['lot_size']
+
+    conn.close()
+    return jsonify({'lot_sizes': lot_sizes})
+
+
 @app.route('/api/master_contract/watch_underlyings')
 @login_required
 def api_watch_underlyings():

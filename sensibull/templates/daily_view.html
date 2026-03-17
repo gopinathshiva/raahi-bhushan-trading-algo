@@ -675,6 +675,52 @@
         </div>
     </div>
 
+    <!-- Option Payoff Chart Modal -->
+    <div id="payoff-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:12000; overflow-y:auto;">
+        <div style="background:#fff; margin:3vh auto; padding:24px; width:min(960px,96vw); border-radius:10px; box-shadow:0 6px 28px rgba(0,0,0,0.25); position:relative;">
+
+            <!-- Header -->
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
+                <div>
+                    <h3 id="payoff-title" style="margin:0 0 3px; font-size:1.15em; color:#333;">Option Payoff at Expiry</h3>
+                    <div id="payoff-subtitle" style="font-size:0.82em; color:#888;"></div>
+                </div>
+                <button onclick="closePayoffModal()" style="background:none;border:none;font-size:1.6em;cursor:pointer;color:#666;padding:0 4px;">&times;</button>
+            </div>
+
+            <!-- Lot size note / status -->
+            <div id="payoff-status" style="font-size:0.83em; color:#666; margin-bottom:10px; min-height:18px;"></div>
+
+            <!-- Chart -->
+            <div style="position:relative; height:320px; margin-bottom:20px;">
+                <canvas id="payoff-canvas"></canvas>
+            </div>
+
+            <!-- Stats row -->
+            <div id="payoff-stats" style="display:flex; gap:20px; flex-wrap:wrap; margin-bottom:20px; padding:12px 16px; background:#f8f9fa; border-radius:6px; font-size:0.88em;"></div>
+
+            <!-- Legs table -->
+            <div style="overflow-x:auto;">
+                <table id="payoff-legs-table" style="width:100%; border-collapse:collapse; font-size:0.85em;">
+                    <thead>
+                        <tr style="background:#f0f4ff;">
+                            <th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; font-weight:600;">Symbol</th>
+                            <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #dee2e6; font-weight:600;">Type</th>
+                            <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #dee2e6; font-weight:600;">Strike</th>
+                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Qty (lots)</th>
+                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Lot Size</th>
+                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Avg Price</th>
+                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">LTP</th>
+                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Curr P&amp;L</th>
+                            <th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; font-weight:600;">Direction</th>
+                        </tr>
+                    </thead>
+                    <tbody id="payoff-legs-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
 {% endblock %}
 
     <!-- Recharts Library -->
@@ -3060,6 +3106,11 @@
                                         onclick="event.stopPropagation(); toggleSubscription('expiry', '${underlying}', '${expiryIso}', null);"
                                         style="padding: 4px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         🔕 Subscribe
+                                    </button>
+                                    <button
+                                        onclick="event.stopPropagation(); openPayoffChart('${underlying}', '${expiryId}', '${expiryIso}', '${expiryDateStr}');"
+                                        style="padding: 4px 10px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
+                                        &#x1F4C8; Payoff
                                     </button>
                                     <button
                                         onclick="event.stopPropagation(); openAIChatPanel('${underlying}', 'expiry', '${expiryIso}', '${underlying} \u2014 ${expiryDateStr}');"
@@ -6455,6 +6506,291 @@
 
         // Reset cache when navigating (page load)
         _pemData = null;
+    })();
+    </script>
+
+    <script>
+    // ==================== OPTION PAYOFF CHART ====================
+    (function() {
+        let _payoffChart = null;
+
+        // Consolidate lifecycle events into current open legs per symbol.
+        // Returns [{symbol, strike, optType, qty, avgPrice, ltp, lotSize}]
+        function consolidateLegs(expiryEvents) {
+            // Latest event per (symbol, product) key
+            const latestBySymbol = {};
+            expiryEvents.forEach(e => {
+                const key = (e.symbol || '') + '|' + (e.product || '');
+                const existing = latestBySymbol[key];
+                if (!existing || new Date(e.timestamp) > new Date(existing.timestamp)) {
+                    latestBySymbol[key] = e;
+                }
+            });
+
+            const legs = [];
+            Object.values(latestBySymbol).forEach(e => {
+                const qty = Number(e.after_quantity || 0);
+                if (qty === 0) return; // closed position
+
+                const symbol = e.symbol || '';
+                const strike = getStrikePrice(symbol);
+                const optType = getOptionType(symbol);
+                if (!strike || !optType || optType === 'FUT' || optType === 'EQ') return;
+
+                legs.push({
+                    symbol,
+                    strike,
+                    optType,
+                    qty,            // positive = long, negative = short
+                    avgPrice: Number(e.after_average_price || 0),
+                    ltp: Number(e.after_last_price || 0),
+                    lotSize: 1,     // filled after lot size fetch
+                });
+            });
+            return legs;
+        }
+
+        // Payoff at expiry for a given spot price
+        function computePayoff(legs, spot) {
+            return legs.reduce((sum, leg) => {
+                const intrinsic = leg.optType === 'CE'
+                    ? Math.max(0, spot - leg.strike)
+                    : Math.max(0, leg.strike - spot);
+                return sum + (intrinsic - leg.avgPrice) * leg.qty * leg.lotSize;
+            }, 0);
+        }
+
+        // Current P&L based on LTP
+        function computeCurrentPnl(legs) {
+            return legs.reduce((sum, leg) =>
+                sum + (leg.ltp - leg.avgPrice) * leg.qty * leg.lotSize, 0);
+        }
+
+        function fmtInrPayoff(n) {
+            if (n == null || isNaN(n)) return '—';
+            const abs = Math.abs(n);
+            return (n < 0 ? '−' : '') + '₹' + abs.toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        }
+
+        window.openPayoffChart = async function(underlying, expiryId, expiryIso, expiryLabel) {
+            const cached = _expiryEventsCache[expiryId];
+            if (!cached) { alert('No trade data found for this expiry.'); return; }
+
+            const legs = consolidateLegs(cached.events || []);
+            if (legs.length === 0) {
+                alert('No open option positions for this expiry — all positions are closed.');
+                return;
+            }
+
+            // Show modal with loading state
+            const modal = document.getElementById('payoff-modal');
+            modal.style.display = 'block';
+            document.getElementById('payoff-title').textContent = `Option Payoff at Expiry — ${underlying} (${expiryLabel})`;
+            document.getElementById('payoff-subtitle').textContent = `${legs.length} open leg(s)`;
+            document.getElementById('payoff-status').textContent = 'Fetching lot sizes…';
+            document.getElementById('payoff-stats').innerHTML = '';
+            document.getElementById('payoff-legs-tbody').innerHTML =
+                '<tr><td colspan="9" style="padding:14px; text-align:center; color:#888;">Loading…</td></tr>';
+
+            // Destroy old chart
+            if (_payoffChart) { _payoffChart.destroy(); _payoffChart = null; }
+
+            // Fetch lot sizes from master contract
+            let lotSizeMap = {};
+            try {
+                const resp = await fetch('/api/master_contract/lot_sizes', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({symbols: legs.map(l => l.symbol)})
+                });
+                lotSizeMap = (await resp.json()).lot_sizes || {};
+            } catch(_) { /* fallback to 1 */ }
+
+            legs.forEach(leg => { leg.lotSize = lotSizeMap[leg.symbol] || 1; });
+
+            const missingAny = legs.some(l => !lotSizeMap[l.symbol]);
+            document.getElementById('payoff-status').textContent = missingAny
+                ? 'Warning: some lot sizes not found in master contract — showing with lot size = 1.'
+                : 'Lot sizes loaded from master contract.';
+
+            // Current spot from cached underlying prices
+            const spotInfo = (_cachedUnderlyingsData?.underlyingPrices || {})[underlying] || {};
+            const spot = spotInfo.ltp || null;
+
+            // Spot range: ±15% around current spot (or midpoint of strikes)
+            const strikes = legs.map(l => l.strike);
+            const mid = spot || (Math.min(...strikes) + Math.max(...strikes)) / 2;
+            const rangeWidth = Math.max(mid * 0.15, (Math.max(...strikes) - Math.min(...strikes)) * 0.8 || mid * 0.1);
+            const rawMin = Math.max(0, mid - rangeWidth);
+            const rawMax = mid + rangeWidth;
+            // Round to nearest 50
+            const spotMin = Math.floor(rawMin / 50) * 50;
+            const spotMax = Math.ceil(rawMax / 50) * 50;
+            const step = Math.max(50, Math.round((spotMax - spotMin) / 100 / 50) * 50);
+
+            const spotPoints = [];
+            for (let s = spotMin; s <= spotMax; s += step) spotPoints.push(s);
+
+            const rawPayoffs = spotPoints.map(s => computePayoff(legs, s));
+
+            // Insert exact zero-crossing points so every segment is fully above or below zero.
+            // This makes segment coloring and above/below fills seamless with no gaps.
+            const allPoints = [];
+            const allPayoffs = [];
+            for (let i = 0; i < spotPoints.length; i++) {
+                allPoints.push(spotPoints[i]);
+                allPayoffs.push(rawPayoffs[i]);
+                if (i < spotPoints.length - 1) {
+                    const v0 = rawPayoffs[i], v1 = rawPayoffs[i + 1];
+                    if ((v0 >= 0) !== (v1 >= 0)) {
+                        const t = v0 / (v0 - v1);
+                        allPoints.push(spotPoints[i] + t * (spotPoints[i + 1] - spotPoints[i]));
+                        allPayoffs.push(0);
+                    }
+                }
+            }
+
+            // Breakeven points are the inserted zero-crossing spots
+            const breakevenSpots = [];
+            for (let i = 0; i < allPoints.length; i++) {
+                if (allPayoffs[i] === 0 && i > 0 && i < allPoints.length - 1) {
+                    breakevenSpots.push(Math.round(allPoints[i]));
+                }
+            }
+
+            const maxProfit = Math.max(...allPayoffs);
+            const maxLoss = Math.min(...allPayoffs);
+            const currentPnl = computeCurrentPnl(legs);
+
+            // Single continuous dataset using Chart.js segment coloring + above/below fill
+            const datasets = [
+                {
+                    label: 'P&L at Expiry',
+                    data: allPayoffs,
+                    borderWidth: 2.5,
+                    pointRadius: 0,
+                    tension: 0,
+                    fill: {
+                        target: 'origin',
+                        above: 'rgba(40,167,69,0.15)',
+                        below: 'rgba(220,53,69,0.15)',
+                    },
+                    segment: {
+                        borderColor: ctx => ctx.p0.parsed.y >= 0 && ctx.p1.parsed.y >= 0
+                            ? '#28a745'
+                            : ctx.p0.parsed.y < 0 && ctx.p1.parsed.y < 0
+                                ? '#dc3545'
+                                : '#888',
+                    },
+                    borderColor: '#28a745',
+                },
+            ];
+
+            // Current spot vertical marker
+            if (spot) {
+                // Find nearest index in allPoints
+                let nearestIdx = 0, nearestDist = Infinity;
+                allPoints.forEach((s, i) => {
+                    const d = Math.abs(s - spot);
+                    if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+                });
+                datasets.push({
+                    label: `Current Spot ₹${spot.toLocaleString('en-IN')}`,
+                    data: allPoints.map((_, i) => i === nearestIdx ? allPayoffs[i] : null),
+                    borderColor: '#007bff',
+                    backgroundColor: '#007bff',
+                    pointRadius: allPoints.map((_, i) => i === nearestIdx ? 9 : 0),
+                    pointStyle: 'triangle',
+                    showLine: false,
+                });
+            }
+
+            const ctx = document.getElementById('payoff-canvas').getContext('2d');
+            _payoffChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: allPoints, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'top', labels: { boxWidth: 12 } },
+                        tooltip: {
+                            callbacks: {
+                                title: ctx => `Spot: ₹${Math.round(Number(ctx[0].label)).toLocaleString('en-IN')}`,
+                                label: ctx => {
+                                    const v = ctx.raw;
+                                    if (v == null) return null;
+                                    return `${ctx.dataset.label}: ${fmtInrPayoff(v)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                maxTicksLimit: 14,
+                                callback: (_, i) => `₹${Math.round(allPoints[i] ?? 0).toLocaleString('en-IN')}`,
+                                maxRotation: 45,
+                            },
+                            title: { display: true, text: 'Underlying Spot Price at Expiry' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Strategy P&L (₹)' },
+                            ticks: { callback: v => fmtInrPayoff(v) },
+                        }
+                    }
+                }
+            });
+
+            // Stats row
+            const stats = [
+                { label: 'Max Profit', value: fmtInrPayoff(maxProfit), color: maxProfit >= 0 ? '#28a745' : '#dc3545' },
+                { label: 'Max Loss',   value: fmtInrPayoff(maxLoss),   color: maxLoss  >= 0 ? '#28a745' : '#dc3545' },
+                { label: 'Current P&L (LTP)', value: fmtInrPayoff(currentPnl), color: currentPnl >= 0 ? '#28a745' : '#dc3545' },
+            ];
+            if (breakevenSpots.length) {
+                stats.push({ label: `Breakeven${breakevenSpots.length > 1 ? 's' : ''}`,
+                    value: breakevenSpots.map(s => `₹${s.toLocaleString('en-IN')}`).join(', '), color: '#555' });
+            }
+            if (spot) stats.push({ label: 'Current Spot', value: `₹${spot.toLocaleString('en-IN')}`, color: '#007bff' });
+
+            document.getElementById('payoff-stats').innerHTML = stats.map(s =>
+                `<div><div style="font-size:0.78em;color:#888;text-transform:uppercase;letter-spacing:0.04em;">${s.label}</div>
+                 <div style="font-size:1.05em;font-weight:bold;color:${s.color};">${s.value}</div></div>`
+            ).join('');
+
+            // Legs table
+            document.getElementById('payoff-legs-tbody').innerHTML = legs.map(leg => {
+                const legPnl = (leg.ltp - leg.avgPrice) * leg.qty * leg.lotSize;
+                const pnlColor = legPnl >= 0 ? '#28a745' : '#dc3545';
+                const typeColor = leg.optType === 'CE' ? '#007bff' : '#e83e8c';
+                const lots = parseFloat((Math.abs(leg.qty) / leg.lotSize).toFixed(2));
+                const direction = leg.qty > 0
+                    ? '<span style="color:#28a745;font-weight:bold;">LONG</span>'
+                    : '<span style="color:#dc3545;font-weight:bold;">SHORT</span>';
+                return `<tr style="border-bottom:1px solid #eee;">
+                    <td style="padding:7px 10px;font-family:monospace;font-size:0.88em;">${leg.symbol}</td>
+                    <td style="padding:7px 10px;text-align:center;"><span style="font-weight:bold;color:${typeColor};">${leg.optType}</span></td>
+                    <td style="padding:7px 10px;text-align:center;">₹${leg.strike.toLocaleString('en-IN')}</td>
+                    <td style="padding:7px 10px;text-align:right;">${lots}</td>
+                    <td style="padding:7px 10px;text-align:right;">${leg.lotSize}</td>
+                    <td style="padding:7px 10px;text-align:right;">₹${leg.avgPrice.toFixed(2)}</td>
+                    <td style="padding:7px 10px;text-align:right;">₹${leg.ltp.toFixed(2)}</td>
+                    <td style="padding:7px 10px;text-align:right;font-weight:bold;color:${pnlColor};">${fmtInrPayoff(legPnl)}</td>
+                    <td style="padding:7px 10px;">${direction}</td>
+                </tr>`;
+            }).join('');
+        };
+
+        window.closePayoffModal = function() {
+            document.getElementById('payoff-modal').style.display = 'none';
+            if (_payoffChart) { _payoffChart.destroy(); _payoffChart = null; }
+        };
+
+        document.getElementById('payoff-modal').addEventListener('click', function(e) {
+            if (e.target === this) closePayoffModal();
+        });
     })();
     </script>
 
