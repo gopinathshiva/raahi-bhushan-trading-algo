@@ -160,7 +160,7 @@ def extract_underlying_from_symbol(trading_symbol):
     # If no digits found, return the whole symbol
     return trading_symbol
 
-def _compute_implied_fill(old_qty, new_qty, old_avg_price, new_avg_price):
+def _compute_implied_fill(old_qty, new_qty, old_avg_price, new_avg_price, ltp=0):
     """Compute implied fill side, quantity, and price from a quantity change."""
     dq = new_qty - old_qty
     if dq == 0:
@@ -172,6 +172,10 @@ def _compute_implied_fill(old_qty, new_qty, old_avg_price, new_avg_price):
             v0 = old_avg_price * old_qty
             v1 = new_avg_price * new_qty
             price = abs((v1 - v0) / dq)
+        elif new_qty == 0 and ltp:
+            # Position fully closed — broker resets avg_price to 0,
+            # so the avg-price formula can't be used. Fall back to LTP.
+            price = ltp
         else:
             price = 0
     except Exception:
@@ -336,7 +340,8 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                         _if_side, _if_qty, _if_price = _compute_implied_fill(
                             old_qty, new_qty,
                             old_trade.get('average_price', 0),
-                            new_trade.get('average_price', 0)
+                            new_trade.get('average_price', 0),
+                            new_trade.get('last_price', 0)
                         )
                         notification_data = {
                             'underlying': key[0],
@@ -410,7 +415,8 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                         _if_side, _if_qty, _if_price = _compute_implied_fill(
                             old_qty, new_qty,
                             old_trade.get('average_price', 0),
-                            new_trade.get('average_price', 0)
+                            new_trade.get('average_price', 0),
+                            new_trade.get('last_price', 0)
                         )
                         notification_data = {
                             'underlying': key[0],
@@ -471,7 +477,8 @@ def generate_notifications_for_changes(conn, profile_id, old_data, new_data):
                         _if_side, _if_qty, _if_price = _compute_implied_fill(
                             old_qty, new_qty,
                             old_trade.get('average_price', 0),
-                            new_trade.get('average_price', 0)
+                            new_trade.get('average_price', 0),
+                            new_trade.get('last_price', 0)
                         )
                         notification_data = {
                             'symbol': matching_key[2],

@@ -1954,16 +1954,19 @@
                 const key = (e.symbol || '') + '|' + (e.product || '');
                 if (!latestBySymbol[key]) latestBySymbol[key] = e;
             });
-            let bookedPnl = 0, unbookedPnl = 0, exitPnl = 0, active = 0, closed = 0;
+            let bookedPnl = 0, unbookedPnl = 0, exitPnl = 0, active = 0, closed = 0, brokerage = 0;
             Object.values(latestBySymbol).forEach(e => {
                 bookedPnl += Number(e.after_booked_pnl || 0);
                 unbookedPnl += Number(e.after_unbooked_pnl || 0);
                 if (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0) closed++;
                 else active++;
             });
-            // Sum exit_pnl from all EXITED events (each is a distinct realised P&L)
-            events.forEach(e => { if (e.exit_pnl) exitPnl += Number(e.exit_pnl || 0); });
-            return { bookedPnl, unbookedPnl, exitPnl, active, closed, symbols: Object.keys(latestBySymbol).length };
+            // Sum exit_pnl and brokerage from all events (each event is a distinct transaction)
+            events.forEach(e => {
+                if (e.exit_pnl) exitPnl += Number(e.exit_pnl || 0);
+                brokerage += Number(e.brokerage || 0);
+            });
+            return { bookedPnl, unbookedPnl, exitPnl, active, closed, brokerage, symbols: Object.keys(latestBySymbol).length };
         }
 
         function renderStatsBadge(stats, compact) {
@@ -1974,6 +1977,7 @@
                     `<span title="Latest booked P&amp;L across positions in this expiry">Bkd: <b style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
                     `<span title="Latest unbooked P&amp;L across open positions">Unbkd: <b style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
                     `<span title="Total P&amp;L" style="color:${c(total)}; font-weight:bold;">= ₹${fmtNum(total,0)}</span>` +
+                    `<span title="Total brokerage charges" style="color:#dc3545;">Brok: <b>₹${fmtNum(stats.brokerage||0,0)}</b></span>` +
                     `<span title="Open positions" style="color:#555;">● ${stats.active}</span>` +
                     `<span title="Closed positions" style="color:#999;">✕ ${stats.closed}</span>` +
                     `</span>`;
@@ -1982,6 +1986,7 @@
                 `<span title="Latest booked P&amp;L across all positions">Booked: <b style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
                 `<span title="Latest unbooked P&amp;L across open positions">Unbooked: <b style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
                 `<span title="Total P&amp;L (Booked + Unbooked)" style="color:${c(total)}; font-weight:bold;">Total: ₹${fmtNum(total,0)}</span>` +
+                `<span title="Total brokerage charges" style="color:#dc3545;">Brokerage: <b>₹${fmtNum(stats.brokerage||0,0)}</b></span>` +
                 `<span title="Open positions" style="color:#555;">● ${stats.active} open</span>` +
                 `<span title="Closed positions" style="color:#aaa;">✕ ${stats.closed} closed</span>` +
                 `</span>`;
@@ -2075,6 +2080,11 @@
             const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
             const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
 
+            const brokerageVal = Number(e.brokerage || 0);
+            const brokerageHtml = brokerageVal > 0
+                ? `<span style="color:#dc3545;">₹${fmtNum(brokerageVal, 2)}</span>`
+                : `<span style="color:#aaa;">-</span>`;
+
             return `<tr>
                 <td>${fmtTimestamp(e.timestamp)}</td>
                 <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
@@ -2086,6 +2096,7 @@
                 <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
                 <td class="num">${bookedPnlHtml}</td>
                 <td class="num">${unbookedPnlHtml}</td>
+                <td class="num">${brokerageHtml}</td>
                 <td>${exitFillHtml || '<span style="color:#aaa;">-</span>'}</td>
                 <td style="text-align:center;">${actionHtml}</td>
             </tr>`;
@@ -2745,19 +2756,32 @@
             underlyings.forEach(u => allEvents.push(...(events[u] || [])));
             if (allEvents.length === 0) { cardsEl.style.display = 'none'; return; }
 
-            const stats = computeGroupStats(allEvents);
+            // Apply exclude-expired filter so top cards stay in sync with the table rows below
+            const excludeExpiredCards = document.getElementById('exclude-expired')?.checked || false;
+            const todayCards = new Date();
+            todayCards.setHours(0, 0, 0, 0);
+            const filteredEvents = excludeExpiredCards
+                ? allEvents.filter(e => {
+                    const expiryDate = getExpiryDateFromSymbolEnhanced(e.symbol || '');
+                    return !expiryDate || expiryDate >= todayCards;
+                })
+                : allEvents;
+
+            const stats = computeGroupStats(filteredEvents);
             const pnlClass = v => v > 0 ? 'val-pos' : (v < 0 ? 'val-neg' : 'val-neu');
             const fmt = v => '₹' + fmtNum(v, 0);
 
-            // Booked P&L: use event-based stats (accumulates realized P&L from trade events,
-            // matches Daily Timeline's Booked P&L).
-            // Net P&L: use snapshot-accurate value from backend — this is summed directly from
-            // the latest snapshot's unbooked_pnl + booked_profit_loss, matching Daily Timeline's
-            // Current P&L exactly.
-            // Unbooked P&L: derived as Net - Booked so all three cards are internally consistent.
+            // Use event-derived values for Booked and Unbooked so they match the sum of
+            // individual rows shown in the table. For Gross P&L, use the backend snapshot value
+            // when no expiry filter is active (matches Daily Timeline); otherwise fall back to
+            // event-derived sum (snapshot includes expired positions which would be filtered out).
             const bookedPnl = stats.bookedPnl;
-            const netPnl = (snapshotPnl && snapshotPnl.net !== null) ? snapshotPnl.net : (stats.bookedPnl + stats.unbookedPnl);
-            const unbookedPnl = netPnl - bookedPnl;
+            const unbookedPnl = stats.unbookedPnl;
+            const grossPnl = (!excludeExpiredCards && snapshotPnl && snapshotPnl.net !== null)
+                ? snapshotPnl.net
+                : (stats.bookedPnl + stats.unbookedPnl);
+            const totalBrokerage = stats.brokerage || 0;
+            const netPnl = grossPnl - totalBrokerage;
 
             cardsEl.innerHTML = `
                 <div class="metric-box">
@@ -2779,6 +2803,14 @@
                 <div class="metric-box">
                     <div class="metric-title">Total Unbooked P&amp;L</div>
                     <div class="metric-value ${pnlClass(unbookedPnl)}">${fmt(unbookedPnl)}</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Gross P&amp;L</div>
+                    <div class="metric-value ${pnlClass(grossPnl)}">${fmt(grossPnl)}</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">Total Brokerage</div>
+                    <div class="metric-value" style="color:#dc3545;">${fmt(totalBrokerage)}</div>
                 </div>
                 <div class="metric-box">
                     <div class="metric-title">Net P&amp;L</div>
@@ -3093,6 +3125,7 @@
                                                     <th style="min-width: 140px;" class="num">LTP (After)</th>
                                                     <th class="sortable num" style="min-width: 170px;" onclick="handleExpiryTableSort('${expiryId}', 'booked_pnl')">Booked P&L (After) <span class="sort-indicator">⇅</span></th>
                                                     <th class="sortable num" style="min-width: 170px;" onclick="handleExpiryTableSort('${expiryId}', 'unbooked_pnl')">Unbooked P&L (After) <span class="sort-indicator">⇅</span></th>
+                                                    <th style="min-width: 110px;" class="num">Brokerage</th>
                                                     <th style="min-width: 240px;">Exit / Fill</th>
                                                     <th style="width: 70px; text-align:center;">Action</th>
                                                 </tr>

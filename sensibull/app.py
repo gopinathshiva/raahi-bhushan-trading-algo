@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
+from brokerage import calculate_option_brokerage, get_exchange_for_underlying
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
 import sqlite3
@@ -984,6 +985,41 @@ def _compute_implied_fill(prev_trade, curr_trade, original_avg_price=None):
     return side, fill_qty, price
 
 
+def _calculate_event_brokerage(evt, underlying):
+    """Calculate brokerage for a single trade event (ENTERED/MODIFIED/EXITED)."""
+    event_type = evt.get('type', '')
+    exchange = get_exchange_for_underlying(underlying)
+
+    if event_type == 'ENTERED':
+        after_qty = evt.get('after_quantity') or 0
+        qty = abs(after_qty)
+        premium = evt.get('after_average_price') or 0
+        tx_type = 'BUY' if after_qty > 0 else 'SELL'
+    elif event_type == 'MODIFIED':
+        qty = abs(evt.get('implied_fill_qty') or 0)
+        premium = evt.get('implied_fill_price') or 0
+        tx_type = (evt.get('implied_fill_side') or 'BUY').upper()
+        if tx_type not in ('BUY', 'SELL'):
+            tx_type = 'BUY'
+    elif event_type == 'EXITED':
+        before_qty = evt.get('before_quantity') or 0
+        qty = abs(before_qty)
+        premium = evt.get('exit_price') or 0
+        tx_type = 'SELL' if before_qty > 0 else 'BUY'
+    else:
+        return 0.0
+
+    if qty == 0 or premium == 0:
+        return 0.0
+
+    return calculate_option_brokerage(
+        premium=premium,
+        lot_size=qty,
+        transaction_type=tx_type,
+        exchange=exchange,
+    )
+
+
 @app.route('/api/profile_symbol_suggest/<slug>')
 @login_required
 def api_profile_symbol_suggest(slug):
@@ -1289,9 +1325,28 @@ def api_profile_all_underlyings(slug):
         ).fetchall()
         for row in rows:
             lot_size_map[row['trading_symbol']] = row['lot_size']
-    for evts in underlying_events.values():
+
+    # Fallback: for old symbols not found in master_contract, look up any current
+    # contract for the same underlying to get its lot size.
+    missing_underlyings = set(
+        underlying
+        for underlying, evts in underlying_events.items()
+        for evt in evts
+        if not lot_size_map.get(evt['symbol'])
+    )
+    fallback_lot_size_map = {}
+    for underlying in missing_underlyings:
+        row = c.execute(
+            "SELECT lot_size FROM master_contract WHERE trading_symbol LIKE ? AND lot_size > 0 ORDER BY expiry DESC LIMIT 1",
+            (underlying + '%',),
+        ).fetchone()
+        if row:
+            fallback_lot_size_map[underlying] = row['lot_size']
+
+    for underlying, evts in underlying_events.items():
         for evt in evts:
-            evt['lot_size'] = lot_size_map.get(evt['symbol'], 0)
+            evt['lot_size'] = lot_size_map.get(evt['symbol']) or fallback_lot_size_map.get(underlying, 0)
+            evt['brokerage'] = _calculate_event_brokerage(evt, underlying)
 
     # Compute snapshot-accurate Net P&L from the final state (last_trade from latest snapshot).
     # This matches the Daily Timeline's Current P&L calculation which sums unbooked_pnl +
@@ -4067,13 +4122,17 @@ def api_profile_pnl_history(slug):
     result = []
     cumulative = 0.0
     for d in days:
-        metrics = get_daily_pnl_metrics(c, profile['id'], d)
-        daily_pnl = round(metrics['todays_pnl'], 2)
-        cumulative = round(cumulative + daily_pnl, 2)
+        metrics      = get_daily_pnl_metrics(c, profile['id'], d)
+        booked_pnl   = round(metrics['booked_pnl'], 2)
+        unbooked_pnl = round(metrics['current_pnl'] - metrics['booked_pnl'], 2)
+        net_pnl      = round(metrics['current_pnl'], 2)
+        cumulative   = round(cumulative + booked_pnl, 2)
         result.append({
-            'date':       d,
-            'daily_pnl':  daily_pnl,
-            'cumulative': cumulative,
+            'date':         d,
+            'booked_pnl':   booked_pnl,
+            'unbooked_pnl': unbooked_pnl,
+            'net_pnl':      net_pnl,
+            'cumulative':   cumulative,
         })
 
     conn.close()
@@ -4233,20 +4292,27 @@ def api_profile_pnl_breakdown(slug):
         """, (profile['id'], date_str)).fetchone()
 
         groups = {}
+        groups_booked   = {}
+        groups_unbooked = {}
         if snap:
             raw = json.loads(snap['raw_data'])
             for item in raw.get('data', []):
                 underlying = item.get('trading_symbol') or item.get('underlying', 'UNKNOWN')
                 for trade in item.get('trades', []):
-                    pnl = (trade.get('unbooked_pnl', 0) + trade.get('booked_profit_loss', 0))
+                    booked   = trade.get('booked_profit_loss', 0)
+                    unbooked = trade.get('unbooked_pnl', 0)
+                    pnl      = booked + unbooked
                     if group_by == 'underlying':
                         key = underlying
                     else:
                         key = (trade.get('instrument_info') or {}).get('expiry', 'N/A')
-                    groups[key] = round(groups.get(key, 0) + pnl, 2)
+                    groups[key]          = round(groups.get(key, 0)          + pnl,      2)
+                    groups_booked[key]   = round(groups_booked.get(key, 0)   + booked,   2)
+                    groups_unbooked[key] = round(groups_unbooked.get(key, 0) + unbooked, 2)
 
         all_keys.update(groups.keys())
-        result.append({'date': date_str, 'groups': groups})
+        result.append({'date': date_str, 'groups': groups,
+                        'groups_booked': groups_booked, 'groups_unbooked': groups_unbooked})
         cur += timedelta(days=1)
 
     conn.close()

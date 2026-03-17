@@ -96,16 +96,6 @@
     .status-msg { font-size: 13px; color: #666; margin-bottom: 8px; min-height: 18px; }
     .status-msg.err { color: #dc3545; }
 
-    /* Breakdown section tabs */
-    .breakdown-tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #dee2e6; }
-    .breakdown-tab {
-        padding: 8px 20px; border: none; background: none; cursor: pointer;
-        font-size: 14px; font-weight: 500; color: #666;
-        border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.15s;
-    }
-    .breakdown-tab:hover { color: #007bff; }
-    .breakdown-tab.active { color: #007bff; border-bottom-color: #007bff; }
-
     /* Tables */
     .table-wrap { overflow-x: auto; margin-top: 20px; }
     .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -119,10 +109,6 @@
     .neg { color: #dc3545; font-weight: 600; }
     .zero { color: #999; }
 
-    /* Breakdown chart */
-    .bkd-chart-wrap { position: relative; height: 320px; margin-bottom: 8px; }
-
-    /* Color palette for stacked bars */
 </style>
 {% endblock %}
 
@@ -151,6 +137,12 @@
         <div class="ctrl-group"><label>From</label><input type="date" id="dailyFrom" /></div>
         <div class="ctrl-group"><label>To</label><input type="date" id="dailyTo" /></div>
         <button class="btn btn-primary" id="dailyFetchBtn" onclick="fetchDaily()">Load</button>
+        <div class="ctrl-group" id="underlyingFilterGroup" style="display:none;">
+          <label>Underlying</label>
+          <select id="underlyingSelect" onchange="applyUnderlyingFilter(this.value)">
+            <option value="">All</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -235,27 +227,6 @@
     </div>
   </div>
 
-  <!-- ── Breakdown section ── -->
-  <div class="section" id="breakdownSection" style="display:none;">
-    <h2>🔍 Breakdown <span style="font-size:13px;color:#888;font-weight:400;" id="breakdownRange"></span></h2>
-
-    <div class="breakdown-tabs">
-      <button class="breakdown-tab active" id="tabUnderlying" onclick="setBreakdownTab('underlying')">By Underlying</button>
-      <button class="breakdown-tab"        id="tabExpiry"     onclick="setBreakdownTab('expiry')">By Expiry</button>
-    </div>
-
-    <div class="status-msg" id="bkdStatus"></div>
-
-    <div class="bkd-chart-wrap"><canvas id="bkdChart"></canvas></div>
-
-    <div class="table-wrap">
-      <table class="data-table" id="bkdTable">
-        <thead><tr id="bkdTableHead"></tr></thead>
-        <tbody id="bkdTableBody"></tbody>
-      </table>
-    </div>
-  </div>
-
   <!-- ── Daily breakdown table ── -->
   <div class="section" id="tableSection" style="display:none;">
     <h2>📋 Breakdown</h2>
@@ -273,12 +244,11 @@
 {% block scripts %}
 <script>
 const SLUG = '{{ slug }}';
-let currentMode   = 'daily';
-let chartMode     = 'cumulative';
-let chartInst     = null;
-let bkdChartInst  = null;
-let allData       = [];
-let breakdownTab  = 'underlying';
+let currentMode       = 'daily';
+let chartMode         = 'cumulative';
+let chartInst         = null;
+let allData           = [];
+let underlyingBkdData = null;
 
 // ── Tooltip wiring ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -328,6 +298,7 @@ function setMode(mode) {
         worstCard.querySelector('.label').textContent = 'Trough PnL';
         profCard.style.display = 'none';
         document.getElementById('activeLabel').textContent = 'Data Points';
+        document.getElementById('underlyingFilterGroup').style.display = 'none';
     } else {
         bestCard.querySelector('.label').innerHTML =
             'Best Day';
@@ -339,11 +310,11 @@ function setMode(mode) {
 }
 
 function hideResults() {
-    document.getElementById('statCards').style.display       = 'none';
-    document.getElementById('chartMeta').style.display      = 'none';
-    document.getElementById('chartWrap').style.display      = 'none';
-    document.getElementById('tableSection').style.display   = 'none';
-    document.getElementById('breakdownSection').style.display = 'none';
+    document.getElementById('statCards').style.display          = 'none';
+    document.getElementById('chartMeta').style.display         = 'none';
+    document.getElementById('chartWrap').style.display         = 'none';
+    document.getElementById('tableSection').style.display      = 'none';
+    document.getElementById('underlyingFilterGroup').style.display = 'none';
     setStatus('');
 }
 
@@ -385,7 +356,7 @@ async function fetchDaily() {
         allData = json.data;
         renderDailyResults(allData);
         setStatus('');
-        loadBreakdown(from, to);
+        loadUnderlyingDropdown(from, to);
     } catch(e) { setStatus('Error: ' + e.message, true); }
     finally    { btn.disabled = false; }
 }
@@ -413,15 +384,16 @@ async function fetchIntraday() {
 // ── Render: Daily ─────────────────────────────────────────────────────
 function renderDailyResults(data) {
     if (!data.length) { setStatus('No data for this date range.'); return; }
-    const actives  = data.filter(d => d.daily_pnl !== 0);
+    const deltas      = data.map((d, i) => i === 0 ? d.net_pnl : round2(d.net_pnl - data[i-1].net_pnl));
+    const activeDeltas = deltas.filter(v => v !== 0);
     const total    = data[data.length - 1].cumulative;
-    const best     = actives.length ? Math.max(...actives.map(d => d.daily_pnl)) : 0;
-    const worst    = actives.length ? Math.min(...actives.map(d => d.daily_pnl)) : 0;
-    const profDays = actives.filter(d => d.daily_pnl > 0).length;
+    const best     = activeDeltas.length ? Math.max(...activeDeltas) : 0;
+    const worst    = activeDeltas.length ? Math.min(...activeDeltas) : 0;
+    const profDays = activeDeltas.filter(v => v > 0).length;
 
-    setStatCards(total, best, worst, `${profDays} / ${actives.length}`, actives.length);
+    setStatCards(total, best, worst, `${profDays} / ${activeDeltas.length}`, activeDeltas.length);
     showResultsUI();
-    document.getElementById('btnRaw').textContent = 'Daily';
+    document.getElementById('btnRaw').textContent = 'Net PnL';
     document.getElementById('btnCumulative').textContent = 'Cumulative';
     chartMode = 'cumulative';
     document.getElementById('btnCumulative').classList.add('active');
@@ -430,22 +402,35 @@ function renderDailyResults(data) {
 
     document.getElementById('tableHead').innerHTML =
         `<th>Date</th>
-         <th>Daily PnL <span class="info-icon" style="vertical-align:middle;">?<div class="tooltip-popup">
-           <strong>Daily PnL</strong> = portfolio value at day's last snapshot<br>
-           minus the carry-over unbooked value from the previous day.<br><br>
-           Includes <strong>realized</strong> P&amp;L from trades closed today
-           and the <strong>change in unrealized</strong> P&amp;L on open positions.
+         <th>Booked PnL <span class="info-icon" style="vertical-align:middle;">?<div class="tooltip-popup">
+           <strong>Booked PnL</strong> = total realized P&amp;L from all closed trades<br>
+           at the day's last snapshot (absolute, cumulative from inception).
          </div></span></th>
-         <th>Cumulative PnL</th>`;
+         <th>Unbooked PnL <span class="info-icon" style="vertical-align:middle;">?<div class="tooltip-popup">
+           <strong>Unbooked PnL</strong> = total unrealized P&amp;L on open positions<br>
+           at the day's last snapshot (absolute).
+         </div></span></th>
+         <th>Net PnL <span class="info-icon" style="vertical-align:middle;">?<div class="tooltip-popup">
+           <strong>Net PnL</strong> = Booked PnL + Unbooked PnL<br>
+           (total absolute portfolio value at day's last snapshot).
+         </div></span></th>
+         <th>Cumulative Booked PnL <span class="info-icon" style="vertical-align:middle;">?<div class="tooltip-popup">
+           <strong>Cumulative Booked PnL</strong> = running sum of Booked PnL across all days<br>
+           in the selected date range (total realized P&amp;L accumulated day over day).
+         </div></span></th>`;
     wireTooltips(document.getElementById('tableHead'));
 
     const rows = [...data].reverse();
     document.getElementById('tableBody').innerHTML = rows.map(d => {
-        const dc = d.daily_pnl > 0 ? 'pos' : d.daily_pnl < 0 ? 'neg' : 'zero';
-        const cc = d.cumulative  > 0 ? 'pos' : d.cumulative  < 0 ? 'neg' : 'zero';
+        const bc = d.booked_pnl   > 0 ? 'pos' : d.booked_pnl   < 0 ? 'neg' : 'zero';
+        const uc = d.unbooked_pnl > 0 ? 'pos' : d.unbooked_pnl < 0 ? 'neg' : 'zero';
+        const nc = d.net_pnl      > 0 ? 'pos' : d.net_pnl      < 0 ? 'neg' : 'zero';
+        const cc = d.cumulative   > 0 ? 'pos' : d.cumulative   < 0 ? 'neg' : 'zero';
         return `<tr>
             <td><a href="/profile/${SLUG}/${d.date}" style="color:#007bff;text-decoration:none;">${d.date}</a></td>
-            <td class="${dc}">${fmt(d.daily_pnl)}</td>
+            <td class="${bc}">${fmt(d.booked_pnl)}</td>
+            <td class="${uc}">${fmt(d.unbooked_pnl)}</td>
+            <td class="${nc}">${fmt(d.net_pnl)}</td>
             <td class="${cc}">${fmt(d.cumulative)}</td>
         </tr>`;
     }).join('');
@@ -516,10 +501,10 @@ function switchChart(mode) {
 function buildDailyChart(data, mode) {
     const isCum  = (mode === 'cumulative');
     const labels = data.map(d => d.date);
-    const values = data.map(d => isCum ? d.cumulative : d.daily_pnl);
+    const values = data.map(d => isCum ? d.cumulative : d.net_pnl);
     const colors = values.map(v => v >= 0 ? 'rgba(40,167,69,0.8)' : 'rgba(220,53,69,0.8)');
-    if (isCum) drawLineChart('pnlChart', chartInst, labels, values, 'Cumulative PnL (₹)', inst => chartInst = inst);
-    else        drawBarChart('pnlChart', chartInst, labels, values, colors, 'Daily PnL (₹)', inst => chartInst = inst);
+    if (isCum) drawLineChart('pnlChart', chartInst, labels, values, 'Cumulative Booked PnL (₹)', inst => chartInst = inst);
+    else        drawLineChart('pnlChart', chartInst, labels, values, 'Net PnL (₹)', inst => chartInst = inst);
 }
 
 function buildIntradayChart(data, mode) {
@@ -533,117 +518,102 @@ function buildIntradayChart(data, mode) {
     else        drawBarChart('pnlChart', chartInst, fullLabels, values, colors, yLabel, inst => chartInst = inst);
 }
 
-// ── Breakdown: fetch & render ─────────────────────────────────────────
-let bkdData = null;
-
-async function loadBreakdown(from, to) {
-    bkdData = null;
-    const range = (from === to) ? from : `${from} → ${to}`;
-    document.getElementById('breakdownRange').textContent = range;
-    document.getElementById('bkdStatus').textContent = 'Loading breakdown…';
-    document.getElementById('breakdownSection').style.display = 'block';
-    await fetchBreakdown(from, to, breakdownTab);
-}
-
-async function setBreakdownTab(tab) {
-    breakdownTab = tab;
-    document.getElementById('tabUnderlying').classList.toggle('active', tab === 'underlying');
-    document.getElementById('tabExpiry').classList.toggle('active',     tab === 'expiry');
-    const from = currentMode === 'daily'
-        ? document.getElementById('dailyFrom').value
-        : document.getElementById('intradayFrom').value;
-    const to   = currentMode === 'daily'
-        ? document.getElementById('dailyTo').value
-        : document.getElementById('intradayTo').value;
-    await fetchBreakdown(from, to, tab);
-}
-
-async function fetchBreakdown(from, to, groupBy) {
-    document.getElementById('bkdStatus').textContent = 'Loading…';
+// ── Underlying dropdown ───────────────────────────────────────────────
+async function loadUnderlyingDropdown(from, to) {
+    underlyingBkdData = null;
+    const filterGroup = document.getElementById('underlyingFilterGroup');
+    filterGroup.style.display = 'none';
     try {
-        const r    = await fetch(`/api/profile/${SLUG}/pnl_breakdown?from=${from}&to=${to}&group_by=${groupBy}`);
+        const r    = await fetch(`/api/profile/${SLUG}/pnl_breakdown?from=${from}&to=${to}&group_by=underlying`);
         const json = await r.json();
-        if (!json.success) throw new Error(json.error || 'API error');
-        bkdData = json;
-        renderBreakdown(json);
-        document.getElementById('bkdStatus').textContent = '';
-    } catch(e) {
-        document.getElementById('bkdStatus').textContent = 'Error loading breakdown: ' + e.message;
-        document.getElementById('bkdStatus').className = 'status-msg err';
-    }
+        if (!json.success) return;
+        underlyingBkdData = json;
+        const keys = json.keys;
+        if (!keys.length) return;
+        const sel = document.getElementById('underlyingSelect');
+        sel.innerHTML = '<option value="">All</option>' +
+            keys.map(k => `<option value="${k}">${k}</option>`).join('');
+        filterGroup.style.display = '';
+    } catch(e) { /* silently fail */ }
 }
 
-const BKD_PALETTE = [
-    '#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f',
-    '#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac',
-    '#36b5b0','#d37295','#a0cbe8','#ffbe7d','#8cd17d'
-];
-
-function renderBreakdown(json) {
-    const keys = json.keys;   // sorted list of all group keys
-    const data = json.data;   // [{date, groups:{...}}, ...]
-
-    // Filter to only days that have any data
-    const activeDays = data.filter(d => Object.keys(d.groups).length > 0);
-    if (!activeDays.length) {
-        document.getElementById('bkdStatus').textContent = 'No position data for this range.';
-        if (bkdChartInst) { bkdChartInst.destroy(); bkdChartInst = null; }
-        document.getElementById('bkdTableBody').innerHTML = '';
-        document.getElementById('bkdTableHead').innerHTML = '';
+function applyUnderlyingFilter(key) {
+    if (!key) {
+        // Restore full portfolio view
+        document.getElementById('chartMeta').style.display = 'flex';
+        renderDailyResults(allData);
         return;
     }
+    if (!underlyingBkdData) return;
 
-    const labels   = activeDays.map(d => d.date);
-    const datasets = keys.map((key, i) => ({
-        label: key,
-        data:  activeDays.map(d => round2(d.groups[key] || 0)),
-        backgroundColor: BKD_PALETTE[i % BKD_PALETTE.length],
-        borderWidth: 0,
-    }));
+    const activeDays = underlyingBkdData.data.filter(d => Object.keys(d.groups).length > 0);
+    if (!activeDays.length) { setStatus('No breakdown data for this range.', true); return; }
 
-    if (bkdChartInst) { bkdChartInst.destroy(); bkdChartInst = null; }
-    const ctx = document.getElementById('bkdChart').getContext('2d');
-    bkdChartInst = new Chart(ctx, {
-        type: 'bar',
-        data: { labels, datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: { position: 'bottom', labels: { font: { size: 11 }, boxWidth: 12 } },
-                tooltip: {
-                    callbacks: {
-                        label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`
-                    }
-                }
-            },
-            scales: {
-                x: { stacked: true, ticks: { maxTicksLimit: 15, font: { size: 11 } }, grid: { display: false } },
-                y: {
-                    stacked: true,
-                    title: { display: true, text: 'PnL (₹)', font: { size: 12 } },
-                    grid:  { color: 'rgba(0,0,0,0.05)' },
-                    ticks: { callback: v => '₹' + v.toLocaleString('en-IN') }
-                }
-            }
-        }
+    const netDeltas    = computeBkdDeltas(activeDays, [key], 'groups');
+    const bookedDeltas = computeBkdDeltas(activeDays, [key], 'groups_booked');
+
+    const dailyNet     = netDeltas.map(d    => round2(d.groups[key] || 0));
+    const dailyBooked  = bookedDeltas.map(d => round2(d.groups[key] || 0));
+    const activeDeltas = dailyNet.filter(v => v !== 0);
+
+    // Build cumulative series (net) for chart
+    let cumNet = 0, cumBooked = 0;
+    const labels = [], cumNetValues = [], cumBookedValues = [], dailyUnbooked = [];
+    netDeltas.forEach((d, i) => {
+        cumNet    = round2(cumNet    + dailyNet[i]);
+        cumBooked = round2(cumBooked + dailyBooked[i]);
+        labels.push(d.date);
+        cumNetValues.push(cumNet);
+        cumBookedValues.push(cumBooked);
+        dailyUnbooked.push(round2(dailyNet[i] - dailyBooked[i]));
     });
 
-    // Table: columns = Date + each key + Total
-    document.getElementById('bkdTableHead').innerHTML =
-        `<th>Date</th>` + keys.map(k => `<th>${k}</th>`).join('') + `<th>Total</th>`;
+    // Stat cards (based on net daily PnL)
+    const total    = cumNet;
+    const best     = activeDeltas.length ? Math.max(...activeDeltas) : 0;
+    const worst    = activeDeltas.length ? Math.min(...activeDeltas) : 0;
+    const profDays = activeDeltas.filter(v => v > 0).length;
+    setStatCards(total, best, worst, `${profDays} / ${activeDeltas.length}`, activeDeltas.length);
 
-    document.getElementById('bkdTableBody').innerHTML = [...activeDays].reverse().map(d => {
-        const total = round2(Object.values(d.groups).reduce((s, v) => s + v, 0));
-        const tc    = total > 0 ? 'pos' : total < 0 ? 'neg' : 'zero';
-        const cells = keys.map(k => {
-            const v  = round2(d.groups[k] || 0);
-            const vc = v > 0 ? 'pos' : v < 0 ? 'neg' : 'zero';
-            return `<td class="${vc}">${v !== 0 ? fmt(v) : '—'}</td>`;
-        }).join('');
-        return `<tr><td>${d.date}</td>${cells}<td class="${tc}">${fmt(total)}</td></tr>`;
+    // Chart — hide the cumulative/daily toggle; show cumulative net line
+    document.getElementById('chartMeta').style.display = 'none';
+    drawLineChart('pnlChart', chartInst, labels, cumNetValues,
+        `${key} Cumulative PnL (₹)`, inst => chartInst = inst);
+
+    // Breakdown table — Date | Booked PnL | Unbooked PnL | Net PnL | Cumulative
+    document.getElementById('tableHead').innerHTML =
+        `<th>Date</th><th>Booked PnL</th><th>Unbooked PnL</th><th>Net PnL</th><th>Cumulative</th>`;
+    document.getElementById('tableBody').innerHTML = [...netDeltas].reverse().map((d, i) => {
+        const idx  = netDeltas.length - 1 - i;
+        const bv   = dailyBooked[idx];
+        const uv   = dailyUnbooked[idx];
+        const nv   = dailyNet[idx];
+        const cv   = cumNetValues[idx];
+        const cls  = v => v > 0 ? 'pos' : v < 0 ? 'neg' : 'zero';
+        return `<tr>
+            <td>${d.date}</td>
+            <td class="${cls(bv)}">${bv !== 0 ? fmt(bv) : '—'}</td>
+            <td class="${cls(uv)}">${uv !== 0 ? fmt(uv) : '—'}</td>
+            <td class="${cls(nv)}">${nv !== 0 ? fmt(nv) : '—'}</td>
+            <td class="${cls(cv)}">${fmt(cv)}</td>
+        </tr>`;
     }).join('');
+}
+
+// Convert absolute snapshot values into day-over-day deltas per group.
+// Day 0 keeps its raw value (no prior day to subtract from).
+// groupsField: which field to read from each day ('groups', 'groups_booked', 'groups_unbooked')
+function computeBkdDeltas(activeDays, keys, groupsField = 'groups') {
+    return activeDays.map((day, i) => {
+        const src = day[groupsField] || {};
+        if (i === 0) return { date: day.date, groups: { ...src } };
+        const prev    = activeDays[i - 1][groupsField] || {};
+        const deltaGroups = {};
+        keys.forEach(k => {
+            deltaGroups[k] = round2((src[k] || 0) - (prev[k] || 0));
+        });
+        return { date: day.date, groups: deltaGroups };
+    });
 }
 
 // ── Generic chart drawers ─────────────────────────────────────────────
