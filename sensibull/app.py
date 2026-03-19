@@ -1140,6 +1140,7 @@ def api_profile_all_underlyings(slug):
     underlying_events = {}
     underlyings_seen = set()
     latest_underlying_price = {}  # underlying -> latest ltp seen in snapshots
+    actual_expiry_map = {}        # trading_symbol -> actual expiry (YYYY-MM-DD) from instrument_info
 
     for snap in snapshots:
         snap_id = snap['id']
@@ -1151,12 +1152,17 @@ def api_profile_all_underlyings(slug):
         except Exception:
             continue
 
-        # Track latest underlying_price from each snapshot's data array
+        # Track latest underlying_price and actual instrument_info expiry per symbol
         for item in raw.get('data', []):
             sym = (item.get('trading_symbol') or '').upper()
             price = item.get('underlying_price')
             if sym and price is not None:
                 latest_underlying_price[sym] = price
+            for trade in item.get('trades', []):
+                tsym = trade.get('trading_symbol', '')
+                actual_expiry = (trade.get('instrument_info') or {}).get('expiry', '')
+                if tsym and actual_expiry:
+                    actual_expiry_map[tsym] = actual_expiry
 
         trades_map = normalize_trades_for_diff(raw.get('data', []))
 
@@ -1282,7 +1288,7 @@ def api_profile_all_underlyings(slug):
                     'type': event_type,
                     'symbol': symbol,
                     'product': product,
-                    'expiry_date': _parse_expiry_from_symbol(symbol),
+                    'expiry_date': actual_expiry_map.get(symbol) or _parse_expiry_from_symbol(symbol),
                     'before_quantity': before_qty,
                     'after_quantity': after_qty,
                     'quantity_diff': after_qty - before_qty,
@@ -3014,17 +3020,30 @@ def _get_nfo_trading_holidays(year, holiday_api_url=None, holiday_api_key=None):
         MARKET_HOLIDAY_CACHE[cache_key] = holidays
     return holidays
 
+# Expiry weekday per underlying (0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri).
+# Default is Tuesday for all instruments (NIFTY, BANKNIFTY, FINNIFTY, stocks, etc.).
+_EXPIRY_WEEKDAY = {
+    'SENSEX':     3,  # Thursday
+    'MIDCPNIFTY': 0,  # Monday
+}
+_DEFAULT_EXPIRY_WEEKDAY = 1  # Tuesday
+
+
 def _resolve_last_trading_day_of_month(base, year, month, holiday_api_url=None, holiday_api_key=None):
-    del base  # Reserved for custom exchange-specific logic in future.
-    last_day = calendar.monthrange(year, month)[1]
+    target_weekday = _EXPIRY_WEEKDAY.get((base or '').upper(), _DEFAULT_EXPIRY_WEEKDAY)
     nfo_holidays = _get_nfo_trading_holidays(
         year,
         holiday_api_url=holiday_api_url,
         holiday_api_key=holiday_api_key
     )
+    last_day = calendar.monthrange(year, month)[1]
+    # Find the last occurrence of target_weekday in the month
     candidate = date(year, month, last_day)
+    while candidate.weekday() != target_weekday:
+        candidate -= timedelta(days=1)
+    # If that day is a holiday, walk back to the previous trading day
     while candidate.weekday() >= 5 or candidate in nfo_holidays:
-        candidate = candidate - timedelta(days=1)
+        candidate -= timedelta(days=1)
     return candidate.day
 
 def convert_broker_symbol_to_openalgo_symbol(
@@ -3412,6 +3431,99 @@ def api_openalgo_place_order():
             },
             'order_payload': order_payload
         }), 502
+
+# ==================== OPENALGO MARGIN ====================
+
+@app.route('/api/openalgo/margin', methods=['POST'])
+@login_required
+def api_openalgo_margin():
+    """Calculate margin for positions by trying active OpenAlgo profiles in order."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+
+    positions = data.get('positions', [])
+    if not positions:
+        return jsonify({'success': False, 'error': 'positions array is required'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    profiles = c.execute("""
+        SELECT id, profile_name, host, api_key
+        FROM openalgo_profiles
+        WHERE is_active = 1
+        ORDER BY id
+    """).fetchall()
+    conn.close()
+
+    if not profiles:
+        return jsonify({'success': False, 'error': 'No active OpenAlgo profile configured. Please add one in OpenAlgo settings.'}), 404
+
+    # Convert broker symbols to OpenAlgo symbols
+    converted_positions = []
+    for pos in positions:
+        converted = dict(pos)
+        broker_sym = (pos.get('symbol') or '').strip().upper()
+        if broker_sym:
+            try:
+                converted['symbol'] = convert_broker_symbol_to_openalgo_symbol(broker_sym)
+            except Exception:
+                pass  # leave as-is if conversion fails
+        converted_positions.append(converted)
+
+    BATCH_SIZE = 50
+    # Fields that represent required/used margin and should be summed across batches.
+    # Account-level fields (available_margin, net, etc.) are kept from the first batch.
+    ADDITIVE_KEYS = {
+        'required_margin', 'total_margin_required',
+        'span_margin', 'span', 'exposure_margin', 'exposure',
+        'additional_margin', 'bo_margin', 'cash_margin',
+    }
+    last_error = None
+    for profile in profiles:
+        host = normalize_openalgo_host(profile['host'])
+        margin_url = f"{host}/api/v1/margin"
+        try:
+            merged_data = None
+            batches = [converted_positions[i:i+BATCH_SIZE] for i in range(0, len(converted_positions), BATCH_SIZE)]
+            failed = False
+            for batch in batches:
+                payload = {
+                    'apikey': profile['api_key'],
+                    'positions': batch
+                }
+                response = http_requests.post(margin_url, json=payload, timeout=10)
+                result = response.json()
+                if result.get('status') != 'success':
+                    last_error = result.get('message') or result.get('error') or 'OpenAlgo returned error'
+                    failed = True
+                    break
+                batch_data = result.get('data', {})
+                if not isinstance(batch_data, dict):
+                    continue
+                if merged_data is None:
+                    # First batch: take all fields as the base
+                    merged_data = dict(batch_data)
+                else:
+                    # Subsequent batches: sum position-level margin fields; keep account-level from first batch
+                    for k, v in batch_data.items():
+                        if k in ADDITIVE_KEYS and isinstance(v, (int, float)):
+                            merged_data[k] = (merged_data.get(k) or 0) + v
+            if not failed and merged_data is not None:
+                return jsonify({
+                    'success': True,
+                    'data': merged_data,
+                    'profile_name': profile['profile_name']
+                })
+        except http_requests.RequestException as exc:
+            last_error = f"Failed to reach {profile['profile_name']}: {str(exc)}"
+        except Exception as exc:
+            last_error = str(exc)
+
+    converted_syms = [p.get('symbol') for p in converted_positions]
+    print(f"[OpenAlgo margin] Converted symbols sent: {converted_syms}. Last error: {last_error}")
+    return jsonify({'success': False, 'error': last_error or 'All OpenAlgo profiles failed'}), 502
+
 
 # ==================== MASTER CONTRACT STRIKE INFO ====================
 
@@ -4283,6 +4395,67 @@ def api_profile_pnl_snapshots(slug):
                     'count': len(result)})
 
 
+@app.route('/api/profile/<slug>/pnl_snapshots_by_expiry/<date>')
+@login_required
+def api_pnl_snapshots_by_expiry(slug, date):
+    """Return PnL time series filtered to a specific underlying + set of symbols.
+
+    Query params:
+        underlying  - e.g. "HDFCBANK"
+        symbols     - comma-separated trading symbols
+        from_date   - YYYY-MM-DD start date (defaults to <date>)
+        to_date     - YYYY-MM-DD end date   (defaults to <date>)
+    """
+    underlying_filter = request.args.get('underlying', '')
+    symbols_param     = request.args.get('symbols', '')
+    symbol_set        = set(s.strip() for s in symbols_param.split(',') if s.strip())
+    from_date         = request.args.get('from_date', date)
+    to_date           = request.args.get('to_date',   date)
+
+    conn = get_db()
+    c    = conn.cursor()
+
+    profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    snapshots = c.execute("""
+        SELECT id, timestamp, raw_data FROM snapshots
+        WHERE profile_id = ? AND date(timestamp) BETWEEN ? AND ?
+        ORDER BY timestamp ASC
+    """, (profile['id'], from_date, to_date)).fetchall()
+
+    conn.close()
+
+    multi_day = from_date != to_date
+
+    result = []
+    for snap in snapshots:
+        raw = json.loads(snap['raw_data'])
+        pnl = 0.0
+        for item in raw.get('data', []):
+            item_underlying = item.get('trading_symbol') or item.get('underlying', '')
+            if underlying_filter and item_underlying != underlying_filter:
+                continue
+            for trade in item.get('trades', []):
+                if symbol_set and trade.get('trading_symbol', '') not in symbol_set:
+                    continue
+                pnl += (trade.get('unbooked_pnl', 0) or 0) + (trade.get('booked_profit_loss', 0) or 0)
+
+        ts = snap['timestamp'][:19].replace('T', ' ')
+        try:
+            dt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+            ts_display = dt.strftime('%d-%b %H:%M') if multi_day else dt.strftime('%H:%M')
+        except Exception:
+            ts_display = ts[:16]
+
+        result.append({'timestamp': ts_display, 'pnl': round(pnl, 2)})
+
+    return jsonify({'success': True, 'data': result, 'underlying': underlying_filter,
+                    'count': len(result), 'from_date': from_date, 'to_date': to_date})
+
+
 @app.route('/api/profile/<slug>/pnl_breakdown')
 @login_required
 def api_profile_pnl_breakdown(slug):
@@ -4365,6 +4538,42 @@ def api_profile_pnl_breakdown(slug):
         'group_by': group_by,
         'slug':     slug
     })
+
+
+@app.route('/api/profile/<slug>/symbol_expiry_map/<date>')
+@login_required
+def api_symbol_expiry_map(slug, date):
+    """Return {trading_symbol: expiry_date} from the last snapshot of the given date.
+    Used by the frontend to display correct expiry dates instead of computed ones.
+    """
+    conn = get_db()
+    c    = conn.cursor()
+
+    profile = c.execute("SELECT * FROM profiles WHERE slug = ?", (slug,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    snap = c.execute("""
+        SELECT raw_data FROM snapshots
+        WHERE profile_id = ? AND date(timestamp) = ?
+        ORDER BY timestamp DESC LIMIT 1
+    """, (profile['id'], date)).fetchone()
+
+    conn.close()
+
+    if not snap:
+        return jsonify({'success': True, 'map': {}})
+
+    result = {}
+    for item in json.loads(snap['raw_data']).get('data', []):
+        for trade in item.get('trades', []):
+            sym    = trade.get('trading_symbol', '')
+            expiry = (trade.get('instrument_info') or {}).get('expiry', '')
+            if sym and expiry:
+                result[sym] = expiry
+
+    return jsonify({'success': True, 'map': result})
 
 
 @app.route('/api/profile/<slug>/pnl_by_expiry/<date>')
