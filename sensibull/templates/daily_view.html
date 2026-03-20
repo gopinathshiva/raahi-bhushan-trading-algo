@@ -628,50 +628,71 @@
         </div>
     </div>
 
-    <!-- PnL by Expiry Modal -->
-    <div id="pnl-expiry-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:11000; overflow-y:auto;">
-        <div style="background:#fff; margin:3vh auto; padding:24px; width:min(900px,96vw); border-radius:10px;
-                    box-shadow:0 6px 24px rgba(0,0,0,0.2); position:relative;">
+    <!-- Intraday P&L Curve Modal -->
+    <div id="intraday-pnl-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:11500; overflow-y:auto;">
+        <div style="background:#fff; margin:3vh auto; padding:24px; width:min(960px,96vw); border-radius:10px; box-shadow:0 6px 28px rgba(0,0,0,0.25); position:relative;">
 
             <!-- Header -->
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
                 <div>
-                    <h3 id="pem-title" style="margin:0 0 4px; font-size:1.15em; color:#333;">PnL by Expiry</h3>
-                    <div id="pem-meta" style="font-size:0.82em; color:#888;"></div>
+                    <h3 id="intraday-modal-title" style="margin:0 0 3px; font-size:1.15em; color:#333;">Intraday P&L Curve</h3>
+                    <div id="intraday-modal-subtitle" style="font-size:0.82em; color:#888;"></div>
                 </div>
-                <button onclick="closePnlExpiryModal()"
-                        style="background:none;border:none;font-size:1.6em;cursor:pointer;color:#666;line-height:1;padding:0 4px;">&times;</button>
+                <div style="display:flex; align-items:center; gap:14px;">
+                    <!-- Legend -->
+                    <span style="font-size:12px; display:inline-flex; align-items:center; gap:5px; color:#555;">
+                        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#570df8;"></span>MTM P&L
+                    </span>
+                    <span style="font-size:12px; display:inline-flex; align-items:center; gap:5px; color:#555;">
+                        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f000b8;"></span>Drawdown
+                    </span>
+                    <!-- Refresh -->
+                    <button id="intraday-refresh-btn" onclick="refreshIntradayPnl()" style="padding:5px 14px; background:#570df8; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:500;">Refresh</button>
+                    <!-- Close -->
+                    <button onclick="closeIntradayPnlModal()" style="background:none; border:none; font-size:1.6em; cursor:pointer; color:#666; line-height:1; padding:0 4px;">&times;</button>
+                </div>
             </div>
 
-            <!-- Underlying tabs (shown when multiple underlyings) -->
-            <div id="pem-tabs" style="display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid #dee2e6; flex-wrap:wrap;"></div>
+            <!-- Metric cards -->
+            <div id="intraday-metrics-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px;">
+                <div style="background:#f8f9fa; border:1px solid #e5e7eb; border-radius:8px; padding:14px 16px;">
+                    <div style="font-size:11px; color:#6b7280; font-weight:500; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:4px;">Current P&L</div>
+                    <div id="icard-current-val" style="font-size:1.25em; font-weight:700;">—</div>
+                </div>
+                <div style="background:#f8f9fa; border:1px solid #e5e7eb; border-radius:8px; padding:14px 16px;">
+                    <div style="font-size:18px; color:#16a34a; line-height:1; margin-bottom:2px;">↗</div>
+                    <div style="font-size:11px; color:#6b7280; font-weight:500; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:4px;">Max P&L</div>
+                    <div id="icard-max-val" style="font-size:1.25em; font-weight:700; color:#16a34a;">—</div>
+                    <div id="icard-max-sub" style="font-size:11px; color:#9ca3af; margin-top:2px;">--:--</div>
+                </div>
+                <div style="background:#f8f9fa; border:1px solid #e5e7eb; border-radius:8px; padding:14px 16px;">
+                    <div style="font-size:18px; color:#dc2626; line-height:1; margin-bottom:2px;">↘</div>
+                    <div style="font-size:11px; color:#6b7280; font-weight:500; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:4px;">Min P&L</div>
+                    <div id="icard-min-val" style="font-size:1.25em; font-weight:700; color:#dc2626;">—</div>
+                    <div id="icard-min-sub" style="font-size:11px; color:#9ca3af; margin-top:2px;">--:--</div>
+                </div>
+                <div style="background:#f8f9fa; border:1px solid #e5e7eb; border-radius:8px; padding:14px 16px;">
+                    <div style="font-size:18px; color:#d97706; line-height:1; margin-bottom:2px;">⚠</div>
+                    <div style="font-size:11px; color:#6b7280; font-weight:500; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:4px;">Max Drawdown</div>
+                    <div id="icard-dd-val" style="font-size:1.25em; font-weight:700; color:#d97706;">—</div>
+                    <div style="font-size:11px; color:#9ca3af; margin-top:2px;">Peak to trough</div>
+                </div>
+            </div>
 
-            <!-- Status -->
-            <div id="pem-status" style="font-size:13px; color:#666; margin-bottom:8px; min-height:16px;"></div>
-
+            <!-- Loading state -->
+            <div id="intraday-loading" style="display:flex; align-items:center; justify-content:center; height:200px; gap:10px; color:#6b7280; font-size:13px;">
+                <span style="display:inline-block; width:18px; height:18px; border:2px solid #e5e7eb; border-top-color:#570df8; border-radius:50%; animation:intraday-spin 0.7s linear infinite;"></span>
+                Loading P&L data…
+            </div>
+            <!-- Empty state -->
+            <div id="intraday-empty" style="display:none; align-items:center; justify-content:center; height:200px; color:#9ca3af; font-size:13px; text-align:center; padding:0 20px;">
+                No snapshot data found for the selected date range — P&L curve will appear once trades are recorded.
+            </div>
             <!-- Chart -->
-            <div style="position:relative; height:280px; margin-bottom:20px;">
-                <canvas id="pem-chart"></canvas>
+            <div id="intraday-chart-wrap" style="display:none; position:relative; height:340px;">
+                <canvas id="intraday-pnl-chart"></canvas>
             </div>
 
-            <!-- Table -->
-            <div style="overflow-x:auto;">
-                <table id="pem-table" style="width:100%; border-collapse:collapse; font-size:13px;">
-                    <thead>
-                        <tr style="background:#f8f9fa;">
-                            <th style="padding:9px 12px; text-align:left; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Expiry</th>
-                            <th style="padding:9px 12px; text-align:right; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Total PnL</th>
-                            <th style="padding:9px 12px; text-align:right; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Unbooked</th>
-                            <th style="padding:9px 12px; text-align:right; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Booked</th>
-                            <th style="padding:9px 12px; text-align:right; font-weight:600; color:#333; border-bottom:2px solid #dee2e6;">Trades</th>
-                        </tr>
-                    </thead>
-                    <tbody id="pem-tbody"></tbody>
-                </table>
-            </div>
-
-            <!-- Trade detail accordion -->
-            <div id="pem-trade-detail" style="margin-top:18px;"></div>
         </div>
     </div>
 
@@ -689,11 +710,30 @@
             </div>
 
             <!-- Lot size note / status -->
-            <div id="payoff-status" style="font-size:0.83em; color:#666; margin-bottom:10px; min-height:18px;"></div>
+            <div id="payoff-status" style="font-size:0.83em; color:#666; margin-bottom:6px; min-height:18px;"></div>
+
+            <!-- Booked P&L toggle -->
+            <div id="payoff-booked-ctrl" style="display:none; margin-bottom:10px;">
+                <label style="cursor:pointer; user-select:none; font-size:0.88em; color:#555; display:inline-flex; align-items:center; gap:6px;">
+                    <input type="checkbox" id="payoff-include-booked" style="cursor:pointer;" />
+                    Include booked P&amp;L from closed positions
+                    (<span id="payoff-booked-amount"></span>)
+                    — shifts curve &amp; breakevens
+                </label>
+            </div>
 
             <!-- Chart -->
             <div style="position:relative; height:320px; margin-bottom:20px;">
                 <canvas id="payoff-canvas"></canvas>
+            </div>
+
+            <!-- Margin section -->
+            <div id="payoff-margin-section" style="margin-bottom:12px; padding:10px 14px; background:#f0f4ff; border-radius:6px; border:1px solid #d0d8ef; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <button id="payoff-fetch-margin-btn" onclick="fetchPayoffMargin()"
+                    style="padding:5px 12px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.82em; font-weight:600; white-space:nowrap;">
+                    💰 Fetch Margin
+                </button>
+                <div id="payoff-margin-info" style="font-size:0.83em; color:#555; display:flex; gap:14px; flex-wrap:wrap; align-items:center;"></div>
             </div>
 
             <!-- Stats row -->
@@ -707,12 +747,12 @@
                             <th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; font-weight:600;">Symbol</th>
                             <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #dee2e6; font-weight:600;">Type</th>
                             <th style="padding:8px 10px; text-align:center; border-bottom:2px solid #dee2e6; font-weight:600;">Strike</th>
-                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Qty (lots)</th>
-                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Lot Size</th>
+                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Lots</th>
+                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Quantity</th>
                             <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Avg Price</th>
                             <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">LTP</th>
                             <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Curr P&amp;L</th>
-                            <th style="padding:8px 10px; text-align:left; border-bottom:2px solid #dee2e6; font-weight:600;">Direction</th>
+                            <th style="padding:8px 10px; text-align:right; border-bottom:2px solid #dee2e6; font-weight:600;">Max Profit</th>
                         </tr>
                     </thead>
                     <tbody id="payoff-legs-tbody"></tbody>
@@ -842,6 +882,16 @@
         function getDayName(dayOfWeek) {
             const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
             return days[dayOfWeek] || 'Unknown';
+        }
+
+        // Populated from /api/profile/<slug>/symbol_expiry_map/<date>
+        // Maps trading_symbol → actual expiry date string (YYYY-MM-DD) from Sensibull snapshot
+        let _symbolExpiryMap = {};
+
+        function getExpiryDateForSymbol(symbol) {
+            const actual = _symbolExpiryMap[symbol];
+            if (actual) return new Date(actual + 'T00:00:00');
+            return getExpiryDateFromSymbolEnhanced(symbol);
         }
 
         function getLastDayOfWeekInMonth(month, year, dayOfWeek) {
@@ -1473,8 +1523,16 @@
             }
 
             try {
+                const datePart = window.location.pathname.split('/')[3] || '';
                 const res = await fetch('/api/profile_all_underlyings/' + slug + '?' + params.toString());
                 const data = await res.json();
+                if (datePart) {
+                    const expiryMapRes = await fetch(`/api/profile/${slug}/symbol_expiry_map/${datePart}`).catch(() => null);
+                    if (expiryMapRes) {
+                        const expiryMapJson = await expiryMapRes.json().catch(() => null);
+                        if (expiryMapJson && expiryMapJson.success) _symbolExpiryMap = expiryMapJson.map;
+                    }
+                }
                 
                 if (data.error) {
                     if (status) status.textContent = 'Error: ' + data.error;
@@ -2001,23 +2059,50 @@
                 if (!latestBySymbol[key]) latestBySymbol[key] = e;
             });
             let bookedPnl = 0, unbookedPnl = 0, exitPnl = 0, active = 0, closed = 0, brokerage = 0;
+            let peSellQty = 0, peBuyQty = 0, ceSellQty = 0, ceBuyQty = 0;
             Object.values(latestBySymbol).forEach(e => {
                 bookedPnl += Number(e.after_booked_pnl || 0);
                 unbookedPnl += Number(e.after_unbooked_pnl || 0);
-                if (e.type === 'EXITED' || Number(e.after_quantity || 0) === 0) closed++;
-                else active++;
+                const qty = Number(e.after_quantity || 0);
+                const isClosed = e.type === 'EXITED' || qty === 0;
+                if (isClosed) closed++;
+                else {
+                    active++;
+                    const sym = (e.symbol || '').toUpperCase();
+                    if (sym.endsWith('PE')) {
+                        if (qty < 0) peSellQty += Math.abs(qty);
+                        else peBuyQty += qty;
+                    } else if (sym.endsWith('CE')) {
+                        if (qty < 0) ceSellQty += Math.abs(qty);
+                        else ceBuyQty += qty;
+                    }
+                }
             });
             // Sum exit_pnl and brokerage from all events (each event is a distinct transaction)
             events.forEach(e => {
                 if (e.exit_pnl) exitPnl += Number(e.exit_pnl || 0);
                 brokerage += Number(e.brokerage || 0);
             });
-            return { bookedPnl, unbookedPnl, exitPnl, active, closed, brokerage, symbols: Object.keys(latestBySymbol).length };
+            return { bookedPnl, unbookedPnl, exitPnl, active, closed, brokerage, symbols: Object.keys(latestBySymbol).length, peSellQty, peBuyQty, ceSellQty, ceBuyQty };
         }
 
         function renderStatsBadge(stats, compact) {
             const c = v => v > 0 ? '#28a745' : (v < 0 ? '#dc3545' : '#888');
             const total = stats.bookedPnl + stats.unbookedPnl;
+            // Build PE/CE open quantity display (sell qty / buy qty)
+            function fmtOptQty(sell, buy) {
+                if (!sell && !buy) return null;
+                if (sell && buy) return `${sell}/<span style="color:#388e3c;">${buy}</span>`;
+                return sell ? `${sell}` : `<span style="color:#388e3c;">${buy}B</span>`;
+            }
+            const peFmt = fmtOptQty(stats.peSellQty || 0, stats.peBuyQty || 0);
+            const ceFmt = fmtOptQty(stats.ceSellQty || 0, stats.ceBuyQty || 0);
+            const qtyParts = [];
+            if (peFmt) qtyParts.push(`<span title="PE open qty (sell/buy)" style="color:#c62828;font-weight:bold;">PE:${peFmt}</span>`);
+            if (ceFmt) qtyParts.push(`<span title="CE open qty (sell/buy)" style="color:#2e7d32;font-weight:bold;">CE:${ceFmt}</span>`);
+            const qtyHtml = qtyParts.length
+                ? `<span style="display:inline-flex;gap:6px;padding:1px 7px;background:#f0f0f0;border-radius:3px;border:1px solid #ddd;">${qtyParts.join(' ')}</span>`
+                : '';
             if (compact) {
                 return `<span style="display:inline-flex;gap:10px;align-items:center;font-size:0.8em;font-weight:normal;margin-left:8px;">` +
                     `<span title="Latest booked P&amp;L across positions in this expiry">Bkd: <b style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
@@ -2026,6 +2111,7 @@
                     `<span title="Total brokerage charges" style="color:#dc3545;">Brok: <b>₹${fmtNum(stats.brokerage||0,0)}</b></span>` +
                     `<span title="Open positions" style="color:#555;">● ${stats.active}</span>` +
                     `<span title="Closed positions" style="color:#999;">✕ ${stats.closed}</span>` +
+                    (qtyHtml ? qtyHtml : '') +
                     `</span>`;
             }
             return `<span style="display:inline-flex;gap:14px;align-items:center;font-size:0.83em;font-weight:normal;margin-left:10px;">` +
@@ -2035,6 +2121,7 @@
                 `<span title="Total brokerage charges" style="color:#dc3545;">Brokerage: <b>₹${fmtNum(stats.brokerage||0,0)}</b></span>` +
                 `<span title="Open positions" style="color:#555;">● ${stats.active} open</span>` +
                 `<span title="Closed positions" style="color:#aaa;">✕ ${stats.closed} closed</span>` +
+                (qtyHtml ? qtyHtml : '') +
                 `</span>`;
         }
 
@@ -2808,7 +2895,9 @@
             todayCards.setHours(0, 0, 0, 0);
             const filteredEvents = excludeExpiredCards
                 ? allEvents.filter(e => {
-                    const expiryDate = getExpiryDateFromSymbolEnhanced(e.symbol || '');
+                    const expiryDate = e.expiry_date
+                        ? new Date(e.expiry_date + 'T00:00:00')
+                        : getExpiryDateForSymbol(e.symbol || '');
                     return !expiryDate || expiryDate >= todayCards;
                 })
                 : allEvents;
@@ -2882,7 +2971,9 @@
                 const eventsByExpiry = {};
                 eventList.forEach(e => {
                     const symbol = e.symbol || '';
-                    const expiryDate = getExpiryDateFromSymbolEnhanced(symbol);
+                    const expiryDate = e.expiry_date
+                        ? new Date(e.expiry_date + 'T00:00:00')
+                        : getExpiryDateForSymbol(symbol);
                     const expiryKey = expiryDate ? expiryDate.getTime() : 'unknown';
                     
                     if (!eventsByExpiry[expiryKey]) {
@@ -2908,6 +2999,7 @@
 
                 const headerDiv = document.createElement('div');
                 headerDiv.className = 'underlying-header';
+                headerDiv.style.flexWrap = 'wrap';
                 headerDiv.onclick = () => toggleUnderlyingGroup(underlying);
 
                 const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
@@ -2916,7 +3008,9 @@
 
                 const visibleEventList = excludeExpired
                     ? eventList.filter(e => {
-                        const expiryDate = getExpiryDateFromSymbolEnhanced(e.symbol || '');
+                        const expiryDate = e.expiry_date
+                            ? new Date(e.expiry_date + 'T00:00:00')
+                            : getExpiryDateForSymbol(e.symbol || '');
                         return !expiryDate || expiryDate >= today;
                     })
                     : eventList;
@@ -2993,22 +3087,27 @@
                     openAIChatPanel(underlying, 'underlying', '', underlying + ' — All Expiries');
                 };
 
-                const pnlExpiryBtn = document.createElement('button');
-                pnlExpiryBtn.innerHTML = '📈 PnL by Expiry';
-                pnlExpiryBtn.style.cssText = 'padding:6px 12px; background:#17a2b8; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9em;';
-                pnlExpiryBtn.onclick = (e) => {
+                const marginUndBtn = document.createElement('button');
+                marginUndBtn.innerHTML = '💰 Fetch Margin';
+                marginUndBtn.style.cssText = 'padding:6px 12px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.9em;';
+                marginUndBtn.onclick = (e) => {
                     e.stopPropagation();
-                    openPnlExpiryModal(underlying);
+                    fetchUnderlyingMargin(underlying);
                 };
 
                 buttonsDiv.appendChild(subscribeBtn);
                 buttonsDiv.appendChild(chartBtn);
-                buttonsDiv.appendChild(pnlExpiryBtn);
+                buttonsDiv.appendChild(marginUndBtn);
                 buttonsDiv.appendChild(aiBtn);
                 buttonsDiv.appendChild(toggleSpan);
 
                 headerDiv.appendChild(titleSpan);
                 headerDiv.appendChild(buttonsDiv);
+                // Margin info row — spans full width below title+buttons
+                const marginUndDiv = document.createElement('div');
+                marginUndDiv.id = `margin-und-${underlying}`;
+                marginUndDiv.style.cssText = 'flex-basis:100%; display:none;';
+                headerDiv.appendChild(marginUndDiv);
 
                 const contentDiv = document.createElement('div');
                 contentDiv.className = 'underlying-content';
@@ -3093,34 +3192,57 @@
                         </label>`
                     ).join('');
 
+                    const escJs = (v = '') => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                    const safeUnderlying = escJs(underlying);
+                    const safeExpiryIso = escJs(expiryIso);
+                    const safeExpiryDateStr = escJs(expiryDateStr);
+                    const safeExpiryId = escJs(expiryId);
+
                     expiryHtml += `
                         <div class="expiry-section" style="margin-top: 15px; border-left: 3px solid #ddd; padding-left: 15px;">
-                            <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-                                <span onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true)}</span>
+                            <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+                                <span onclick="toggleExpiryGroup('${safeExpiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true)}</span>
                                 <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
                                     <button
                                         data-subscribe-btn="true"
                                         data-subscribe-type="expiry"
-                                        data-subscribe-underlying="${underlying}"
-                                        data-subscribe-expiry="${expiryIso}"
-                                        onclick="event.stopPropagation(); toggleSubscription('expiry', '${underlying}', '${expiryIso}', null);"
+                                        data-subscribe-underlying="${safeUnderlying}"
+                                        data-subscribe-expiry="${safeExpiryIso}"
+                                        onclick="event.stopPropagation(); toggleSubscription('expiry', '${safeUnderlying}', '${safeExpiryIso}', null);"
                                         style="padding: 4px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         🔕 Subscribe
                                     </button>
                                     <button
-                                        onclick="event.stopPropagation(); openPayoffChart('${underlying}', '${expiryId}', '${expiryIso}', '${expiryDateStr}');"
+                                        onclick="event.stopPropagation(); openPayoffChart('${safeUnderlying}', '${safeExpiryId}', '${safeExpiryIso}', '${safeExpiryDateStr}');"
                                         style="padding: 4px 10px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         &#x1F4C8; Payoff
                                     </button>
                                     <button
-                                        onclick="event.stopPropagation(); openAIChatPanel('${underlying}', 'expiry', '${expiryIso}', '${underlying} \u2014 ${expiryDateStr}');"
+                                        onclick="event.stopPropagation(); openIntradayPnlModal('${safeUnderlying}', '${safeExpiryIso}', '${safeExpiryDateStr}', '${safeExpiryId}');"
+                                        style="padding: 4px 10px; background: #570df8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
+                                        &#x1F4C8; P&amp;L Curve
+                                    </button>
+                                    <button
+                                        onclick="event.stopPropagation(); showPayoffStatsInline('${safeUnderlying}', '${safeExpiryId}');"
+                                        style="padding: 4px 10px; background: #20c997; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
+                                        &#x1F4CA; Stats
+                                    </button>
+                                    <button
+                                        onclick="event.stopPropagation(); fetchExpiryMargin('${safeExpiryId}', '${safeUnderlying}');"
+                                        style="padding: 4px 10px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
+                                        💰 Fetch Margin
+                                    </button>
+                                    <button
+                                        onclick="event.stopPropagation(); openAIChatPanel('${safeUnderlying}', 'expiry', '${safeExpiryIso}', '${safeUnderlying} \u2014 ${safeExpiryDateStr}');"
                                         style="padding: 4px 10px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         &#x1F916; Ask AI
                                     </button>
                                     <span class="expiry-toggle" id="expiry-toggle-${expiryId}" onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer;">▶</span>
                                 </div>
+                                <div id="margin-exp-${expiryId}" style="flex-basis:100%; display:none;"></div>
                             </div>
-                            <div class="expiry-content" id="expiry-content-${expiryId}" style="display: none;">
+                            <div id="payoff-stats-inline-${expiryId}" style="display:none; margin-bottom:6px;"></div>
+                            <div class="expiry-content" id="expiry-content-${expiryId}" style="display: none; margin-top:10px;">
                                 ${document.getElementById('consolidate-trades')?.checked
                                     ? renderConsolidatedExpiry(visibleEvents, underlying, expiryId)
                                     : `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px; padding:8px 10px; background:#f0f4ff; border-radius:6px; border:1px solid #d0d8ef;">
@@ -3210,6 +3332,16 @@
                     if (select && _expiryEventsCache[expiryId]) {
                         populateEtfDateFilter(expiryId, _expiryEventsCache[expiryId].events);
                     }
+                    // Restore cached expiry margin if available
+                    if (_expiryEventsCache[expiryId]) {
+                        _restoreExpiryMarginFromCache(expiryId, _expiryEventsCache[expiryId].underlying);
+                    }
+                });
+                // Restore cached underlying margin
+                underlyings.forEach(underlying => {
+                    const allEvents = (events[underlying] || []);
+                    const stats = computeGroupStats(allEvents);
+                    _restoreUnderlyingMarginFromCache(underlying, stats.bookedPnl, stats.unbookedPnl);
                 });
             }, 0);
         }
@@ -6255,257 +6387,235 @@
         </div>
     </div>
 
-    <!-- ── PnL by Expiry Modal JS ── -->
+    <!-- ── Intraday P&L Curve JS ── -->
     <script>
     (function() {
         const SLUG = '{{ slug }}';
         const DATE = '{{ date }}';
-        let _pemChart = null;
-        let _pemData  = null;   // full API response
-        let _pemActiveUnderlying = null;
 
-        // Palette
-        const PALETTE = [
-            '#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f',
-            '#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'
-        ];
+        let _intradayChart = null;
+        let _intradayLoading = false;
+        let _intradayUnderlying = '';
+        let _intradaySymbols = '';
+        let _intradayFromDate = DATE;
+        let _intradayToDate = DATE;
 
-        window.openPnlExpiryModal = function(underlying) {
-            _pemActiveUnderlying = underlying;
-            document.getElementById('pnl-expiry-modal').style.display = 'block';
-            document.getElementById('pem-status').textContent = 'Loading…';
-            document.getElementById('pem-tabs').innerHTML     = '';
-            document.getElementById('pem-tbody').innerHTML    = '';
-            document.getElementById('pem-trade-detail').innerHTML = '';
-            document.getElementById('pem-title').textContent = 'PnL by Expiry — ' + underlying;
-            document.getElementById('pem-meta').textContent  = '';
+        function fmtInr(n) {
+            if (n == null || isNaN(n)) return '—';
+            const abs = Math.abs(n);
+            return (n < 0 ? '−' : '') + '₹' + abs.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        }
 
-            if (_pemData) {
-                renderPem(underlying);
-                return;
-            }
+        function computeMetrics(points) {
+            if (!points.length) return null;
+            let maxPnl = -Infinity, maxTime = '--:--';
+            let minPnl = Infinity, minTime = '--:--';
+            let runningPeak = -Infinity, maxDD = 0;
+            points.forEach(p => {
+                if (p.pnl > maxPnl) { maxPnl = p.pnl; maxTime = p.time; }
+                if (p.pnl < minPnl) { minPnl = p.pnl; minTime = p.time; }
+                if (p.pnl > runningPeak) runningPeak = p.pnl;
+                const dd = runningPeak - p.pnl;
+                if (dd > maxDD) maxDD = dd;
+            });
+            const current = points[points.length - 1].pnl;
+            return { current, maxPnl, maxTime, minPnl, minTime, maxDD };
+        }
 
-            fetch(`/api/profile/${SLUG}/pnl_by_expiry/${DATE}`)
-                .then(r => r.json())
-                .then(json => {
-                    if (!json.success) throw new Error(json.error || 'API error');
-                    _pemData = json;
-                    renderPem(underlying);
-                })
-                .catch(e => {
-                    document.getElementById('pem-status').textContent = 'Error: ' + e.message;
-                });
-        };
+        function computeDrawdown(points) {
+            let peak = -Infinity;
+            return points.map(p => {
+                if (p.pnl > peak) peak = p.pnl;
+                return { time: p.time, dd: p.pnl - peak };
+            });
+        }
 
-        function renderPem(activeUnderlying) {
-            const json = _pemData;
-            const underlyingKeys = Object.keys(json.underlyings).sort();
+        function renderMetrics(m) {
+            const curEl = document.getElementById('icard-current-val');
+            curEl.textContent = fmtInr(m.current);
+            curEl.style.color = m.current >= 0 ? '#16a34a' : '#dc2626';
+            document.getElementById('icard-max-val').textContent = fmtInr(m.maxPnl);
+            document.getElementById('icard-max-sub').textContent = 'at ' + m.maxTime;
+            document.getElementById('icard-min-val').textContent = fmtInr(m.minPnl);
+            document.getElementById('icard-min-sub').textContent = 'at ' + m.minTime;
+            document.getElementById('icard-dd-val').textContent = fmtInr(m.maxDD);
+        }
 
-            document.getElementById('pem-meta').textContent =
-                `Snapshot at ${json.snapshot_time} on ${json.date}`;
+        function renderChart(points, ddPoints) {
+            const canvas = document.getElementById('intraday-pnl-chart');
+            const ctx = canvas.getContext('2d');
+            if (_intradayChart) { _intradayChart.destroy(); _intradayChart = null; }
 
-            // Build underlying tabs if more than one
-            const tabsEl = document.getElementById('pem-tabs');
-            tabsEl.innerHTML = '';
-            if (underlyingKeys.length > 1) {
-                underlyingKeys.forEach(u => {
-                    const btn = document.createElement('button');
-                    btn.textContent = u;
-                    btn.style.cssText = `padding:7px 18px; border:none; background:none; cursor:pointer;
-                        font-size:13px; font-weight:500; color:${u === activeUnderlying ? '#007bff' : '#666'};
-                        border-bottom:3px solid ${u === activeUnderlying ? '#007bff' : 'transparent'};
-                        margin-bottom:-2px; transition:all 0.15s;`;
-                    btn.onclick = () => {
-                        _pemActiveUnderlying = u;
-                        document.getElementById('pem-title').textContent = 'PnL by Expiry — ' + u;
-                        renderPem(u);
-                    };
-                    tabsEl.appendChild(btn);
-                });
-                tabsEl.style.display = 'flex';
-            } else {
-                tabsEl.style.display = 'none';
-            }
+            const purpleGrad = ctx.createLinearGradient(0, 0, 0, 300);
+            purpleGrad.addColorStop(0, 'rgba(87,13,248,0.25)');
+            purpleGrad.addColorStop(1, 'rgba(87,13,248,0)');
 
-            const expiryData = json.underlyings[activeUnderlying] || {};
-            const expiries   = Object.keys(expiryData).sort();
+            const pinkGrad = ctx.createLinearGradient(0, 0, 0, 300);
+            pinkGrad.addColorStop(0, 'rgba(240,0,184,0)');
+            pinkGrad.addColorStop(1, 'rgba(240,0,184,0.25)');
 
-            document.getElementById('pem-status').textContent = '';
-
-            if (!expiries.length) {
-                document.getElementById('pem-status').textContent = 'No trade data for this underlying.';
-                destroyPemChart();
-                document.getElementById('pem-tbody').innerHTML = '';
-                return;
-            }
-
-            // ── Chart ──
-            destroyPemChart();
-            const labels = expiries;
-            const values = expiries.map(e => expiryData[e].pnl);
-            const colors = values.map(v => v >= 0 ? 'rgba(40,167,69,0.8)' : 'rgba(220,53,69,0.8)');
-            const ctx = document.getElementById('pem-chart').getContext('2d');
-            _pemChart = new Chart(ctx, {
-                type: 'bar',
+            _intradayChart = new Chart(ctx, {
+                type: 'line',
                 data: {
-                    labels,
-                    datasets: [{
-                        label: 'PnL per Expiry',
-                        data: values,
-                        backgroundColor: colors,
-                        borderWidth: 0,
-                    }]
+                    labels: points.map(p => p.time),
+                    datasets: [
+                        {
+                            label: 'MTM P&L',
+                            data: points.map(p => p.pnl),
+                            borderColor: '#570df8',
+                            backgroundColor: purpleGrad,
+                            borderWidth: 2,
+                            fill: true,
+                            pointRadius: 0,
+                            tension: 0.1,
+                        },
+                        {
+                            label: 'Drawdown',
+                            data: ddPoints.map(p => p.dd),
+                            borderColor: '#f000b8',
+                            backgroundColor: pinkGrad,
+                            borderWidth: 2,
+                            fill: true,
+                            pointRadius: 0,
+                            tension: 0.1,
+                        }
+                    ]
                 },
                 options: {
-                    responsive: true, maintainAspectRatio: false,
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
                         tooltip: {
                             callbacks: {
-                                label: ctx => ' ' + fmtInr(ctx.parsed.y),
-                                afterLabel: ctx => {
-                                    const ed = expiryData[expiries[ctx.dataIndex]];
-                                    return [
-                                        `  Unbooked: ${fmtInr(ed.unbooked_pnl)}`,
-                                        `  Booked:   ${fmtInr(ed.booked_pnl)}`,
-                                        `  Trades:   ${ed.trades.length}`,
-                                    ];
-                                }
+                                label: ctx => ` ${ctx.dataset.label}: ${fmtInr(ctx.parsed.y)}`
                             }
                         }
                     },
                     scales: {
-                        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+                        x: {
+                            grid: { display: false },
+                            ticks: { font: { size: 11 }, maxTicksLimit: 10 }
+                        },
                         y: {
+                            position: 'left',
                             grid: { color: 'rgba(0,0,0,0.05)' },
                             ticks: { callback: v => '₹' + v.toLocaleString('en-IN') }
                         }
-                    },
-                    onClick: (_evt, els) => {
-                        if (els.length) showTradeDetail(activeUnderlying, expiries[els[0].index]);
-                    },
-                    onHover: (e, els) => {
-                        e.native.target.style.cursor = els.length ? 'pointer' : 'default';
                     }
                 }
             });
-
-            // ── Table ──
-            const tbody = document.getElementById('pem-tbody');
-            const totalPnl = expiries.reduce((s, e) => s + expiryData[e].pnl, 0);
-            tbody.innerHTML = expiries.map((expiry, i) => {
-                const ed = expiryData[expiry];
-                const pc = ed.pnl > 0 ? '#28a745' : ed.pnl < 0 ? '#dc3545' : '#999';
-                return `<tr style="cursor:pointer;" onclick="window._pemShowDetail('${activeUnderlying}','${expiry}')"
-                            onmouseover="this.style.background='#f8f9fa'" onmouseout="this.style.background=''">
-                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6;">
-                        <span style="font-weight:600;">${expiry}</span>
-                        <span style="margin-left:8px; font-size:11px; color:#888;">${ed.trades.length} trade${ed.trades.length!==1?'s':''}</span>
-                    </td>
-                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6; text-align:right; font-weight:700; color:${pc};">${fmtInr(ed.pnl)}</td>
-                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6; text-align:right; color:${ed.unbooked_pnl>=0?'#28a745':'#dc3545'};">${fmtInr(ed.unbooked_pnl)}</td>
-                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6; text-align:right; color:${ed.booked_pnl>=0?'#28a745':'#dc3545'};">${fmtInr(ed.booked_pnl)}</td>
-                    <td style="padding:8px 12px; border-bottom:1px solid #dee2e6; text-align:right; color:#666;">${ed.trades.length}</td>
-                </tr>`;
-            }).join('') +
-            `<tr style="background:#f8f9fa; font-weight:700;">
-                <td style="padding:9px 12px;">Total</td>
-                <td style="padding:9px 12px; text-align:right; color:${totalPnl>=0?'#28a745':'#dc3545'};">${fmtInr(totalPnl)}</td>
-                <td colspan="3"></td>
-            </tr>`;
-
-            document.getElementById('pem-trade-detail').innerHTML = '';
         }
 
-        // Expose to onclick in table row
-        window._pemShowDetail = function(underlying, expiry) {
-            showTradeDetail(underlying, expiry);
+        async function loadIntradayPnl() {
+            if (_intradayLoading) return;
+            _intradayLoading = true;
+
+            const loadEl   = document.getElementById('intraday-loading');
+            const emptyEl  = document.getElementById('intraday-empty');
+            const chartWrap = document.getElementById('intraday-chart-wrap');
+            const btn      = document.getElementById('intraday-refresh-btn');
+
+            loadEl.style.display  = 'flex';
+            emptyEl.style.display = 'none';
+            chartWrap.style.display = 'none';
+            btn.disabled = true;
+            btn.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.4);border-top-color:#fff;border-radius:50%;animation:intraday-spin 0.7s linear infinite;vertical-align:middle;margin-right:4px;"></span>Loading';
+
+            try {
+                const url = `/api/profile/${SLUG}/pnl_snapshots_by_expiry/${DATE}` +
+                    `?underlying=${encodeURIComponent(_intradayUnderlying)}` +
+                    `&symbols=${encodeURIComponent(_intradaySymbols)}` +
+                    `&from_date=${encodeURIComponent(_intradayFromDate)}` +
+                    `&to_date=${encodeURIComponent(_intradayToDate)}`;
+                const snapJson = await fetch(url).then(r => r.json());
+
+                if (!snapJson.success || !snapJson.data || !snapJson.data.length) {
+                    loadEl.style.display  = 'none';
+                    emptyEl.style.display = 'flex';
+                    return;
+                }
+
+                const points = snapJson.data.map(d => ({
+                    time: d.timestamp,
+                    pnl:  d.pnl
+                }));
+
+                renderMetrics(computeMetrics(points));
+                renderChart(points, computeDrawdown(points));
+
+                loadEl.style.display    = 'none';
+                chartWrap.style.display = 'block';
+            } catch (e) {
+                loadEl.style.display = 'none';
+                emptyEl.style.display = 'flex';
+                emptyEl.textContent = `Failed to load P&L data: ${e.message}`;
+            } finally {
+                _intradayLoading = false;
+                btn.disabled = false;
+                btn.textContent = 'Refresh';
+            }
+        }
+
+        window.refreshIntradayPnl = loadIntradayPnl;
+
+        window.openIntradayPnlModal = function(underlying, expiry, expiryLabel, expiryId) {
+            _intradayUnderlying = underlying || '';
+
+            // Collect the actual trading symbols for this expiry group from the cache
+            const cached = (typeof _expiryEventsCache !== 'undefined') && expiryId
+                ? _expiryEventsCache[expiryId] : null;
+            const symbols = cached
+                ? [...new Set(cached.events.map(e => e.symbol || '').filter(Boolean))]
+                : [];
+            _intradaySymbols = symbols.join(',');
+
+            // Determine date range: from first event date to min(today, expiry date)
+            let fromDate = DATE;
+            if (cached && cached.events && cached.events.length) {
+                const timestamps = cached.events
+                    .map(e => e.timestamp ? e.timestamp.slice(0, 10) : null)
+                    .filter(Boolean)
+                    .sort();
+                if (timestamps.length) fromDate = timestamps[0];
+            }
+            const today = DATE;
+            let toDate = today;
+            if (expiry && expiry < today) toDate = expiry;  // expiry already passed → cap at expiry
+            _intradayFromDate = fromDate;
+            _intradayToDate   = toDate;
+
+            const subtitle = fromDate === toDate
+                ? fromDate
+                : `${fromDate} → ${toDate}`;
+            document.getElementById('intraday-modal-subtitle').textContent = subtitle;
+
+            document.getElementById('intraday-modal-title').textContent =
+                (underlying ? underlying + (expiryLabel ? ' · ' + expiryLabel : '') + ' — ' : '') + 'P&L Curve';
+
+            document.getElementById('intraday-pnl-modal').style.display = 'block';
+            document.getElementById('intraday-loading').style.display  = 'flex';
+            document.getElementById('intraday-empty').style.display    = 'none';
+            document.getElementById('intraday-chart-wrap').style.display = 'none';
+            loadIntradayPnl();
         };
 
-        function showTradeDetail(underlying, expiry) {
-            const ed = _pemData?.underlyings?.[underlying]?.[expiry];
-            if (!ed) return;
-            const detailEl = document.getElementById('pem-trade-detail');
-
-            // Toggle: if already showing this expiry, hide it
-            if (detailEl.dataset.current === expiry && detailEl.style.display !== 'none') {
-                detailEl.style.display = 'none';
-                detailEl.dataset.current = '';
-                return;
-            }
-            detailEl.dataset.current = expiry;
-            detailEl.style.display = 'block';
-
-            const sorted = [...ed.trades].sort((a, b) => {
-                // Sort CE before PE, then by strike
-                if (a.opt_type !== b.opt_type) return a.opt_type === 'CE' ? -1 : 1;
-                return Number(a.strike) - Number(b.strike);
-            });
-
-            detailEl.innerHTML = `
-                <div style="background:#f8f9fa; border-radius:6px; padding:16px; border:1px solid #e9ecef;">
-                    <div style="font-weight:600; font-size:14px; color:#333; margin-bottom:12px;">
-                        Trades — ${expiry} <span style="color:#888; font-weight:400; font-size:12px;">(click row to toggle)</span>
-                    </div>
-                    <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
-                        <thead>
-                            <tr style="background:#e9ecef;">
-                                <th style="padding:7px 10px; text-align:left; font-weight:600; border-bottom:1px solid #dee2e6;">Symbol</th>
-                                <th style="padding:7px 10px; text-align:center; font-weight:600; border-bottom:1px solid #dee2e6;">Type</th>
-                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Strike</th>
-                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Qty</th>
-                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Avg</th>
-                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">LTP</th>
-                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Total PnL</th>
-                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Unbooked</th>
-                                <th style="padding:7px 10px; text-align:right; font-weight:600; border-bottom:1px solid #dee2e6;">Booked</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${sorted.map(t => {
-                                const pc = t.pnl > 0 ? '#28a745' : t.pnl < 0 ? '#dc3545' : '#999';
-                                const typeBg = t.opt_type === 'CE' ? '#cce5ff' : t.opt_type === 'PE' ? '#f8d7da' : '#e2e3e5';
-                                const typeColor = t.opt_type === 'CE' ? '#004085' : t.opt_type === 'PE' ? '#721c24' : '#383d41';
-                                return `<tr onmouseover="this.style.background='#fff'" onmouseout="this.style.background=''">
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; font-family:monospace; font-size:11.5px;">${t.symbol}</td>
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:center;">
-                                        <span style="background:${typeBg};color:${typeColor};padding:2px 7px;border-radius:3px;font-size:11px;font-weight:700;">${t.opt_type||'—'}</span>
-                                    </td>
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right;">${t.strike||'—'}</td>
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right;">${t.qty}</td>
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right;">${fmtInr(t.avg_price)}</td>
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right;">${fmtInr(t.ltp)}</td>
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right; font-weight:700; color:${pc};">${fmtInr(t.pnl)}</td>
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right; color:${t.unbooked>=0?'#28a745':'#dc3545'};">${fmtInr(t.unbooked)}</td>
-                                    <td style="padding:6px 10px; border-bottom:1px solid #dee2e6; text-align:right; color:${t.booked>=0?'#28a745':'#dc3545'};">${fmtInr(t.booked)}</td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>`;
-        }
-
-        window.closePnlExpiryModal = function() {
-            document.getElementById('pnl-expiry-modal').style.display = 'none';
+        window.closeIntradayPnlModal = function() {
+            document.getElementById('intraday-pnl-modal').style.display = 'none';
         };
 
         // Close on backdrop click
-        document.getElementById('pnl-expiry-modal').addEventListener('click', function(e) {
-            if (e.target === this) closePnlExpiryModal();
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('intraday-pnl-modal').addEventListener('click', function(e) {
+                if (e.target === this) closeIntradayPnlModal();
+            });
+
+            // Inject keyframes for spinner (needed since modal is outside tab panel)
+            const style = document.createElement('style');
+            style.textContent = '@keyframes intraday-spin { to { transform: rotate(360deg); } }';
+            document.head.appendChild(style);
         });
-
-        function destroyPemChart() {
-            if (_pemChart) { _pemChart.destroy(); _pemChart = null; }
-        }
-
-        function fmtInr(n) {
-            if (n == null) return '—';
-            const abs = Math.abs(n);
-            return (n < 0 ? '−' : '') + '₹' + abs.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
-        }
-
-        // Reset cache when navigating (page load)
-        _pemData = null;
     })();
     </script>
 
@@ -6513,6 +6623,8 @@
     // ==================== OPTION PAYOFF CHART ====================
     (function() {
         let _payoffChart = null;
+        // Persisted state between initial render and checkbox toggle
+        let _payoffState = null;
 
         // Consolidate lifecycle events into current open legs per symbol.
         // Returns [{symbol, strike, optType, qty, avgPrice, ltp, lotSize}]
@@ -6550,20 +6662,93 @@
             return legs;
         }
 
+        function getClosedLegs(expiryEvents) {
+            const eventsBySymbol = {};
+            expiryEvents.forEach(e => {
+                const symbol = e.symbol || '';
+                if (!symbol) return;
+                const optType = getOptionType(symbol);
+                if (!optType || optType === 'FUT' || optType === 'EQ') return;
+                if (!eventsBySymbol[symbol]) eventsBySymbol[symbol] = [];
+                eventsBySymbol[symbol].push(e);
+            });
+            const closedLegs = [];
+            Object.entries(eventsBySymbol).forEach(([symbol, events]) => {
+                events.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                const latest = events[events.length - 1];
+                if (Number(latest.after_quantity || 0) !== 0) return; // still open
+                const totalExitPnl = events.reduce((s, e) => s + Number(e.exit_pnl || 0), 0);
+                if (!events.some(e => e.exit_pnl)) return;
+                const strike = getStrikePrice(symbol);
+                const optType = getOptionType(symbol);
+                if (!strike || !optType) return;
+                closedLegs.push({ symbol, strike, optType, exitPnl: totalExitPnl, isClosed: true, lotSize: 1 });
+            });
+            return closedLegs;
+        }
+
+        function computeLegMaxProfit(leg) {
+            if (leg.qty > 0) {
+                if (leg.optType === 'CE') return { isUnlimited: true, value: null };
+                return { isUnlimited: false, value: (leg.strike - leg.avgPrice) * leg.qty };
+            } else {
+                return { isUnlimited: false, value: leg.avgPrice * Math.abs(leg.qty) };
+            }
+        }
+
+        function renderPayoffLegsTable(legs, closedLegs, showClosed) {
+            const openRows = legs.map(leg => {
+                const legPnl = (leg.ltp - leg.avgPrice) * leg.qty;
+                const pnlColor = legPnl >= 0 ? '#28a745' : '#dc3545';
+                const typeColor = leg.optType === 'CE' ? '#007bff' : '#e83e8c';
+                const signedLots = parseFloat((leg.qty / leg.lotSize).toFixed(2));
+                const lotsColor = leg.qty > 0 ? '#28a745' : '#dc3545';
+                const lotsDisplay = (signedLots > 0 ? '+' : '') + signedLots;
+                const maxP = computeLegMaxProfit(leg);
+                const maxPHtml = maxP.isUnlimited
+                    ? '<span style="color:#28a745;font-weight:bold;">Unlimited</span>'
+                    : `<span style="font-weight:bold;color:${(maxP.value||0) >= 0 ? '#28a745' : '#dc3545'};">${fmtInrPayoff(maxP.value)}</span>`;
+                return `<tr style="border-bottom:1px solid #eee;">
+                    <td style="padding:7px 10px;font-family:monospace;font-size:0.88em;">${leg.symbol}</td>
+                    <td style="padding:7px 10px;text-align:center;"><span style="font-weight:bold;color:${typeColor};">${leg.optType}</span></td>
+                    <td style="padding:7px 10px;text-align:center;">₹${leg.strike.toLocaleString('en-IN')}</td>
+                    <td style="padding:7px 10px;text-align:right;font-weight:bold;color:${lotsColor};">${lotsDisplay}</td>
+                    <td style="padding:7px 10px;text-align:right;">${Math.abs(leg.qty)}</td>
+                    <td style="padding:7px 10px;text-align:right;">₹${leg.avgPrice.toFixed(2)}</td>
+                    <td style="padding:7px 10px;text-align:right;">₹${leg.ltp.toFixed(2)}</td>
+                    <td style="padding:7px 10px;text-align:right;font-weight:bold;color:${pnlColor};">${fmtInrPayoff(legPnl)}</td>
+                    <td style="padding:7px 10px;text-align:right;">${maxPHtml}</td>
+                </tr>`;
+            });
+            const closedRows = (showClosed && closedLegs && closedLegs.length > 0) ? closedLegs.map(leg => {
+                const pnlColor = leg.exitPnl >= 0 ? '#28a745' : '#dc3545';
+                const typeColor = leg.optType === 'CE' ? '#007bff' : '#e83e8c';
+                return `<tr style="border-bottom:1px solid #eee;background:#fdf6f6;">
+                    <td style="padding:7px 10px;font-family:monospace;font-size:0.88em;opacity:0.8;">${leg.symbol}</td>
+                    <td style="padding:7px 10px;text-align:center;"><span style="font-weight:bold;color:${typeColor};opacity:0.8;">${leg.optType}</span></td>
+                    <td style="padding:7px 10px;text-align:center;opacity:0.8;">₹${leg.strike.toLocaleString('en-IN')}</td>
+                    <td style="padding:7px 10px;text-align:center;" colspan="4"><span style="font-size:0.8em;background:#f8d7da;color:#721c24;padding:2px 8px;border-radius:999px;font-weight:bold;">CLOSED</span></td>
+                    <td style="padding:7px 10px;text-align:right;font-weight:bold;color:${pnlColor};">${fmtInrPayoff(leg.exitPnl)}</td>
+                    <td style="padding:7px 10px;text-align:right;font-weight:bold;color:${pnlColor};">${fmtInrPayoff(leg.exitPnl)}</td>
+                </tr>`;
+            }) : [];
+            document.getElementById('payoff-legs-tbody').innerHTML = [...openRows, ...closedRows].join('');
+        }
+
         // Payoff at expiry for a given spot price
         function computePayoff(legs, spot) {
             return legs.reduce((sum, leg) => {
                 const intrinsic = leg.optType === 'CE'
                     ? Math.max(0, spot - leg.strike)
                     : Math.max(0, leg.strike - spot);
-                return sum + (intrinsic - leg.avgPrice) * leg.qty * leg.lotSize;
+                return sum + (intrinsic - leg.avgPrice) * leg.qty;
             }, 0);
         }
 
         // Current P&L based on LTP
         function computeCurrentPnl(legs) {
             return legs.reduce((sum, leg) =>
-                sum + (leg.ltp - leg.avgPrice) * leg.qty * leg.lotSize, 0);
+                sum + (leg.ltp - leg.avgPrice) * leg.qty, 0);
         }
 
         function fmtInrPayoff(n) {
@@ -6572,76 +6757,16 @@
             return (n < 0 ? '−' : '') + '₹' + abs.toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0});
         }
 
-        window.openPayoffChart = async function(underlying, expiryId, expiryIso, expiryLabel) {
-            const cached = _expiryEventsCache[expiryId];
-            if (!cached) { alert('No trade data found for this expiry.'); return; }
-
-            const legs = consolidateLegs(cached.events || []);
-            if (legs.length === 0) {
-                alert('No open option positions for this expiry — all positions are closed.');
-                return;
-            }
-
-            // Show modal with loading state
-            const modal = document.getElementById('payoff-modal');
-            modal.style.display = 'block';
-            document.getElementById('payoff-title').textContent = `Option Payoff at Expiry — ${underlying} (${expiryLabel})`;
-            document.getElementById('payoff-subtitle').textContent = `${legs.length} open leg(s)`;
-            document.getElementById('payoff-status').textContent = 'Fetching lot sizes…';
-            document.getElementById('payoff-stats').innerHTML = '';
-            document.getElementById('payoff-legs-tbody').innerHTML =
-                '<tr><td colspan="9" style="padding:14px; text-align:center; color:#888;">Loading…</td></tr>';
-
-            // Destroy old chart
-            if (_payoffChart) { _payoffChart.destroy(); _payoffChart = null; }
-
-            // Fetch lot sizes from master contract
-            let lotSizeMap = {};
-            try {
-                const resp = await fetch('/api/master_contract/lot_sizes', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({symbols: legs.map(l => l.symbol)})
-                });
-                lotSizeMap = (await resp.json()).lot_sizes || {};
-            } catch(_) { /* fallback to 1 */ }
-
-            legs.forEach(leg => { leg.lotSize = lotSizeMap[leg.symbol] || 1; });
-
-            const missingAny = legs.some(l => !lotSizeMap[l.symbol]);
-            document.getElementById('payoff-status').textContent = missingAny
-                ? 'Warning: some lot sizes not found in master contract — showing with lot size = 1.'
-                : 'Lot sizes loaded from master contract.';
-
-            // Current spot from cached underlying prices
-            const spotInfo = (_cachedUnderlyingsData?.underlyingPrices || {})[underlying] || {};
-            const spot = spotInfo.ltp || null;
-
-            // Spot range: ±15% around current spot (or midpoint of strikes)
-            const strikes = legs.map(l => l.strike);
-            const mid = spot || (Math.min(...strikes) + Math.max(...strikes)) / 2;
-            const rangeWidth = Math.max(mid * 0.15, (Math.max(...strikes) - Math.min(...strikes)) * 0.8 || mid * 0.1);
-            const rawMin = Math.max(0, mid - rangeWidth);
-            const rawMax = mid + rangeWidth;
-            // Round to nearest 50
-            const spotMin = Math.floor(rawMin / 50) * 50;
-            const spotMax = Math.ceil(rawMax / 50) * 50;
-            const step = Math.max(50, Math.round((spotMax - spotMin) / 100 / 50) * 50);
-
-            const spotPoints = [];
-            for (let s = spotMin; s <= spotMax; s += step) spotPoints.push(s);
-
-            const rawPayoffs = spotPoints.map(s => computePayoff(legs, s));
-
-            // Insert exact zero-crossing points so every segment is fully above or below zero.
-            // This makes segment coloring and above/below fills seamless with no gaps.
+        // Build allPoints/allPayoffs with zero-crossing interpolation, apply offset
+        function buildChartPoints(spotPoints, baseRawPayoffs, offset) {
+            const shiftedPayoffs = baseRawPayoffs.map(v => v + offset);
             const allPoints = [];
             const allPayoffs = [];
             for (let i = 0; i < spotPoints.length; i++) {
                 allPoints.push(spotPoints[i]);
-                allPayoffs.push(rawPayoffs[i]);
+                allPayoffs.push(shiftedPayoffs[i]);
                 if (i < spotPoints.length - 1) {
-                    const v0 = rawPayoffs[i], v1 = rawPayoffs[i + 1];
+                    const v0 = shiftedPayoffs[i], v1 = shiftedPayoffs[i + 1];
                     if ((v0 >= 0) !== (v1 >= 0)) {
                         const t = v0 / (v0 - v1);
                         allPoints.push(spotPoints[i] + t * (spotPoints[i + 1] - spotPoints[i]));
@@ -6649,6 +6774,15 @@
                     }
                 }
             }
+            return { allPoints, allPayoffs };
+        }
+
+        function renderPayoffFromState(includeBooked) {
+            if (!_payoffState) return;
+            const { legs, spotPoints, baseRawPayoffs, spot, closedPnl } = _payoffState;
+
+            const offset = includeBooked ? closedPnl : 0;
+            const { allPoints, allPayoffs } = buildChartPoints(spotPoints, baseRawPayoffs, offset);
 
             // Breakeven points are the inserted zero-crossing spots
             const breakevenSpots = [];
@@ -6658,9 +6792,38 @@
                 }
             }
 
-            const maxProfit = Math.max(...allPayoffs);
-            const maxLoss = Math.min(...allPayoffs);
-            const currentPnl = computeCurrentPnl(legs);
+            const currentPnl = computeCurrentPnl(legs) + offset;
+
+            // The payoff function is piecewise-linear with kinks at each strike.
+            // The chart only covers ±15% around current spot, so strikes outside that
+            // range are never sampled. Evaluate at every strike + spot=0 to find the
+            // true extremes (e.g. long put max-profit is at spot=0, not in the chart range).
+            const _kinkSpots = [0, ...legs.map(l => l.strike)];
+            const _kinkPayoffs = _kinkSpots.map(s => computePayoff(legs, s) + offset);
+            const maxProfit = Math.max(...allPayoffs, ..._kinkPayoffs);
+            const maxLoss   = Math.min(...allPayoffs, ..._kinkPayoffs);
+
+            // Detect truly unbounded profit/loss by evaluating payoff well beyond chart range.
+            // Only the upside (spot → ∞) can be truly unlimited for options; short-put losses
+            // are bounded by the strike price so we don't flag them as "Unlimited".
+            const _farHigh = (spotPoints[spotPoints.length - 1] || 50000) * 3;
+            const _payoffFarHigh = computePayoff(legs, _farHigh) + offset;
+            const isUnlimitedProfit = _payoffFarHigh > maxProfit + 1;
+            const isUnlimitedLoss   = _payoffFarHigh < maxLoss   - 1;
+
+            // Margin from cache for ROI% display
+            const _roiMargin = _payoffMarginContext
+                ? ((_getMarginCache(`exp_${_payoffMarginContext.expiryId}`) || {}).total_margin_required || 0)
+                : 0;
+            function _fmtStatValue(val, isUnlimited) {
+                if (isUnlimited) return 'Unlimited';
+                const base = fmtInrPayoff(val);
+                if (_roiMargin > 0) {
+                    const pct = (val / _roiMargin * 100).toFixed(1);
+                    return `${base} <span style="font-size:0.82em;opacity:0.75;">(${pct}%)</span>`;
+                }
+                return base;
+            }
 
             // Single continuous dataset using Chart.js segment coloring + above/below fill
             const datasets = [
@@ -6688,7 +6851,6 @@
 
             // Current spot vertical marker
             if (spot) {
-                // Find nearest index in allPoints
                 let nearestIdx = 0, nearestDist = Infinity;
                 allPoints.forEach((s, i) => {
                     const d = Math.abs(s - spot);
@@ -6705,6 +6867,7 @@
                 });
             }
 
+            if (_payoffChart) { _payoffChart.destroy(); _payoffChart = null; }
             const ctx = document.getElementById('payoff-canvas').getContext('2d');
             _payoffChart = new Chart(ctx, {
                 type: 'line',
@@ -6717,7 +6880,11 @@
                         legend: { position: 'top', labels: { boxWidth: 12 } },
                         tooltip: {
                             callbacks: {
-                                title: ctx => `Spot: ₹${Math.round(Number(ctx[0].label)).toLocaleString('en-IN')}`,
+                                title: ctx => {
+                                    const hoverSpot = Math.round(Number(ctx[0].label));
+                                    const distPct = spot ? ` (${((hoverSpot - spot) / spot * 100).toFixed(1)}% from spot)` : '';
+                                    return `Spot: ₹${hoverSpot.toLocaleString('en-IN')}${distPct}`;
+                                },
                                 label: ctx => {
                                     const v = ctx.raw;
                                     if (v == null) return null;
@@ -6744,14 +6911,18 @@
             });
 
             // Stats row
+            const currentPnlLabel = includeBooked ? 'Current P&L (LTP + Booked)' : 'Current P&L (LTP)';
             const stats = [
-                { label: 'Max Profit', value: fmtInrPayoff(maxProfit), color: maxProfit >= 0 ? '#28a745' : '#dc3545' },
-                { label: 'Max Loss',   value: fmtInrPayoff(maxLoss),   color: maxLoss  >= 0 ? '#28a745' : '#dc3545' },
-                { label: 'Current P&L (LTP)', value: fmtInrPayoff(currentPnl), color: currentPnl >= 0 ? '#28a745' : '#dc3545' },
+                { label: 'Max Profit', value: _fmtStatValue(maxProfit, isUnlimitedProfit), color: isUnlimitedProfit || maxProfit >= 0 ? '#28a745' : '#dc3545' },
+                { label: 'Max Loss',   value: _fmtStatValue(maxLoss,   isUnlimitedLoss),   color: isUnlimitedLoss   || maxLoss   <  0 ? '#dc3545' : '#28a745' },
+                { label: currentPnlLabel, value: fmtInrPayoff(currentPnl), color: currentPnl >= 0 ? '#28a745' : '#dc3545' },
             ];
             if (breakevenSpots.length) {
                 stats.push({ label: `Breakeven${breakevenSpots.length > 1 ? 's' : ''}`,
-                    value: breakevenSpots.map(s => `₹${s.toLocaleString('en-IN')}`).join(', '), color: '#555' });
+                    value: breakevenSpots.map(s => {
+                        const pct = spot ? ` (${((s - spot) / spot * 100).toFixed(1)}%)` : '';
+                        return `₹${s.toLocaleString('en-IN')}${pct}`;
+                    }).join(', '), color: '#555' });
             }
             if (spot) stats.push({ label: 'Current Spot', value: `₹${spot.toLocaleString('en-IN')}`, color: '#007bff' });
 
@@ -6759,38 +6930,432 @@
                 `<div><div style="font-size:0.78em;color:#888;text-transform:uppercase;letter-spacing:0.04em;">${s.label}</div>
                  <div style="font-size:1.05em;font-weight:bold;color:${s.color};">${s.value}</div></div>`
             ).join('');
+        }
 
-            // Legs table
-            document.getElementById('payoff-legs-tbody').innerHTML = legs.map(leg => {
-                const legPnl = (leg.ltp - leg.avgPrice) * leg.qty * leg.lotSize;
-                const pnlColor = legPnl >= 0 ? '#28a745' : '#dc3545';
-                const typeColor = leg.optType === 'CE' ? '#007bff' : '#e83e8c';
-                const lots = parseFloat((Math.abs(leg.qty) / leg.lotSize).toFixed(2));
-                const direction = leg.qty > 0
-                    ? '<span style="color:#28a745;font-weight:bold;">LONG</span>'
-                    : '<span style="color:#dc3545;font-weight:bold;">SHORT</span>';
-                return `<tr style="border-bottom:1px solid #eee;">
-                    <td style="padding:7px 10px;font-family:monospace;font-size:0.88em;">${leg.symbol}</td>
-                    <td style="padding:7px 10px;text-align:center;"><span style="font-weight:bold;color:${typeColor};">${leg.optType}</span></td>
-                    <td style="padding:7px 10px;text-align:center;">₹${leg.strike.toLocaleString('en-IN')}</td>
-                    <td style="padding:7px 10px;text-align:right;">${lots}</td>
-                    <td style="padding:7px 10px;text-align:right;">${leg.lotSize}</td>
-                    <td style="padding:7px 10px;text-align:right;">₹${leg.avgPrice.toFixed(2)}</td>
-                    <td style="padding:7px 10px;text-align:right;">₹${leg.ltp.toFixed(2)}</td>
-                    <td style="padding:7px 10px;text-align:right;font-weight:bold;color:${pnlColor};">${fmtInrPayoff(legPnl)}</td>
-                    <td style="padding:7px 10px;">${direction}</td>
-                </tr>`;
-            }).join('');
+        window.openPayoffChart = async function(underlying, expiryId, expiryIso, expiryLabel) {
+            const cached = _expiryEventsCache[expiryId];
+            if (!cached) { alert('No trade data found for this expiry.'); return; }
+
+            const legs = consolidateLegs(cached.events || []);
+            if (legs.length === 0) {
+                alert('No open option positions for this expiry — all positions are closed.');
+                return;
+            }
+
+            // Show modal with loading state
+            const modal = document.getElementById('payoff-modal');
+            modal.style.display = 'block';
+            document.getElementById('payoff-title').textContent = `Option Payoff at Expiry — ${underlying} (${expiryLabel})`;
+            document.getElementById('payoff-subtitle').textContent = `${legs.length} open leg(s)`;
+            document.getElementById('payoff-status').textContent = 'Fetching lot sizes…';
+            document.getElementById('payoff-stats').innerHTML = '';
+            document.getElementById('payoff-legs-tbody').innerHTML =
+                '<tr><td colspan="9" style="padding:14px; text-align:center; color:#888;">Loading…</td></tr>';
+
+            // Reset booked PnL checkbox
+            const bookedCtrl = document.getElementById('payoff-booked-ctrl');
+            const bookedCheckbox = document.getElementById('payoff-include-booked');
+            bookedCtrl.style.display = 'none';
+            bookedCheckbox.checked = false;
+
+            // Destroy old chart
+            if (_payoffChart) { _payoffChart.destroy(); _payoffChart = null; }
+
+            // Fetch lot sizes from master contract
+            let lotSizeMap = {};
+            try {
+                const resp = await fetch('/api/master_contract/lot_sizes', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({symbols: legs.map(l => l.symbol)})
+                });
+                lotSizeMap = (await resp.json()).lot_sizes || {};
+            } catch(_) { /* fallback to 1 */ }
+
+            legs.forEach(leg => { leg.lotSize = lotSizeMap[leg.symbol] || 1; });
+
+            const missingAny = legs.some(l => !lotSizeMap[l.symbol]);
+            document.getElementById('payoff-status').textContent = missingAny
+                ? 'Warning: some lot sizes not found in master contract — showing with lot size = 1.'
+                : 'Lot sizes loaded from master contract.';
+
+            // Compute closed/booked PnL from exit events
+            let closedPnl = 0;
+            (cached.events || []).forEach(e => { if (e.exit_pnl) closedPnl += Number(e.exit_pnl || 0); });
+
+            // Current spot from cached underlying prices
+            const spotInfo = (_cachedUnderlyingsData?.underlyingPrices || {})[underlying] || {};
+            const spot = spotInfo.ltp || null;
+
+            // Spot range: ±15% around current spot (or midpoint of strikes)
+            const strikes = legs.map(l => l.strike);
+            const mid = spot || (Math.min(...strikes) + Math.max(...strikes)) / 2;
+            const rangeWidth = Math.max(mid * 0.15, (Math.max(...strikes) - Math.min(...strikes)) * 0.8 || mid * 0.1);
+            const rawMin = Math.max(0, mid - rangeWidth);
+            const rawMax = mid + rangeWidth;
+            // Round to nearest 50
+            const spotMin = Math.floor(rawMin / 50) * 50;
+            const spotMax = Math.ceil(rawMax / 50) * 50;
+            const step = Math.max(50, Math.round((spotMax - spotMin) / 100 / 50) * 50);
+
+            const spotPoints = [];
+            for (let s = spotMin; s <= spotMax; s += step) spotPoints.push(s);
+
+            const baseRawPayoffs = spotPoints.map(s => computePayoff(legs, s));
+
+            // Closed legs for the table
+            const closedLegs = getClosedLegs(cached.events || []);
+
+            // Store state for checkbox re-render
+            _payoffState = { legs, closedLegs, spotPoints, baseRawPayoffs, spot, closedPnl };
+
+            // Store context for margin fetch button
+            _payoffMarginContext = { underlying, expiryId, legs };
+
+            // Restore cached margin if available, else clear the info area
+            const payoffMarginEl = document.getElementById('payoff-margin-info');
+            if (payoffMarginEl) {
+                const cachedMargin = _getMarginCache(`exp_${expiryId}`);
+                if (cachedMargin) {
+                    const unbookedPnl = legs.reduce((s, l) => s + (l.ltp - l.avgPrice) * l.qty, 0);
+                    payoffMarginEl.innerHTML = buildMarginInfoHtml(cachedMargin, closedPnl, unbookedPnl);
+                } else {
+                    payoffMarginEl.innerHTML = '';
+                }
+            }
+
+            // Show checkbox if there are any closed positions
+            if (closedPnl !== 0 || closedLegs.length > 0) {
+                const amtColor = closedPnl >= 0 ? '#28a745' : '#dc3545';
+                document.getElementById('payoff-booked-amount').innerHTML =
+                    `<b style="color:${amtColor};">${fmtInrPayoff(closedPnl)}</b>`;
+                bookedCtrl.style.display = 'block';
+            }
+
+            renderPayoffFromState(false);
+            renderPayoffLegsTable(legs, closedLegs, false);
         };
+
+        // Checkbox handler
+        document.getElementById('payoff-include-booked').addEventListener('change', function() {
+            renderPayoffFromState(this.checked);
+            if (_payoffState) {
+                renderPayoffLegsTable(_payoffState.legs, _payoffState.closedLegs, this.checked);
+            }
+        });
 
         window.closePayoffModal = function() {
             document.getElementById('payoff-modal').style.display = 'none';
             if (_payoffChart) { _payoffChart.destroy(); _payoffChart = null; }
+            _payoffState = null;
+            _payoffMarginContext = null;
         };
 
         document.getElementById('payoff-modal').addEventListener('click', function(e) {
             if (e.target === this) closePayoffModal();
         });
+
+        // =====================================================================
+        // MARGIN FETCH SYSTEM
+        // =====================================================================
+
+        // Cache helpers — key includes profile slug so caches don't bleed across profiles
+        function _marginCacheKey(contextKey) {
+            return `margin_${PROFILE_SLUG}_${contextKey}`;
+        }
+        function _getMarginCache(contextKey) {
+            try {
+                const raw = localStorage.getItem(_marginCacheKey(contextKey));
+                return raw ? JSON.parse(raw) : null;
+            } catch { return null; }
+        }
+        function _setMarginCache(contextKey, payload) {
+            try {
+                localStorage.setItem(_marginCacheKey(contextKey), JSON.stringify({
+                    ...payload, fetchedAt: new Date().toISOString()
+                }));
+            } catch {}
+        }
+
+        // Convert lifecycle events → OpenAlgo positions array (open positions only)
+        function getOpenPositionsForMargin(eventsArray, underlyingName) {
+            const latestByKey = {};
+            (eventsArray || []).forEach(e => {
+                const key = (e.symbol || '') + '|' + (e.product || '');
+                const existing = latestByKey[key];
+                if (!existing || new Date(e.timestamp) > new Date(existing.timestamp)) {
+                    latestByKey[key] = e;
+                }
+            });
+            const isBFO = underlyingName &&
+                ['SENSEX', 'BANKEX'].includes(underlyingName.toUpperCase());
+            const exchange = isBFO ? 'BFO' : 'NFO';
+            const positions = [];
+            Object.values(latestByKey).forEach(e => {
+                const qty = Number(e.after_quantity || 0);
+                if (qty === 0) return;
+                positions.push({
+                    symbol: e.symbol || '',
+                    exchange,
+                    action: qty > 0 ? 'BUY' : 'SELL',
+                    product: (e.product || 'NRML').toUpperCase(),
+                    pricetype: 'MARKET',
+                    quantity: String(Math.abs(qty)),
+                    price: '0'
+                });
+            });
+            return positions;
+        }
+
+        // Format a fetched-at ISO string as "HH:MM"
+        function _fmtFetchTime(iso) {
+            if (!iso) return '';
+            try {
+                const d = new Date(iso);
+                return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+            } catch { return ''; }
+        }
+
+        // Format currency for margin display
+        function _fmtMarginInr(n) {
+            if (n == null || isNaN(n)) return '—';
+            const abs = Math.abs(n);
+            return (n < 0 ? '−' : '') + '₹' + abs.toLocaleString('en-IN', {
+                minimumFractionDigits: 0, maximumFractionDigits: 0
+            });
+        }
+
+        // Return % colored HTML
+        function _returnPctHtml(pct) {
+            if (pct == null || isNaN(pct)) return '<span style="color:#888;">—%</span>';
+            const color = pct >= 0 ? '#28a745' : '#dc3545';
+            const sign = pct >= 0 ? '+' : '';
+            return `<span style="color:${color};font-weight:bold;">${sign}${pct.toFixed(2)}%</span>`;
+        }
+
+        // Render inline margin info HTML given cached data + pnl values
+        function buildMarginInfoHtml(cached, bookedPnl, unbookedPnl) {
+            if (!cached) return '';
+            const margin = cached.total_margin_required;
+            const fetchTime = _fmtFetchTime(cached.fetchedAt);
+            const netPnl = (bookedPnl || 0) + (unbookedPnl || 0);
+            const bookedPct = margin ? (bookedPnl || 0) / margin * 100 : null;
+            const unbookedPct = margin ? (unbookedPnl || 0) / margin * 100 : null;
+            const netPct = margin ? netPnl / margin * 100 : null;
+            const sep = `<span style="color:#ccc; margin:0 4px;">·</span>`;
+            return `<span style="color:#555; font-weight:600;">Margin: <b style="color:#0d6efd;">${_fmtMarginInr(margin)}</b></span>` +
+                sep +
+                `<span title="Booked P&L / Margin">Bkd%: ${_returnPctHtml(bookedPct)}</span>` +
+                sep +
+                `<span title="Unbooked P&L / Margin">Unbkd%: ${_returnPctHtml(unbookedPct)}</span>` +
+                sep +
+                `<span title="Net P&L / Margin">Net%: ${_returnPctHtml(netPct)}</span>` +
+                `<span style="color:#aaa; font-size:0.9em; margin-left:6px;">· ${fetchTime}</span>`;
+        }
+
+        // Core fetch: calls backend proxy, caches, then calls renderFn with the result
+        async function fetchMarginAndCache(contextKey, positions, renderFn) {
+            if (!positions || positions.length === 0) {
+                renderFn(null, 'No open positions to calculate margin for.');
+                return;
+            }
+            renderFn(null, '⏳ Fetching margin…');
+            try {
+                const resp = await fetch('/api/openalgo/margin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ positions })
+                });
+                const json = await resp.json();
+                if (!json.success) {
+                    renderFn(null, `Error: ${json.error || 'Unknown error'}`);
+                    return;
+                }
+                const cached = { ...json.data, positionCount: positions.length };
+                _setMarginCache(contextKey, cached);
+                renderFn(cached, '');
+            } catch (e) {
+                renderFn(null, `Network error: ${e.message}`);
+            }
+        }
+
+        // ── Underlying-level margin ──────────────────────────────────────────
+        window.fetchUnderlyingMargin = function(underlying) {
+            const allEvents = (_cachedUnderlyingsData?.events || {})[underlying] || [];
+            // All expiries merged
+            const positions = getOpenPositionsForMargin(allEvents, underlying);
+            const cacheKey = `und_${underlying}`;
+            // Compute current PnL for return% display
+            const stats = computeGroupStats(allEvents);
+            fetchMarginAndCache(cacheKey, positions, (cached, errMsg) => {
+                const el = document.getElementById(`margin-und-${underlying}`);
+                if (!el) return;
+                if (errMsg) {
+                    el.style.display = 'block';
+                    el.innerHTML = `<div style="padding:4px 0; font-size:0.82em; color:#888;">${errMsg}</div>`;
+                    return;
+                }
+                el.style.display = 'block';
+                el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:5px 0 3px; border-top:1px solid #e0e8ff; margin-top:4px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl)}</div>`;
+            });
+        };
+
+        // Restore underlying margin from cache on render
+        window._restoreUnderlyingMarginFromCache = function(underlying, bookedPnl, unbookedPnl) {
+            const cached = _getMarginCache(`und_${underlying}`);
+            if (!cached) return;
+            const el = document.getElementById(`margin-und-${underlying}`);
+            if (!el) return;
+            el.style.display = 'block';
+            el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:5px 0 3px; border-top:1px solid #e0e8ff; margin-top:4px; font-size:0.82em;">${buildMarginInfoHtml(cached, bookedPnl, unbookedPnl)}</div>`;
+        };
+
+        // ── Expiry-level margin ──────────────────────────────────────────────
+        window.fetchExpiryMargin = function(expiryId, underlying) {
+            const cached_ = _expiryEventsCache[expiryId];
+            if (!cached_) return;
+            const positions = getOpenPositionsForMargin(cached_.events || [], underlying);
+            const cacheKey = `exp_${expiryId}`;
+            const stats = computeGroupStats(cached_.events || []);
+            fetchMarginAndCache(cacheKey, positions, (cached, errMsg) => {
+                const el = document.getElementById(`margin-exp-${expiryId}`);
+                if (!el) return;
+                if (errMsg) {
+                    el.style.display = 'block';
+                    el.innerHTML = `<div style="padding:3px 0; font-size:0.82em; color:#888;">${errMsg}</div>`;
+                    return;
+                }
+                el.style.display = 'block';
+                el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:4px 0 2px; border-top:1px solid #e0e8ff; margin-top:2px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl)}</div>`;
+            });
+        };
+
+        // Restore expiry margin from cache
+        window._restoreExpiryMarginFromCache = function(expiryId, underlying) {
+            const cached = _getMarginCache(`exp_${expiryId}`);
+            if (!cached) return;
+            const cached_ = _expiryEventsCache[expiryId];
+            const stats = cached_ ? computeGroupStats(cached_.events || []) : { bookedPnl: 0, unbookedPnl: 0 };
+            const el = document.getElementById(`margin-exp-${expiryId}`);
+            if (!el) return;
+            el.style.display = 'block';
+            el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:4px 0 2px; border-top:1px solid #e0e8ff; margin-top:2px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl)}</div>`;
+        };
+
+        // ── Payoff-level margin ──────────────────────────────────────────────
+        let _payoffMarginContext = null; // { underlying, expiryId, legs }
+
+        // ── Inline payoff stats (Stats button on expiry header) ──────────────
+        window.showPayoffStatsInline = async function(underlying, expiryId) {
+            const statsDiv = document.getElementById(`payoff-stats-inline-${expiryId}`);
+            if (!statsDiv) return;
+            // Toggle off if already visible
+            if (statsDiv.style.display !== 'none' && statsDiv.innerHTML) {
+                statsDiv.style.display = 'none';
+                return;
+            }
+            const cached = _expiryEventsCache[expiryId];
+            if (!cached) return;
+            const legs = consolidateLegs(cached.events || []);
+            if (legs.length === 0) {
+                statsDiv.style.display = 'block';
+                statsDiv.innerHTML = '<div style="padding:6px 10px; font-size:0.83em; color:#888;">No open positions to compute stats.</div>';
+                return;
+            }
+            statsDiv.style.display = 'block';
+            statsDiv.innerHTML = '<div style="padding:6px 10px; font-size:0.83em; color:#888;">Computing payoff stats…</div>';
+            // Fetch lot sizes
+            let lotSizeMap = {};
+            try {
+                const resp = await fetch('/api/master_contract/lot_sizes', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({symbols: legs.map(l => l.symbol)})
+                });
+                lotSizeMap = (await resp.json()).lot_sizes || {};
+            } catch(_) {}
+            legs.forEach(leg => { leg.lotSize = lotSizeMap[leg.symbol] || 1; });
+            // Compute spot + payoff points
+            const spotInfo = (_cachedUnderlyingsData?.underlyingPrices || {})[underlying] || {};
+            const spot = spotInfo.ltp || null;
+            const strikes = legs.map(l => l.strike);
+            const mid = spot || (Math.min(...strikes) + Math.max(...strikes)) / 2;
+            const rangeWidth = Math.max(mid * 0.15, (Math.max(...strikes) - Math.min(...strikes)) * 0.8 || mid * 0.1);
+            const spotMin = Math.floor(Math.max(0, mid - rangeWidth) / 50) * 50;
+            const spotMax = Math.ceil((mid + rangeWidth) / 50) * 50;
+            const step = Math.max(50, Math.round((spotMax - spotMin) / 100 / 50) * 50);
+            const spotPoints = [];
+            for (let s = spotMin; s <= spotMax; s += step) spotPoints.push(s);
+            const baseRawPayoffs = spotPoints.map(s => computePayoff(legs, s));
+            const { allPoints, allPayoffs } = buildChartPoints(spotPoints, baseRawPayoffs, 0);
+            // Breakevens
+            const breakevenSpots = [];
+            for (let i = 0; i < allPoints.length; i++) {
+                if (allPayoffs[i] === 0 && i > 0 && i < allPoints.length - 1) breakevenSpots.push(Math.round(allPoints[i]));
+            }
+            // Max profit/loss
+            const _kinkSpots = [0, ...legs.map(l => l.strike)];
+            const _kinkPayoffs = _kinkSpots.map(s => computePayoff(legs, s));
+            const maxProfit = Math.max(...allPayoffs, ..._kinkPayoffs);
+            const maxLoss = Math.min(...allPayoffs, ..._kinkPayoffs);
+            const _farHigh = (spotPoints[spotPoints.length - 1] || 50000) * 3;
+            const _payoffFarHigh = computePayoff(legs, _farHigh);
+            const isUnlimitedProfit = _payoffFarHigh > maxProfit + 1;
+            const isUnlimitedLoss = _payoffFarHigh < maxLoss - 1;
+            const currentPnl = computeCurrentPnl(legs);
+            // ROI from cached margin
+            const cachedMargin = _getMarginCache(`exp_${expiryId}`);
+            const roiMargin = cachedMargin ? (cachedMargin.total_margin_required || 0) : 0;
+            function fmtStat(val, isUnlimited) {
+                if (isUnlimited) return 'Unlimited';
+                const base = fmtInrPayoff(val);
+                if (roiMargin > 0) return `${base} (${(val / roiMargin * 100).toFixed(1)}%)`;
+                return base;
+            }
+            const breakevenStr = breakevenSpots.length
+                ? breakevenSpots.map(s => {
+                    const pct = spot ? ` (${((s - spot) / spot * 100).toFixed(1)}%)` : '';
+                    return `₹${s.toLocaleString('en-IN')}${pct}`;
+                }).join(', ')
+                : '—';
+            const mpColor = isUnlimitedProfit || maxProfit >= 0 ? '#28a745' : '#dc3545';
+            const mlColor = isUnlimitedLoss || maxLoss < 0 ? '#dc3545' : '#28a745';
+            const pnlColor = currentPnl >= 0 ? '#28a745' : '#dc3545';
+            statsDiv.innerHTML = `<div style="display:flex; gap:20px; flex-wrap:wrap; padding:8px 12px; background:#f0fff4; border:1px solid #c3e6cb; border-radius:0 0 4px 4px; font-size:0.83em;">
+                <div><div style="font-size:0.75em;color:#888;text-transform:uppercase;letter-spacing:0.04em;">Max Profit</div><div style="font-weight:bold;color:${mpColor};">${fmtStat(maxProfit, isUnlimitedProfit)}</div></div>
+                <div><div style="font-size:0.75em;color:#888;text-transform:uppercase;letter-spacing:0.04em;">Max Loss</div><div style="font-weight:bold;color:${mlColor};">${fmtStat(maxLoss, isUnlimitedLoss)}</div></div>
+                <div><div style="font-size:0.75em;color:#888;text-transform:uppercase;letter-spacing:0.04em;">Current P&amp;L (LTP)</div><div style="font-weight:bold;color:${pnlColor};">${fmtInrPayoff(currentPnl)}</div></div>
+                <div><div style="font-size:0.75em;color:#888;text-transform:uppercase;letter-spacing:0.04em;">Breakevens</div><div style="font-weight:bold;color:#555;">${breakevenStr}</div></div>
+            </div>`;
+        };
+
+        window.fetchPayoffMargin = function() {
+            if (!_payoffMarginContext) return;
+            const { underlying, expiryId, legs } = _payoffMarginContext;
+            const positions = legs.map(leg => ({
+                symbol: leg.symbol,
+                exchange: ['SENSEX','BANKEX'].includes((underlying||'').toUpperCase()) ? 'BFO' : 'NFO',
+                action: leg.qty > 0 ? 'BUY' : 'SELL',
+                product: 'NRML',
+                pricetype: 'MARKET',
+                quantity: String(Math.abs(leg.qty)),
+                price: '0'
+            }));
+            const cacheKey = `exp_${expiryId}`;
+            const infoEl = document.getElementById('payoff-margin-info');
+            const btn = document.getElementById('payoff-fetch-margin-btn');
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ Fetching…'; }
+            fetchMarginAndCache(cacheKey, positions, (cached, errMsg) => {
+                if (btn) { btn.disabled = false; btn.textContent = '💰 Fetch Margin'; }
+                if (!infoEl) return;
+                if (errMsg) { infoEl.innerHTML = `<span style="color:#888;">${errMsg}</span>`; return; }
+                // Get current PnL from legs (lot-size adjusted)
+                const unbookedPnl = legs.reduce((s, l) => s + (l.ltp - l.avgPrice) * l.qty, 0);
+                // bookedPnl from payoff state
+                const bookedPnl = _payoffState ? _payoffState.closedPnl : 0;
+                infoEl.innerHTML = buildMarginInfoHtml(cached, bookedPnl, unbookedPnl);
+            });
+        };
     })();
     </script>
 
