@@ -3467,8 +3467,8 @@ def api_openalgo_margin():
         if broker_sym:
             try:
                 converted['symbol'] = convert_broker_symbol_to_openalgo_symbol(broker_sym)
-            except Exception:
-                pass  # leave as-is if conversion fails
+            except Exception as e:
+                print(f"[OpenAlgo margin] Symbol conversion failed for {broker_sym}: {e}")
         converted_positions.append(converted)
 
     BATCH_SIZE = 50

@@ -3008,7 +3008,9 @@
 
                 const visibleEventList = excludeExpired
                     ? eventList.filter(e => {
-                        const expiryDate = getExpiryDateFromSymbolEnhanced(e.symbol || '');
+                        const expiryDate = e.expiry_date
+                            ? new Date(e.expiry_date + 'T00:00:00')
+                            : getExpiryDateForSymbol(e.symbol || '');
                         return !expiryDate || expiryDate >= today;
                     })
                     : eventList;
@@ -3190,42 +3192,48 @@
                         </label>`
                     ).join('');
 
+                    const escJs = (v = '') => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                    const safeUnderlying = escJs(underlying);
+                    const safeExpiryIso = escJs(expiryIso);
+                    const safeExpiryDateStr = escJs(expiryDateStr);
+                    const safeExpiryId = escJs(expiryId);
+
                     expiryHtml += `
                         <div class="expiry-section" style="margin-top: 15px; border-left: 3px solid #ddd; padding-left: 15px;">
                             <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-                                <span onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true)}</span>
+                                <span onclick="toggleExpiryGroup('${safeExpiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true)}</span>
                                 <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
                                     <button
                                         data-subscribe-btn="true"
                                         data-subscribe-type="expiry"
-                                        data-subscribe-underlying="${underlying}"
-                                        data-subscribe-expiry="${expiryIso}"
-                                        onclick="event.stopPropagation(); toggleSubscription('expiry', '${underlying}', '${expiryIso}', null);"
+                                        data-subscribe-underlying="${safeUnderlying}"
+                                        data-subscribe-expiry="${safeExpiryIso}"
+                                        onclick="event.stopPropagation(); toggleSubscription('expiry', '${safeUnderlying}', '${safeExpiryIso}', null);"
                                         style="padding: 4px 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         🔕 Subscribe
                                     </button>
                                     <button
-                                        onclick="event.stopPropagation(); openPayoffChart('${underlying}', '${expiryId}', '${expiryIso}', '${expiryDateStr}');"
+                                        onclick="event.stopPropagation(); openPayoffChart('${safeUnderlying}', '${safeExpiryId}', '${safeExpiryIso}', '${safeExpiryDateStr}');"
                                         style="padding: 4px 10px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         &#x1F4C8; Payoff
                                     </button>
                                     <button
-                                        onclick="event.stopPropagation(); openIntradayPnlModal('${underlying}', '${expiryIso}', '${expiryDateStr}', '${expiryId}');"
+                                        onclick="event.stopPropagation(); openIntradayPnlModal('${safeUnderlying}', '${safeExpiryIso}', '${safeExpiryDateStr}', '${safeExpiryId}');"
                                         style="padding: 4px 10px; background: #570df8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         &#x1F4C8; P&amp;L Curve
                                     </button>
                                     <button
-                                        onclick="event.stopPropagation(); showPayoffStatsInline('${underlying}', '${expiryId}');"
+                                        onclick="event.stopPropagation(); showPayoffStatsInline('${safeUnderlying}', '${safeExpiryId}');"
                                         style="padding: 4px 10px; background: #20c997; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         &#x1F4CA; Stats
                                     </button>
                                     <button
-                                        onclick="event.stopPropagation(); fetchExpiryMargin('${expiryId}', '${underlying}');"
+                                        onclick="event.stopPropagation(); fetchExpiryMargin('${safeExpiryId}', '${safeUnderlying}');"
                                         style="padding: 4px 10px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         💰 Fetch Margin
                                     </button>
                                     <button
-                                        onclick="event.stopPropagation(); openAIChatPanel('${underlying}', 'expiry', '${expiryIso}', '${underlying} \u2014 ${expiryDateStr}');"
+                                        onclick="event.stopPropagation(); openAIChatPanel('${safeUnderlying}', 'expiry', '${safeExpiryIso}', '${safeUnderlying} \u2014 ${safeExpiryDateStr}');"
                                         style="padding: 4px 10px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         &#x1F916; Ask AI
                                     </button>
@@ -6540,7 +6548,9 @@
                 loadEl.style.display    = 'none';
                 chartWrap.style.display = 'block';
             } catch (e) {
-                loadEl.innerHTML = `<span style="color:#dc2626; font-size:13px;">Failed to load P&L data: ${e.message}</span>`;
+                loadEl.style.display = 'none';
+                emptyEl.style.display = 'flex';
+                emptyEl.textContent = `Failed to load P&L data: ${e.message}`;
             } finally {
                 _intradayLoading = false;
                 btn.disabled = false;
@@ -7007,7 +7017,7 @@
             if (payoffMarginEl) {
                 const cachedMargin = _getMarginCache(`exp_${expiryId}`);
                 if (cachedMargin) {
-                    const unbookedPnl = legs.reduce((s, l) => s + (l.ltp - l.avgPrice) * l.qty * l.lotSize, 0);
+                    const unbookedPnl = legs.reduce((s, l) => s + (l.ltp - l.avgPrice) * l.qty, 0);
                     payoffMarginEl.innerHTML = buildMarginInfoHtml(cachedMargin, closedPnl, unbookedPnl);
                 } else {
                     payoffMarginEl.innerHTML = '';
@@ -7340,7 +7350,7 @@
                 if (!infoEl) return;
                 if (errMsg) { infoEl.innerHTML = `<span style="color:#888;">${errMsg}</span>`; return; }
                 // Get current PnL from legs (lot-size adjusted)
-                const unbookedPnl = legs.reduce((s, l) => s + (l.ltp - l.avgPrice) * l.qty * l.lotSize, 0);
+                const unbookedPnl = legs.reduce((s, l) => s + (l.ltp - l.avgPrice) * l.qty, 0);
                 // bookedPnl from payoff state
                 const bookedPnl = _payoffState ? _payoffState.closedPnl : 0;
                 infoEl.innerHTML = buildMarginInfoHtml(cached, bookedPnl, unbookedPnl);
