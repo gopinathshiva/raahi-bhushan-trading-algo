@@ -1524,14 +1524,14 @@
 
             try {
                 const datePart = window.location.pathname.split('/')[3] || '';
-                const [res, expiryMapRes] = await Promise.all([
-                    fetch('/api/profile_all_underlyings/' + slug + '?' + params.toString()),
-                    datePart ? fetch(`/api/profile/${slug}/symbol_expiry_map/${datePart}`) : Promise.resolve(null)
-                ]);
+                const res = await fetch('/api/profile_all_underlyings/' + slug + '?' + params.toString());
                 const data = await res.json();
-                if (expiryMapRes) {
-                    const expiryMapJson = await expiryMapRes.json().catch(() => null);
-                    if (expiryMapJson && expiryMapJson.success) _symbolExpiryMap = expiryMapJson.map;
+                if (datePart) {
+                    const expiryMapRes = await fetch(`/api/profile/${slug}/symbol_expiry_map/${datePart}`).catch(() => null);
+                    if (expiryMapRes) {
+                        const expiryMapJson = await expiryMapRes.json().catch(() => null);
+                        if (expiryMapJson && expiryMapJson.success) _symbolExpiryMap = expiryMapJson.map;
+                    }
                 }
                 
                 if (data.error) {
