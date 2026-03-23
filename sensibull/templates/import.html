@@ -35,6 +35,9 @@
     .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     .alert-danger  { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
     .alert-warning { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
+    .alert-info    { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    .merge-result-table { width: 100%; font-size: 0.85em; margin-top: 12px; border-collapse: collapse; }
+    .merge-result-table th, .merge-result-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #c3e6cb; }
 
     .upload-area {
         border: 2px dashed #dee2e6;
@@ -86,10 +89,37 @@
         <div class="import-header">
             <div class="import-icon">⬆️</div>
             <h2>Import Database</h2>
-            <p>Upload a <strong>sensibull.db</strong> file to replace the current database.</p>
+            <p>Upload a <strong>sensibull.db</strong> file to import data.</p>
         </div>
 
-        {% if success %}
+        {% if supabase_mode %}
+        <div class="alert alert-warning">
+            ⚠️ <strong>Supabase mode:</strong> The app is using Supabase as its database.
+            This import will only update the local <code>sensibull.db</code> file, which is not in use.
+            To load data into Supabase, use the <code>migrate_to_supabase.py</code> script.
+            You may still proceed to build a local copy.
+        </div>
+        {% endif %}
+
+        {% if success and merge_result %}
+        <div class="alert alert-success">
+            ✅ <strong>Merge complete!</strong>
+            <table class="merge-result-table">
+                <thead><tr><th>Table</th><th style="color:green;">Inserted</th><th style="color:#888;">Skipped</th></tr></thead>
+                <tbody>
+                {% for table, counts in merge_result.items() %}
+                    {% if counts.inserted > 0 or counts.skipped > 0 %}
+                    <tr>
+                        <td>{{ table }}</td>
+                        <td style="color:green;">+{{ counts.inserted }}</td>
+                        <td style="color:#888;">{{ counts.skipped }}</td>
+                    </tr>
+                    {% endif %}
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% elif success %}
         <div class="alert alert-success">
             ✅ <strong>Success!</strong> Database imported successfully.
             You can now <a href="{{ url_for('login') }}">login</a>.
@@ -102,11 +132,27 @@
         </div>
         {% endif %}
 
-        <div class="alert alert-warning">
-            ⚠️ <strong>Warning:</strong> This will completely replace your current database. All existing data will be lost!
+        <!-- Mode warning — toggled by merge checkbox -->
+        <div id="modeWarning" class="alert alert-warning" style="display:none;">
+            ⚠️ <strong>Replace mode:</strong> This will completely replace your current database.
+            All existing data will be lost!
+        </div>
+        <div id="mergeModeInfo" class="alert alert-info">
+            ℹ️ <strong>Merge mode:</strong> New rows from the imported file will be added.
+            Rows that already exist (by primary key) will be skipped. Your existing data is safe.
         </div>
 
         <form id="uploadForm" method="POST" action="{{ url_for('import_upload') }}" enctype="multipart/form-data">
+            <!-- Merge checkbox (default: checked) -->
+            <div style="margin-bottom: 16px;">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600;">
+                    <input type="checkbox" name="merge" value="1" id="mergeCheckbox" checked
+                           style="width:16px; height:16px;">
+                    Merge data
+                    <span style="font-weight:400; color:#555;">(recommended — keeps existing data)</span>
+                </label>
+            </div>
+
             <div class="upload-area" id="uploadArea">
                 <div class="upload-icon">☁️</div>
                 <p><strong>Click to select file or drag and drop</strong></p>
@@ -131,9 +177,16 @@
         <div class="instructions">
             <h5>Instructions</h5>
             <ol>
-                <li>Select the <code>sensibull.db</code> file you want to import</li>
-                <li>Click "Import Database" to upload and replace the current database</li>
-                <li>After successful import, log in with the credentials from the imported database</li>
+                <li>Select a <code>sensibull.db</code> export file</li>
+                <li>
+                    <strong>Merge mode</strong> (default): new rows are added; existing rows are skipped.
+                    Ideal for importing date-range exports from the same Supabase database.
+                </li>
+                <li>
+                    <strong>Replace mode</strong> (uncheck box): replaces the entire database.
+                    Use for a fresh install or when merging from a different source.
+                </li>
+                <li>After import, log in with the credentials from the imported database</li>
             </ol>
         </div>
     </div>
@@ -142,13 +195,29 @@
 
 {% block scripts %}
 <script>
-    const uploadArea = document.getElementById('uploadArea');
-    const fileInput  = document.getElementById('fileInput');
-    const fileInfo   = document.getElementById('fileInfo');
-    const fileName   = document.getElementById('fileName');
-    const fileSize   = document.getElementById('fileSize');
-    const uploadBtn  = document.getElementById('uploadBtn');
-    const uploadForm = document.getElementById('uploadForm');
+    const uploadArea    = document.getElementById('uploadArea');
+    const fileInput     = document.getElementById('fileInput');
+    const fileInfo      = document.getElementById('fileInfo');
+    const fileName      = document.getElementById('fileName');
+    const fileSize      = document.getElementById('fileSize');
+    const uploadBtn     = document.getElementById('uploadBtn');
+    const uploadForm    = document.getElementById('uploadForm');
+    const mergeCheckbox = document.getElementById('mergeCheckbox');
+    const modeWarning   = document.getElementById('modeWarning');
+    const mergeModeInfo = document.getElementById('mergeModeInfo');
+
+    // Toggle warning/info based on merge checkbox
+    function updateModeDisplay() {
+        if (mergeCheckbox.checked) {
+            modeWarning.style.display   = 'none';
+            mergeModeInfo.style.display = 'block';
+        } else {
+            modeWarning.style.display   = 'block';
+            mergeModeInfo.style.display = 'none';
+        }
+    }
+    mergeCheckbox.addEventListener('change', updateModeDisplay);
+    updateModeDisplay(); // set initial state
 
     uploadArea.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', e => handleFiles(e.target.files));

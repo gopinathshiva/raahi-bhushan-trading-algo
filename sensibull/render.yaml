@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: sensibull-tracker
+    runtime: python
+    rootDir: sensibull
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 app.py
+    healthCheckPath: /health
+    envVars:
+      - key: DB_BACKEND
+        value: supabase
+      - key: DATABASE_URL
+        sync: false   # secret — set in Render dashboard
+      - key: SECRET_KEY
+        sync: false   # secret — set in Render dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false   # secret — set in Render dashboard
+      - key: GEMINI_API_KEY
+        sync: false   # secret — set in Render dashboard
+      - key: REGISTRATION_CODE
+        sync: false   # secret — set in Render dashboard
+      - key: SCRAPE_TOKEN
+        sync: false   # secret — set in Render dashboard

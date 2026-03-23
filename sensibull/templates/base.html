@@ -130,6 +130,21 @@
             color: #ff9999 !important;
         }
 
+        .db-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .db-badge-sqlite  { background: rgba(255,193,7,0.18); color: #ffc107; border: 1px solid rgba(255,193,7,0.35); }
+        .db-badge-supabase { background: rgba(62,207,142,0.18); color: #3ecf8e; border: 1px solid rgba(62,207,142,0.35); }
+
         /* ===================== BREADCRUMB ===================== */
         .breadcrumb-bar {
             background: #fff;
@@ -223,6 +238,11 @@
         <a href="{{ url_for('index') }}" class="nav-brand">
             📊 Sensibull Tracker
         </a>
+        {% if db_backend == 'supabase' %}
+        <span class="db-badge db-badge-supabase">☁ Supabase</span>
+        {% else %}
+        <span class="db-badge db-badge-sqlite">🗄 SQLite</span>
+        {% endif %}
 
         <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation" onclick="toggleNav()">
             <span></span><span></span><span></span>
@@ -263,6 +283,12 @@
                 <a href="{{ url_for('import_page') }}"
                    class="{{ 'active' if request.endpoint == 'import_page' else '' }}">
                     ⬆ Import
+                </a>
+            </li>
+            <li>
+                <a href="{{ url_for('sync_page') }}"
+                   class="{{ 'active' if request.endpoint in ('sync_page', 'sync_run') else '' }}">
+                    🔄 Sync
                 </a>
             </li>
 
