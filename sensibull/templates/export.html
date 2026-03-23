@@ -86,5 +86,47 @@
             </ul>
         </div>
     </div>
+
+    <!-- Date Range Export -->
+    <div class="export-card" style="margin-top: 24px;">
+        <div class="export-icon">📅</div>
+        <h2>Export Date Range</h2>
+        <p>
+            Download a filtered database containing only data from a specific date range.
+            The exported <code>.db</code> file can be imported on the Import page.
+        </p>
+
+        <form method="POST" action="{{ url_for('export_download_range') }}" id="rangeForm">
+            <div style="display: flex; gap: 16px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap;">
+                <div>
+                    <label for="from_date" style="display: block; margin-bottom: 4px; font-weight: 600;">From</label>
+                    <input type="date" id="from_date" name="from_date" required
+                           value="{{ default_from }}"
+                           style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem;">
+                </div>
+                <div>
+                    <label for="to_date" style="display: block; margin-bottom: 4px; font-weight: 600;">To</label>
+                    <input type="date" id="to_date" name="to_date" required
+                           value="{{ default_to }}"
+                           style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem;">
+                </div>
+            </div>
+            <button type="submit" class="btn-download" id="rangeBtn">⬇ Download Range</button>
+        </form>
+
+        <div class="alert alert-info" style="margin-top: 16px; text-align: left;">
+            ℹ️ <strong>What's included:</strong> Snapshots, position changes, notifications,
+            and AI chat history for the selected date range. Profiles, subscriptions, and
+            admin users are always included. Maximum recommended range: 30 days.
+        </div>
+    </div>
 </div>
+
+<script>
+    document.getElementById('rangeForm').addEventListener('submit', function() {
+        const btn = document.getElementById('rangeBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Building export…';
+    });
+</script>
 {% endblock %}

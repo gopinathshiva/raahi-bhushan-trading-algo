@@ -54,18 +54,17 @@ def fetch_data(slug):
         return None
 
 def save_snapshot(conn, profile_id, data, timestamp=None):
+    from db_adapter import last_insert_id
     c = conn.cursor()
     # Store timestamps in ISO format with timezone (e.g., "2026-02-16T10:30:00+05:30")
-    # This makes it explicit that all times are in IST
     if timestamp:
-         # Convert datetime to ISO format string with timezone
-         ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
-         c.execute("INSERT INTO snapshots (profile_id, raw_data, created_at_source, timestamp) VALUES (?, ?, ?, ?)", 
+        ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+        c.execute("INSERT INTO snapshots (profile_id, raw_data, created_at_source, timestamp) VALUES (?, ?, ?, ?) RETURNING id",
                   (profile_id, json.dumps(data), data.get('created_at'), ts_str))
     else:
-         c.execute("INSERT INTO snapshots (profile_id, raw_data, created_at_source) VALUES (?, ?, ?)", 
+        c.execute("INSERT INTO snapshots (profile_id, raw_data, created_at_source) VALUES (?, ?, ?) RETURNING id",
                   (profile_id, json.dumps(data), data.get('created_at')))
-    return c.lastrowid
+    return last_insert_id(c)
 
 def normalize_trades(trades):
     # Sort trades to ensure consistent order for comparison (e.g. by symbol + product)
@@ -523,7 +522,7 @@ def run_scraper():
 
     # Ensure profiles exist in DB
     for slug in slugs:
-        c.execute("INSERT OR IGNORE INTO profiles (slug, name) VALUES (?, ?)", (slug, slug))
+        c.execute("INSERT INTO profiles (slug, name) VALUES (?, ?) ON CONFLICT (slug) DO NOTHING", (slug, slug))
     conn.commit()
 
     # Run cleanup occasionally (simple way: check if hour is 09:15 approx, or just every run is fine given low volume?
@@ -538,7 +537,7 @@ def run_scraper():
         profile = c.execute("SELECT id FROM profiles WHERE slug = ?", (slug,)).fetchone()
         if not profile:
             continue
-        profile_id = profile[0] # Fetchone returns a tuple, not a dict
+        profile_id = profile['id']
         
         # Check if we have any data (Initial Snapshot Check)
         last_snapshot = c.execute("SELECT raw_data FROM snapshots WHERE profile_id = ? ORDER BY created_at_source DESC LIMIT 1", (profile_id,)).fetchone()
@@ -580,7 +579,8 @@ def run_scraper():
             continue
             
         # Compare with last snapshot
-        last_data = json.loads(last_snapshot[0]) # Fetchone returns a tuple
+        raw = last_snapshot['raw_data']
+        last_data = raw if isinstance(raw, dict) else json.loads(raw)  # psycopg2 JSONB→dict, SQLite TEXT→parse
         diff = get_normalized_trades(current_data) != get_normalized_trades(last_data)
         
         if diff:

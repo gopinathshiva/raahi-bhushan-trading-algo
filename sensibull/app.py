@@ -1,3 +1,9 @@
+# Load .env FIRST so DB_BACKEND and other env vars are set before any module
+# reads os.environ at import time (db_adapter.py reads DB_BACKEND at module level)
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 from brokerage import calculate_option_brokerage, get_exchange_for_underlying
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -5,18 +11,22 @@ from werkzeug.security import check_password_hash
 import sqlite3
 import json
 import requests as http_requests
+
+def _json_loads(value):
+    """Parse JSON string or return value as-is if already deserialized (Supabase)."""
+    if isinstance(value, (dict, list)):
+        return value
+    return json.loads(value)
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
-from database import get_db, sync_profiles, now_ist, init_db
+from database import get_db, sync_profiles, now_ist, init_db, BACKEND
+from db_adapter import last_insert_id
 import sys
-import os
 import threading
 import re
 import calendar
 from urllib.parse import urlparse
 from typing import Callable, Optional
-from dotenv import load_dotenv
-load_dotenv()
 import time
 import subprocess
 import signal
@@ -27,8 +37,8 @@ IST = ZoneInfo("Asia/Kolkata")
 app = Flask(__name__)
 # Configure secret key for sessions (generate a secure random key in production)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-12345')
-# Configure standard port or 5010 as per previous context
-PORT = 6060
+# Use PORT env var (Render injects it automatically; default to 6060 locally)
+PORT = int(os.environ.get('PORT', 6060))
 
 # Initialize Flask-Login
 login_manager = LoginManager()
@@ -52,6 +62,11 @@ class AdminUser(UserMixin):
     def is_active(self):
         """Override UserMixin is_active property"""
         return bool(self._is_active)
+
+@app.context_processor
+def inject_db_backend():
+    return {'db_backend': BACKEND}
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -94,26 +109,40 @@ def to_datetime_filter(value):
     # Timestamps in DB are stored in ISO format with IST timezone (e.g., "2026-02-16T10:30:00+05:30")
     # We parse them and return as timezone-aware datetime objects for accurate calculations
     if isinstance(value, datetime):
-        # If datetime is naive (old data), assume it's IST
         if value.tzinfo is None:
             return value.replace(tzinfo=IST)
         return value
 
+    if not value:
+        return datetime.now(IST)
+
+    # Python 3.11+ fromisoformat handles timezone offsets; 3.9/3.10 do not.
+    # Normalise by replacing a trailing +HH:MM / -HH:MM with the equivalent
+    # UTC-offset so fromisoformat can parse it on all versions.
+    import re as _re
+    from datetime import timezone as _tz, timedelta as _td
+    _TZ_RE = _re.compile(r'([+-])(\d{2}):(\d{2})$')
+
+    def _parse(s):
+        s = s.replace(' ', 'T')
+        m = _TZ_RE.search(s)
+        if m:
+            sign = 1 if m.group(1) == '+' else -1
+            offset = _td(hours=sign * int(m.group(2)), minutes=sign * int(m.group(3)))
+            s_naive = s[:m.start()]
+            dt = datetime.fromisoformat(s_naive)
+            return dt.replace(tzinfo=_tz(offset))
+        dt = datetime.fromisoformat(s)
+        return dt.replace(tzinfo=IST) if dt.tzinfo is None else dt
+
     try:
-        # First try ISO format with timezone (new format)
-        dt = datetime.fromisoformat(value)
-        # Ensure it has timezone info
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=IST)
-        return dt
+        return _parse(value)
     except (ValueError, AttributeError):
         try:
-            # Fallback to old format without timezone (for backward compatibility)
             dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
-            # Assume it's IST and add timezone info
             return dt.replace(tzinfo=IST)
-        except:
-            return value
+        except Exception:
+            return datetime.now(IST)
 
 @app.template_filter('fmt_inr')
 def fmt_inr_filter(value, decimals=1):
@@ -191,9 +220,18 @@ def _do_download_master_contract():
                 instrument_type = row.get('instrument_type', '')
 
                 c.execute('''
-                    INSERT OR REPLACE INTO master_contract
+                    INSERT INTO master_contract
                     (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, last_updated)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (instrument_token) DO UPDATE SET
+                        trading_symbol = EXCLUDED.trading_symbol,
+                        exchange = EXCLUDED.exchange,
+                        name = EXCLUDED.name,
+                        expiry = EXCLUDED.expiry,
+                        strike = EXCLUDED.strike,
+                        lot_size = EXCLUDED.lot_size,
+                        instrument_type = EXCLUDED.instrument_type,
+                        last_updated = EXCLUDED.last_updated
                 ''', (instrument_token, trading_symbol, exchange, name, expiry, strike, lot_size, instrument_type, now_ist()))
 
                 instruments_count += 1
@@ -214,26 +252,35 @@ def _do_download_master_contract():
         return False, str(e)
 
 
-def restart_scraper_internal():
-    print("Restarting scraper process...")
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    scraper_path = os.path.join(base_dir, 'scraper.py')
-    log_file = os.path.join(base_dir, 'scraper.log')
+def run_scraper_loop():
+    """
+    Runs the scraper in a background thread (replaces the subprocess model).
+    Loops indefinitely: runs one scraper cycle, sleeps 60 s, repeats.
+    All exceptions are caught so the thread never dies silently.
+    """
+    import traceback
+    from scraper import run_scraper as _run_scraper_once
 
-    # Kill existing
-    os.system("pkill -f 'vibhu/sensibull/scraper.py'")
+    print(f"[ScraperThread] Started at {now_ist().isoformat()}")
+    while True:
+        try:
+            _run_scraper_once()
+        except Exception as e:
+            print(f"[ScraperThread] Error: {e}")
+            traceback.print_exc()
+        time.sleep(60)
 
-    # Start new
-    cmd = f"nohup python3 {scraper_path} >> {log_file} 2>&1 &"
-    os.system(cmd)
 
 def monitor_scraper():
-    """Background thread to monitor scraper and restart if stuck"""
-    global LAST_AUTO_RESTART
+    """
+    Background thread for startup tasks and ongoing staleness monitoring.
+    - Downloads master contract once at startup if not already done today.
+    - Logs a warning if scraper appears stuck (staleness > 5 min during market hours).
+    - Does NOT restart the scraper — Render health checks handle restarts via /health 503.
+    """
+    print("Startup monitor thread started.")
 
-    print("Scraper monitor thread started.")
-
-    # --- Daily master contract download (at startup, before scraper starts) ---
+    # --- Daily master contract download at startup ---
     try:
         conn = get_db()
         c = conn.cursor()
@@ -253,64 +300,90 @@ def monitor_scraper():
         print(f"[MasterContract] Error during startup download check: {e}")
         MASTER_CONTRACT_DOWNLOAD_FAILED = True
 
-    # Wait for auto-start delay before first check
-    print(f"Waiting {SCRAPER_AUTO_START_DELAY} seconds before auto-starting scraper...")
-    time.sleep(SCRAPER_AUTO_START_DELAY)
-
-    # Auto-start scraper on first run
-    print("Auto-starting scraper...")
-    restart_scraper_internal()
-    LAST_AUTO_RESTART = now_ist()
-
+    # --- Ongoing staleness monitoring ---
     while True:
         try:
-            # Check every minute
             time.sleep(60)
 
             if not is_market_open():
                 continue
 
-            # Check DB for last update
             conn = get_db()
             c = conn.cursor()
-            last_updated_row = c.execute("SELECT MAX(timestamp) FROM latest_snapshots").fetchone()
+            last_updated_row = c.execute("SELECT MAX(timestamp) AS max_ts FROM latest_snapshots").fetchone()
             conn.close()
 
-            last_updated = last_updated_row[0] if last_updated_row else None
-
-            should_restart = False
+            last_updated = last_updated_row['max_ts'] if last_updated_row else None
 
             if last_updated:
                 last_dt = to_datetime_filter(last_updated)
-                # Ensure both datetimes are timezone-aware for comparison
                 if last_dt.tzinfo is None:
                     last_dt = last_dt.replace(tzinfo=IST)
                 time_diff = (now_ist() - last_dt).total_seconds()
-
-                # If no update for > 5 minutes (300 seconds)
                 if time_diff > 300:
-                    print(f"Monitor: Scraper stuck! Last update {time_diff}s ago.")
-                    should_restart = True
-            else:
-                 # If no data at all and market is open, maybe assume stuck?
-                 # Or maybe database is empty. Let's be conservative and only restart if data exists but is stale,
-                 # or perhaps if empty database persists for long.
-                 # For now, only restart if stale.
-                 pass
-
-            if should_restart:
-                # Check cooldown (don't restart if we just restarted < 1 min ago)
-                if LAST_AUTO_RESTART and (now_ist() - LAST_AUTO_RESTART).total_seconds() < 60:
-                    print("Monitor: Skipping restart due to cooldown.")
-                else:
-                    print("Monitor: Triggering auto-restart.")
-                    restart_scraper_internal()
-                    LAST_AUTO_RESTART = now_ist()
+                    print(f"[Monitor] WARNING: Scraper appears stuck! Last update {int(time_diff)}s ago.")
 
         except Exception as e:
-            print(f"Monitor error: {e}")
-            # Sleep a bit to avoid rapid loops on error
+            print(f"[Monitor] Error: {e}")
             time.sleep(10)
+
+SCRAPE_TOKEN = os.environ.get('SCRAPE_TOKEN', '')
+
+
+@app.route('/health')
+def health():
+    """
+    Health check endpoint (no login required).
+    Used by Render health checks and Google Apps Script keep-alive.
+    Returns 200 normally; 503 if scraper appears stuck during market hours.
+    """
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute("SELECT MAX(timestamp) AS max_ts FROM latest_snapshots").fetchone()
+    conn.close()
+
+    last_updated = row['max_ts'] if row else None
+
+    if is_market_open() and last_updated:
+        last_dt = to_datetime_filter(last_updated)
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=IST)
+        staleness = (now_ist() - last_dt).total_seconds()
+        if staleness > 600:  # 10 minutes
+            return jsonify({
+                'status': 'degraded',
+                'reason': f'Scraper last updated {int(staleness)}s ago',
+                'last_updated': last_updated
+            }), 503
+
+    return jsonify({
+        'status': 'ok',
+        'last_updated': last_updated,
+        'market_open': is_market_open()
+    }), 200
+
+
+def _run_scraper_once_safe():
+    """Run one scraper cycle in a fire-and-forget thread (for /api/trigger-scrape)."""
+    try:
+        from scraper import run_scraper
+        run_scraper()
+    except Exception as e:
+        print(f"[TriggerScrape] Error: {e}")
+
+
+@app.route('/api/trigger-scrape', methods=['POST'])
+def trigger_scrape():
+    """
+    Trigger an immediate scrape cycle (protected by SCRAPE_TOKEN bearer token).
+    Set SCRAPE_TOKEN env var to a random secret.
+    """
+    auth = request.headers.get('Authorization', '')
+    if not SCRAPE_TOKEN or auth != f'Bearer {SCRAPE_TOKEN}':
+        return jsonify({'error': 'Unauthorized'}), 401
+    threading.Thread(target=_run_scraper_once_safe, daemon=True).start()
+    return jsonify({'status': 'triggered'}), 200
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -333,7 +406,8 @@ def login():
                 return render_template('login.html', error='All fields are required for registration')
 
             # Check verification code
-            if verification_code != '1083':
+            REGISTRATION_CODE = os.environ.get('REGISTRATION_CODE', '1083')
+            if verification_code != REGISTRATION_CODE:
                 return render_template('login.html', error='Invalid verification code')
 
             # Validate password length
@@ -452,7 +526,7 @@ def notifications(slug):
 
     # Get the last snapshot date for this profile
     last_snapshot = c.execute("""
-        SELECT date(timestamp) as snapshot_date
+        SELECT SUBSTR(timestamp, 1, 10) as snapshot_date
         FROM snapshots
         WHERE profile_id = ?
         ORDER BY timestamp DESC
@@ -478,33 +552,32 @@ def index():
         ORDER BY slug
     """).fetchall()
 
-    # Calculate dates (last 30 days)
-
-    # We have profiles now. Now get dates.
-    # Get unique dates from changes
-    dates_rows = c.execute("SELECT DISTINCT date(timestamp) as day FROM position_changes ORDER BY day DESC LIMIT 30").fetchall()
+    # Get unique dates from changes (last 30 days)
+    dates_rows = c.execute("SELECT DISTINCT SUBSTR(timestamp, 1, 10) as day FROM position_changes ORDER BY day DESC LIMIT 30").fetchall()
     dates = [row['day'] for row in dates_rows]
 
-    # Build matrix
-    matrix = {}
-    for p in profiles:
-        for d in dates:
-            # Check if any changes on this day
-            count = c.execute("""
-                SELECT COUNT(*) FROM position_changes
-                WHERE profile_id = ? AND date(timestamp) = ?
-            """, (p['id'], d)).fetchone()[0]
+    # For SQLite (local), build the full matrix eagerly — it's fast enough.
+    # For Supabase, skip the matrix so the page loads instantly; rows are loaded on demand.
+    matrix = None
+    if BACKEND != 'supabase':
+        matrix = {}
+        for p in profiles:
+            for d in dates:
+                count = c.execute("""
+                    SELECT COUNT(*) AS count FROM position_changes
+                    WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
+                """, (p['id'], d)).fetchone()['count']
 
-            pnl = 0
-            if count > 0:
-                 metrics = get_daily_pnl_metrics(c, p['id'], d)
-                 pnl = metrics['todays_pnl']
+                pnl = 0
+                if count > 0:
+                    metrics = get_daily_pnl_metrics(c, p['id'], d)
+                    pnl = metrics['todays_pnl']
 
-            matrix[(p['id'], d)] = {'count': count, 'pnl': pnl}
+                matrix[(p['id'], d)] = {'count': count, 'pnl': pnl}
 
     # Get global last updated time
-    last_updated_row = c.execute("SELECT MAX(timestamp) FROM latest_snapshots").fetchone()
-    last_updated = last_updated_row[0] if last_updated_row else None
+    last_updated_row = c.execute("SELECT MAX(timestamp) AS max_ts FROM latest_snapshots").fetchone()
+    last_updated = last_updated_row['max_ts'] if last_updated_row else None
 
     scraper_error = None
     if not is_market_open():
@@ -513,23 +586,54 @@ def index():
         # Check if stuck (no update in last 3 minutes)
         if last_updated:
             last_dt = to_datetime_filter(last_updated)
-            # Ensure both datetimes are timezone-aware for comparison
             current_time = now_ist()
             if last_dt.tzinfo is None:
-                # If old data without timezone, assume it's IST
                 last_dt = last_dt.replace(tzinfo=IST)
             if (current_time - last_dt).total_seconds() > 180:
                 scraper_error = "Scraper is stuck or not running! (Last update > 3 mins ago)"
         else:
-             scraper_error = "Scraper has no data yet!"
+            scraper_error = "Scraper has no data yet!"
 
     conn.close()
-    return render_template('index.html', profiles=profiles, dates=dates, matrix=matrix, last_updated=last_updated, scraper_error=scraper_error)
+    return render_template('index.html', profiles=profiles, dates=dates, matrix=matrix,
+                           lazy_rows=(BACKEND == 'supabase'), last_updated=last_updated, scraper_error=scraper_error)
+
+
+@app.route('/api/profile_row/<int:profile_id>')
+@login_required
+def api_profile_row(profile_id):
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT * FROM profiles WHERE id = ? AND is_active = 1", (profile_id,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'error': 'Profile not found'}), 404
+
+    dates_rows = c.execute("SELECT DISTINCT SUBSTR(timestamp, 1, 10) as day FROM position_changes ORDER BY day DESC LIMIT 30").fetchall()
+    dates = [row['day'] for row in dates_rows]
+
+    cells = []
+    for d in dates:
+        count = c.execute("""
+            SELECT COUNT(*) AS count FROM position_changes
+            WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
+        """, (profile_id, d)).fetchone()['count']
+
+        pnl = 0
+        if count > 0:
+            metrics = get_daily_pnl_metrics(c, profile_id, d)
+            pnl = metrics['todays_pnl']
+
+        cells.append({'date': d, 'count': count, 'pnl': round(pnl, 1)})
+
+    conn.close()
+    return jsonify({'profile_id': profile_id, 'cells': cells})
 
 def calculate_snapshot_pnl(c, snapshot_id):
     snap = c.execute("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,)).fetchone()
     if not snap: return 0, 0
-    raw = json.loads(snap['raw_data'])
+    raw = _json_loads(snap['raw_data'])
     data = raw.get('data', [])
 
     # Calculate manually to be safe
@@ -553,7 +657,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
     # Try to get previous day's close
     prev_change = c.execute("""
         SELECT * FROM position_changes
-        WHERE profile_id = ? AND date(timestamp) < ?
+        WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) < ?
         ORDER BY timestamp DESC LIMIT 1
     """, (profile_id, date)).fetchone()
 
@@ -564,7 +668,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
         # Fallback to first change of the day
         first_change = c.execute("""
             SELECT * FROM position_changes
-            WHERE profile_id = ? AND date(timestamp) = ?
+            WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
             ORDER BY timestamp ASC LIMIT 1
         """, (profile_id, date)).fetchone()
 
@@ -596,7 +700,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
 
     if use_realtime:
         # Parse raw_data manually since we don't have calculate_snapshot_pnl helper for raw JSON input
-        raw = json.loads(latest_realtime['raw_data'])
+        raw = _json_loads(latest_realtime['raw_data'])
         last_updated = latest_realtime['timestamp'] # Get timestamp from latest_snapshots
         data = raw.get('data', [])
         total = 0
@@ -611,7 +715,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
         # Fallback to history (Last recorded snapshot for that day)
         latest_snapshot = c.execute("""
             SELECT * FROM snapshots
-            WHERE profile_id = ? AND date(timestamp) = ?
+            WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
             ORDER BY timestamp DESC LIMIT 1
         """, (profile_id, date)).fetchone()
 
@@ -643,7 +747,7 @@ def daily_view(slug, date):
     # Get changes for this date
     changes = c.execute("""
         SELECT * FROM position_changes
-        WHERE profile_id = ? AND date(timestamp) = ?
+        WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
         ORDER BY timestamp DESC
     """, (profile['id'], date)).fetchall()
 
@@ -669,7 +773,7 @@ def api_diff(change_id):
         return jsonify({'error': 'Change not found'}), 404
 
     current_snapshot = c.execute("SELECT * FROM snapshots WHERE id = ?", (change['snapshot_id'],)).fetchone()
-    current_raw = json.loads(current_snapshot['raw_data']) if current_snapshot else {}
+    current_raw = _json_loads(current_snapshot['raw_data']) if current_snapshot else {}
     current_trades = normalize_trades_for_diff(current_raw.get('data', []))
 
     # Find PREVIOUS snapshot for this profile
@@ -680,7 +784,7 @@ def api_diff(change_id):
         ORDER BY id DESC LIMIT 1
     """, (change['profile_id'], change['snapshot_id'])).fetchone()
 
-    prev_raw = json.loads(prev_snapshot['raw_data']) if prev_snapshot else {}
+    prev_raw = _json_loads(prev_snapshot['raw_data']) if prev_snapshot else {}
     prev_trades = normalize_trades_for_diff(prev_raw.get('data', []))
 
     # Find ALL previous snapshots to look back through history
@@ -694,7 +798,7 @@ def api_diff(change_id):
     # Build a map of historical data for each symbol
     historical_trades = {}
     for snap in all_prev_snapshots:
-        snap_data = json.loads(snap['raw_data'])
+        snap_data = _json_loads(snap['raw_data'])
         trades = normalize_trades_for_diff(snap_data.get('data', []))
         # Merge into historical_trades (keep first with both qty > 0 AND avg_price > 0)
         for key, trade in trades.items():
@@ -802,7 +906,7 @@ def daily_log(slug, date):
     # fetch all changes for the day in chronological order
     changes = c.execute("""
         SELECT * FROM position_changes
-        WHERE profile_id = ? AND date(timestamp) = ?
+        WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
         ORDER BY timestamp ASC
     """, (profile['id'], date)).fetchall()
 
@@ -815,7 +919,7 @@ def daily_log(slug, date):
 
         # Calculate Detailed Diff (Restore "Change" column detail)
         curr_snap = c.execute("SELECT raw_data FROM snapshots WHERE id = ?", (change['snapshot_id'],)).fetchone()
-        curr_raw = json.loads(curr_snap['raw_data']) if curr_snap else {}
+        curr_raw = _json_loads(curr_snap['raw_data']) if curr_snap else {}
         curr_trades = normalize_trades_for_diff(curr_raw.get('data', []))
 
         # Find previous snapshot (relative to this change)
@@ -825,7 +929,7 @@ def daily_log(slug, date):
             ORDER BY id DESC LIMIT 1
         """, (profile['id'], change['snapshot_id'])).fetchone()
 
-        prev_raw = json.loads(prev_snap['raw_data']) if prev_snap else {}
+        prev_raw = _json_loads(prev_snap['raw_data']) if prev_snap else {}
         prev_trades = normalize_trades_for_diff(prev_raw.get('data', []))
 
         # Find ALL previous snapshots to look back through history
@@ -838,7 +942,7 @@ def daily_log(slug, date):
         # Build a map of historical data for each symbol
         historical_trades = {}
         for snap in all_prev_snapshots:
-            snap_data = json.loads(snap['raw_data'])
+            snap_data = _json_loads(snap['raw_data'])
             trades = normalize_trades_for_diff(snap_data.get('data', []))
             # Merge into historical_trades (keep first non-zero qty we find)
             for key, trade in trades.items():
@@ -1058,7 +1162,7 @@ def api_profile_symbol_suggest(slug):
 
         for row in snapshots:
             try:
-                raw = json.loads(row['raw_data'])
+                raw = _json_loads(row['raw_data'])
             except Exception:
                 continue
             trades_map = normalize_trades_for_diff(raw.get('data', []))
@@ -1108,7 +1212,7 @@ def api_profile_all_underlyings(slug):
     # Get snapshots for this profile in chronological order, optionally filtered by date
     if date_filter:
         snapshots = c.execute(
-            "SELECT id, timestamp, raw_data FROM snapshots WHERE profile_id = ? AND date(timestamp) = ? ORDER BY id ASC",
+            "SELECT id, timestamp, raw_data FROM snapshots WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ? ORDER BY id ASC",
             (profile['id'], date_filter),
         ).fetchall()
     else:
@@ -1148,7 +1252,7 @@ def api_profile_all_underlyings(slug):
         change_id = snapshot_to_change_id.get(snap_id)
 
         try:
-            raw = json.loads(snap['raw_data'])
+            raw = _json_loads(snap['raw_data'])
         except Exception:
             continue
 
@@ -1377,12 +1481,12 @@ def api_profile_all_underlyings(slug):
         prev_date = view_date - timedelta(days=1)
         for _ in range(7):
             prev_snap_row = c.execute(
-                "SELECT raw_data FROM snapshots WHERE profile_id = ? AND date(timestamp) = ? ORDER BY id DESC LIMIT 1",
+                "SELECT raw_data FROM snapshots WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ? ORDER BY id DESC LIMIT 1",
                 (profile['id'], prev_date.isoformat()),
             ).fetchone()
             if prev_snap_row:
                 try:
-                    prev_raw = json.loads(prev_snap_row['raw_data'])
+                    prev_raw = _json_loads(prev_snap_row['raw_data'])
                     for item in prev_raw.get('data', []):
                         sym = (item.get('trading_symbol') or '').upper()
                         price = item.get('underlying_price')
@@ -1465,7 +1569,7 @@ def api_profile_symbol_lifecycle(slug):
         change_id = snapshot_to_change_id.get(snap_id)
 
         try:
-            raw = json.loads(snap['raw_data'])
+            raw = _json_loads(snap['raw_data'])
         except Exception:
             raw = {}
 
@@ -1684,7 +1788,7 @@ def _fetch_underlying_events(c, profile_id, underlying_filter):
         change_id = snapshot_to_change_id.get(snap_id)
 
         try:
-            raw = json.loads(snap['raw_data'])
+            raw = _json_loads(snap['raw_data'])
         except Exception:
             continue
 
@@ -2570,7 +2674,7 @@ def download_master_contract():
         # Re-query count for the response
         conn = get_db()
         c = conn.cursor()
-        count = c.execute("SELECT COUNT(*) FROM master_contract").fetchone()[0]
+        count = c.execute("SELECT COUNT(*) AS count FROM master_contract").fetchone()['count']
         conn.close()
         return jsonify({'success': True, 'message': message, 'count': count})
     else:
@@ -2583,6 +2687,57 @@ def master_contract_status():
     """Return whether the daily master contract download failed at startup"""
     return jsonify({'failed': MASTER_CONTRACT_DOWNLOAD_FAILED})
 
+
+@app.route('/api/storage-stats')
+@login_required
+def api_storage_stats():
+    """Return database storage usage for the current backend.
+
+    Supabase free tier limit: 500 MB database storage.
+    SQLite: returns local file size (no hard limit).
+    """
+    try:
+        if BACKEND == 'supabase':
+            import psycopg2
+            import psycopg2.extras
+            conn = psycopg2.connect(
+                os.environ['DATABASE_URL'],
+                cursor_factory=psycopg2.extras.RealDictCursor,
+            )
+            c = conn.cursor()
+            c.execute("""
+                SELECT
+                    pg_database_size(current_database()) AS db_bytes,
+                    current_database() AS db_name
+            """)
+            row = c.fetchone()
+            conn.close()
+            db_bytes = int(row['db_bytes'])
+            free_tier_bytes = 500 * 1024 * 1024  # 500 MB
+            return jsonify({
+                'backend': 'supabase',
+                'db_name': row['db_name'],
+                'used_bytes': db_bytes,
+                'used_mb': round(db_bytes / (1024 * 1024), 2),
+                'limit_bytes': free_tier_bytes,
+                'limit_mb': 500,
+                'pct': round(db_bytes / free_tier_bytes * 100, 1),
+            })
+        else:
+            from database import DB_PATH as _DB_PATH
+            db_bytes = os.path.getsize(_DB_PATH) if os.path.exists(_DB_PATH) else 0
+            return jsonify({
+                'backend': 'sqlite',
+                'db_name': os.path.basename(_DB_PATH),
+                'used_bytes': db_bytes,
+                'used_mb': round(db_bytes / (1024 * 1024), 2),
+                'limit_bytes': None,
+                'limit_mb': None,
+                'pct': None,
+            })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/scraper-status')
 @login_required
 def scraper_status():
@@ -2592,8 +2747,8 @@ def scraper_status():
         c = conn.cursor()
 
         # Get last update timestamp
-        last_updated_row = c.execute("SELECT MAX(timestamp) FROM latest_snapshots").fetchone()
-        last_updated = last_updated_row[0] if last_updated_row else None
+        last_updated_row = c.execute("SELECT MAX(timestamp) AS max_ts FROM latest_snapshots").fetchone()
+        last_updated = last_updated_row['max_ts'] if last_updated_row else None
 
         conn.close()
 
@@ -2653,8 +2808,9 @@ def scraper_status():
 @app.route('/restart', methods=['POST'])
 @login_required
 def restart_scraper_endpoint():
-    threading.Thread(target=restart_scraper_internal).start()
-    return "Restarting scraper process... It should resume in a few seconds.", 200
+    # In the thread model, we can't restart the thread — trigger a new scrape cycle instead
+    threading.Thread(target=_run_scraper_once_safe, daemon=True).start()
+    return "Scrape cycle triggered. Check logs for progress.", 200
 
 @app.route('/delete_date/<date>', methods=['DELETE', 'POST'])
 @login_required
@@ -2664,13 +2820,13 @@ def delete_date(date):
         c = conn.cursor()
 
         # 1. Delete position_changes for this date
-        c.execute("DELETE FROM position_changes WHERE date(timestamp) = ?", (date,))
+        c.execute("DELETE FROM position_changes WHERE SUBSTR(timestamp, 1, 10) = ?", (date,))
         changes_deleted = c.rowcount
 
         # 2. Delete snapshots for this date
         # Note: Be careful if snapshots are shared (unlikely in this design) or used by latest_snapshots
         # latest_snapshots is separate, so current state is preserved.
-        c.execute("DELETE FROM snapshots WHERE date(timestamp) = ?", (date,))
+        c.execute("DELETE FROM snapshots WHERE SUBSTR(timestamp, 1, 10) = ?", (date,))
         snaps_deleted = c.rowcount
 
         conn.commit()
@@ -2720,7 +2876,7 @@ def get_subscriptions():
                 'subscription_type': sub['subscription_type'],
                 'underlying': sub['underlying'],
                 'expiry': sub['expiry'],
-                'position_identifier': json.loads(sub['position_identifier']) if sub['position_identifier'] else None,
+                'position_identifier': _json_loads(sub['position_identifier']) if sub['position_identifier'] else None,
                 'created_at': sub['created_at']
             })
 
@@ -2770,15 +2926,19 @@ def subscribe():
             c.execute("""
                 INSERT INTO subscriptions (profile_id, subscription_type, underlying, expiry, position_identifier, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
             """, (profile_id, subscription_type, underlying, expiry, position_id_str, now_ist().isoformat()))
             conn.commit()
-            subscription_id = c.lastrowid
+            subscription_id = last_insert_id(c)
             conn.close()
 
             return jsonify({'success': True, 'message': 'Subscription created successfully', 'subscription_id': subscription_id})
-        except sqlite3.IntegrityError:
-            conn.close()
-            return jsonify({'success': False, 'message': 'Already subscribed to this item'})
+        except Exception as e:
+            _err = str(e).lower()
+            if 'unique' in _err or 'duplicate' in _err:
+                conn.close()
+                return jsonify({'success': False, 'message': 'Already subscribed to this item'})
+            raise
 
     except Exception as e:
         print(f"Error creating subscription: {e}")
@@ -2839,9 +2999,9 @@ def test_subscription_notify():
         }
 
         max_id_row = c.execute(
-            "SELECT COALESCE(MAX(id), 0) FROM notifications WHERE profile_id = ?", (profile_id,)
+            "SELECT COALESCE(MAX(id), 0) AS max_id FROM notifications WHERE profile_id = ?", (profile_id,)
         ).fetchone()
-        max_id_before = max_id_row[0]
+        max_id_before = max_id_row['max_id']
 
         generate_notifications_for_changes(conn, profile_id, before_data, after_data)
 
@@ -2854,7 +3014,7 @@ def test_subscription_notify():
         for notif in new_notifs:
             c.execute("UPDATE notifications SET message = '[TEST] ' || message WHERE id = ?", (notif['id'],))
             try:
-                nd = json.loads(notif['notification_data']) if notif['notification_data'] else {}
+                nd = _json_loads(notif['notification_data']) if notif['notification_data'] else {}
                 nd['is_test'] = True
                 c.execute("UPDATE notifications SET notification_data = ? WHERE id = ?",
                           (json.dumps(nd), notif['id']))
@@ -3257,9 +3417,10 @@ def api_create_openalgo_profile():
         c.execute("""
             INSERT INTO openalgo_profiles (profile_name, host, api_key, is_active, created_at, updated_at)
             VALUES (?, ?, ?, 1, ?, ?)
+            RETURNING id
         """, (profile_name, host, api_key, now_ist().isoformat(), now_ist().isoformat()))
         conn.commit()
-        profile_id = c.lastrowid
+        profile_id = last_insert_id(c)
         created = c.execute("""
             SELECT id, profile_name, host, api_key, is_active, created_at, updated_at
             FROM openalgo_profiles
@@ -3353,7 +3514,7 @@ def api_openalgo_place_order():
     if not notif:
         return jsonify({'success': False, 'error': 'Notification not found'}), 404
 
-    notification_data = json.loads(notif['notification_data']) if notif['notification_data'] else {}
+    notification_data = _json_loads(notif['notification_data']) if notif['notification_data'] else {}
     hint = build_openalgo_order_hint(notif['notification_type'], notification_data, notif['message'])
 
     broker_symbol = hint['broker_symbol']
@@ -3739,7 +3900,7 @@ def get_notifications():
 
         result = []
         for notif in notifications:
-            notification_data = json.loads(notif['notification_data']) if notif['notification_data'] else {}
+            notification_data = _json_loads(notif['notification_data']) if notif['notification_data'] else {}
             openalgo_hint = build_openalgo_order_hint(
                 notif['notification_type'],
                 notification_data,
@@ -3917,12 +4078,12 @@ def simulate_notifications():
             conn.close()
             return jsonify({'error': 'Could not find before/after snapshots for this event'}), 404
 
-        before_data = json.loads(before_snap['raw_data'])
-        after_data = json.loads(after_snap['raw_data'])
+        before_data = _json_loads(before_snap['raw_data'])
+        after_data = _json_loads(after_snap['raw_data'])
 
         # Record the max notification id before simulation
-        max_id_row = c.execute("SELECT COALESCE(MAX(id), 0) FROM notifications WHERE profile_id = ?", (profile_id,)).fetchone()
-        max_id_before = max_id_row[0]
+        max_id_row = c.execute("SELECT COALESCE(MAX(id), 0) AS max_id FROM notifications WHERE profile_id = ?", (profile_id,)).fetchone()
+        max_id_before = max_id_row['max_id']
 
         generate_notifications_for_changes(conn, profile_id, before_data, after_data)
 
@@ -4061,7 +4222,9 @@ def update_preferences():
         return jsonify({'error': str(e)}), 500
 
 def cleanup_port():
-    """Kill any process using port 6060"""
+    """Kill any process using the app port. No-op on Render (containerized environment)."""
+    if os.environ.get('RENDER'):
+        return  # Not needed in Render's containerized environment
     try:
         print(f"Cleaning up port {PORT}...")
         # Find and kill process using the port
@@ -4177,11 +4340,12 @@ def api_add_profile():
 
         c.execute("""
             INSERT INTO profiles (slug, name, url, source_url, is_active, added_at)
-            VALUES (?, ?, ?, ?, 1, datetime('now'))
-        """, (slug, name, url, url))
+            VALUES (?, ?, ?, ?, 1, ?)
+            RETURNING id
+        """, (slug, name, url, url, now_ist().isoformat()))
 
         conn.commit()
-        profile_id = c.lastrowid
+        profile_id = last_insert_id(c)
 
         profile = c.execute("""
             SELECT id, slug, name, source_url, is_active, added_at
@@ -4362,7 +4526,7 @@ def api_profile_pnl_snapshots(slug):
     # Fetch all snapshots in range using date() to handle ISO tz strings correctly
     snapshots = c.execute("""
         SELECT id, timestamp FROM snapshots
-        WHERE profile_id = ? AND date(timestamp) >= ? AND date(timestamp) <= ?
+        WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) >= ? AND SUBSTR(timestamp, 1, 10) <= ?
         ORDER BY timestamp ASC
     """, (profile['id'], from_date, to_date)).fetchall()
 
@@ -4449,7 +4613,7 @@ def api_pnl_snapshots_by_expiry(slug, date):
 
     snapshots = c.execute("""
         SELECT id, timestamp, raw_data FROM snapshots
-        WHERE profile_id = ? AND date(timestamp) BETWEEN ? AND ?
+        WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) BETWEEN ? AND ?
         ORDER BY timestamp ASC
     """, (profile['id'], from_date, to_date)).fetchall()
 
@@ -4459,7 +4623,7 @@ def api_pnl_snapshots_by_expiry(slug, date):
 
     result = []
     for snap in snapshots:
-        raw = json.loads(snap['raw_data'])
+        raw = _json_loads(snap['raw_data'])
         pnl = 0.0
         spot_price = None
         for item in raw.get('data', []):
@@ -4534,7 +4698,7 @@ def api_profile_pnl_breakdown(slug):
         # Get the last snapshot for this day
         snap = c.execute("""
             SELECT id, raw_data FROM snapshots
-            WHERE profile_id = ? AND date(timestamp) = ?
+            WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
             ORDER BY timestamp DESC LIMIT 1
         """, (profile['id'], date_str)).fetchone()
 
@@ -4542,7 +4706,7 @@ def api_profile_pnl_breakdown(slug):
         groups_booked   = {}
         groups_unbooked = {}
         if snap:
-            raw = json.loads(snap['raw_data'])
+            raw = _json_loads(snap['raw_data'])
             for item in raw.get('data', []):
                 underlying = item.get('trading_symbol') or item.get('underlying', 'UNKNOWN')
                 for trade in item.get('trades', []):
@@ -4588,7 +4752,7 @@ def api_symbol_expiry_map(slug, date):
 
     snap = c.execute("""
         SELECT raw_data FROM snapshots
-        WHERE profile_id = ? AND date(timestamp) = ?
+        WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
         ORDER BY timestamp DESC LIMIT 1
     """, (profile['id'], date)).fetchone()
 
@@ -4598,7 +4762,7 @@ def api_symbol_expiry_map(slug, date):
         return jsonify({'success': True, 'map': {}})
 
     result = {}
-    for item in json.loads(snap['raw_data']).get('data', []):
+    for item in _json_loads(snap['raw_data']).get('data', []):
         for trade in item.get('trades', []):
             sym    = trade.get('trading_symbol', '')
             expiry = (trade.get('instrument_info') or {}).get('expiry', '')
@@ -4635,7 +4799,7 @@ def api_pnl_by_expiry(slug, date):
 
     snap = c.execute("""
         SELECT id, timestamp, raw_data FROM snapshots
-        WHERE profile_id = ? AND date(timestamp) = ?
+        WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
         ORDER BY timestamp DESC LIMIT 1
     """, (profile['id'], date)).fetchone()
 
@@ -4644,7 +4808,7 @@ def api_pnl_by_expiry(slug, date):
     if not snap:
         return jsonify({'error': 'No snapshot found for this date'}), 404
 
-    raw = json.loads(snap['raw_data'])
+    raw = _json_loads(snap['raw_data'])
     result = {}
 
     for item in raw.get('data', []):
@@ -4720,11 +4884,520 @@ def sensibull_snapshot_proxy(slug):
         return jsonify({"error": str(e)}), 502
 
 
+def _create_export_schema(conn):
+    """
+    Create all SQLite tables in an export connection.
+    Mirrors database.py:init_db() DDL only — no migration step.
+    PRAGMA foreign_keys = OFF allows partial date-range imports.
+    Must be kept in sync with database.py:init_db().
+    """
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT UNIQUE NOT NULL,
+            name TEXT, url TEXT, source_url TEXT,
+            is_active INTEGER DEFAULT 1,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            raw_data JSON NOT NULL,
+            created_at_source TEXT,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS position_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_id INTEGER NOT NULL,
+            profile_id INTEGER NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            diff_summary TEXT,
+            FOREIGN KEY (snapshot_id) REFERENCES snapshots (id),
+            FOREIGN KEY (profile_id) REFERENCES profiles (id)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS latest_snapshots (
+            profile_id INTEGER PRIMARY KEY,
+            raw_data JSON NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS master_contract (
+            instrument_token INTEGER PRIMARY KEY,
+            trading_symbol TEXT NOT NULL,
+            exchange TEXT, name TEXT, expiry TEXT,
+            strike REAL, lot_size INTEGER, instrument_type TEXT,
+            last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            subscription_type TEXT NOT NULL,
+            underlying TEXT, expiry TEXT, position_identifier TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id),
+            UNIQUE(profile_id, subscription_type, underlying, expiry, position_identifier)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            subscription_id INTEGER,
+            message TEXT NOT NULL,
+            notification_type TEXT NOT NULL,
+            notification_data TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            is_read INTEGER DEFAULT 0,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id),
+            FOREIGN KEY (subscription_id) REFERENCES subscriptions (id)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            notification_sound TEXT DEFAULT 'default',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id),
+            UNIQUE(profile_id)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS admin_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            email TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_login DATETIME
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS openalgo_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_name TEXT UNIQUE NOT NULL,
+            host TEXT NOT NULL, api_key TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS ai_chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            scope_type TEXT NOT NULL, underlying TEXT NOT NULL,
+            expiry_key TEXT, role TEXT NOT NULL, content TEXT NOT NULL,
+            model TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id)
+        )
+    ''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_ai_chat_scope ON ai_chat_history (profile_id, scope_type, underlying, expiry_key)')
+    conn.commit()
+
+
+def _copy_table(src_cursor, dst_conn, table, from_date=None, to_date=None, date_column=None):
+    """
+    Copy rows from src_cursor's table into dst_conn (a SQLite connection).
+    If from_date/to_date/date_column are provided, filter by date range.
+    Handles raw_data/notification_data/position_identifier JSONB→TEXT serialization
+    for the Supabase→SQLite path.
+    """
+    if date_column and from_date and to_date:
+        src_cursor.execute(
+            f"SELECT * FROM {table} WHERE SUBSTR({date_column}, 1, 10) BETWEEN ? AND ?",
+            (from_date, to_date)
+        )
+    else:
+        src_cursor.execute(f"SELECT * FROM {table}")
+
+    rows = src_cursor.fetchall()
+    if not rows:
+        return
+
+    # Build INSERT from first row's column names
+    columns = list(dict(rows[0]).keys())
+    placeholders = ', '.join(['?' for _ in columns])
+    col_names = ', '.join(columns)
+
+    JSONB_COLUMNS = {'raw_data', 'notification_data', 'position_identifier'}
+
+    dst_c = dst_conn.cursor()
+    for row in rows:
+        row_dict = dict(row)
+        # psycopg2 auto-deserializes JSONB → dict; re-serialize for SQLite TEXT storage
+        for col in JSONB_COLUMNS:
+            if col in row_dict and isinstance(row_dict[col], dict):
+                row_dict[col] = json.dumps(row_dict[col])
+        values = [row_dict[c] for c in columns]
+        dst_c.execute(
+            f"INSERT OR REPLACE INTO {table} ({col_names}) VALUES ({placeholders})",
+            values
+        )
+
+
+def build_export_db(from_date: str, to_date: str) -> bytes:
+    """
+    Read from the active backend (SQLite or Supabase), build a temporary SQLite
+    file containing filtered data for the date range, return as bytes.
+    Reference tables are copied in full; event tables are date-filtered.
+    """
+    import tempfile
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.db')
+    os.close(tmp_fd)
+
+    try:
+        export_conn = sqlite3.connect(tmp_path)
+        export_conn.row_factory = sqlite3.Row
+        _create_export_schema(export_conn)
+
+        src_conn = get_db()
+        src_c = src_conn.cursor()
+
+        # Reference tables — include in full
+        for table in ['profiles', 'master_contract', 'admin_users',
+                      'subscriptions', 'user_preferences', 'openalgo_profiles']:
+            _copy_table(src_c, export_conn, table)
+
+        # Event tables — date filtered
+        _copy_table(src_c, export_conn, 'snapshots',
+                    from_date, to_date, date_column='timestamp')
+        _copy_table(src_c, export_conn, 'position_changes',
+                    from_date, to_date, date_column='timestamp')
+        _copy_table(src_c, export_conn, 'notifications',
+                    from_date, to_date, date_column='created_at')
+        _copy_table(src_c, export_conn, 'ai_chat_history',
+                    from_date, to_date, date_column='created_at')
+
+        src_conn.close()
+        export_conn.commit()
+        export_conn.close()
+
+        with open(tmp_path, 'rb') as f:
+            return f.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def merge_import_db(uploaded_db_path: str) -> dict:
+    """
+    Merge rows from an uploaded SQLite .db file into the current local database.
+    Uses INSERT OR IGNORE by PK so existing rows are preserved.
+    Valid only in SQLite mode. Returns per-table inserted/skipped counts.
+    """
+    from database import DB_PATH as _DB_PATH
+
+    MERGE_ORDER = [
+        'profiles', 'master_contract', 'admin_users', 'openalgo_profiles',
+        'subscriptions', 'user_preferences', 'snapshots', 'latest_snapshots',
+        'position_changes', 'notifications', 'ai_chat_history',
+    ]
+
+    src_conn = sqlite3.connect(uploaded_db_path)
+    src_conn.row_factory = sqlite3.Row
+
+    dst_conn = sqlite3.connect(_DB_PATH)
+    dst_conn.row_factory = sqlite3.Row
+    dst_conn.execute("PRAGMA foreign_keys = OFF")
+
+    counts = {}
+    try:
+        for table in MERGE_ORDER:
+            exists = src_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if not exists:
+                continue
+
+            src_rows = src_conn.execute(f"SELECT * FROM {table}").fetchall()
+            if not src_rows:
+                counts[table] = {'inserted': 0, 'skipped': 0}
+                continue
+
+            cols = list(src_rows[0].keys())
+            placeholders = ', '.join(['?' for _ in cols])
+            col_names = ', '.join(cols)
+            insert_sql = (
+                f"INSERT OR IGNORE INTO {table} ({col_names}) VALUES ({placeholders})"
+            )
+
+            inserted = 0
+            skipped = 0
+            dst_c = dst_conn.cursor()
+            for row in src_rows:
+                row_dict = dict(row)
+                values = [row_dict[c] for c in cols]
+                dst_c.execute(insert_sql, values)
+                if dst_c.rowcount == 1:
+                    inserted += 1
+                else:
+                    skipped += 1
+
+            counts[table] = {'inserted': inserted, 'skipped': skipped}
+
+        dst_conn.commit()
+    finally:
+        src_conn.close()
+        dst_conn.execute("PRAGMA foreign_keys = ON")
+        dst_conn.close()
+
+    return counts
+
+
+# ─── Bidirectional Sync (SQLite ↔ Supabase) ──────────────────────────────────
+
+# Tables that have a date column for range filtering, in FK-safe order
+_SYNC_TABLES = [
+    ('snapshots',        'timestamp'),
+    ('position_changes', 'timestamp'),
+    ('notifications',    'created_at'),
+    ('ai_chat_history',  'created_at'),
+]
+
+# Columns whose values come back from psycopg2 as dicts (JSONB) and must be
+# re-serialised to JSON strings when writing to SQLite.
+_JSONB_COLS = {'raw_data', 'notification_data'}
+
+
+def sync_databases(from_date: str, to_date: str) -> dict:
+    """
+    Bidirectional sync of all event tables between SQLite and Supabase
+    for the given date range (inclusive).
+
+    For each table:
+      - rows in SQLite but not Supabase  → pushed to Supabase
+      - rows in Supabase but not SQLite  → pushed to SQLite
+
+    Returns a dict keyed by table name, each value:
+      {'to_supabase': N, 'to_sqlite': N, 'errors': [...]}
+
+    Always opens both connections directly — works regardless of DB_BACKEND.
+    Requires DATABASE_URL to be set.
+    """
+    if not os.environ.get('DATABASE_URL'):
+        raise RuntimeError("DATABASE_URL is not set — cannot connect to Supabase for sync.")
+
+    import psycopg2
+    import psycopg2.extras
+    from database import DB_PATH as _DB_PATH
+
+    results = {}
+
+    sqlite_conn = sqlite3.connect(_DB_PATH)
+    sqlite_conn.row_factory = sqlite3.Row
+    sqlite_conn.execute("PRAGMA foreign_keys = OFF")
+
+    pg_conn = psycopg2.connect(
+        os.environ['DATABASE_URL'],
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
+    pg_conn.autocommit = False
+
+    try:
+        for table, date_col in _SYNC_TABLES:
+            pushed_to_pg = 0
+            pushed_to_sq = 0
+            errors = []
+
+            # ── 1. Fetch IDs present in each backend for the date range ──
+            sq_c = sqlite_conn.cursor()
+            sq_c.execute(
+                f"SELECT id FROM {table} WHERE SUBSTR({date_col}, 1, 10) BETWEEN ? AND ?",
+                (from_date, to_date)
+            )
+            sqlite_ids = {r['id'] for r in sq_c.fetchall()}
+
+            pg_c = pg_conn.cursor()
+            pg_c.execute(
+                f"SELECT id FROM {table} WHERE SUBSTR({date_col}::text, 1, 10) BETWEEN %s AND %s",
+                (from_date, to_date)
+            )
+            pg_ids = {r['id'] for r in pg_c.fetchall()}
+
+            # ── 2. SQLite → Supabase (IDs only in SQLite) ────────────────
+            missing_in_pg = sqlite_ids - pg_ids
+            if missing_in_pg:
+                sq_c.execute(
+                    f"SELECT * FROM {table} WHERE id IN ({','.join('?' * len(missing_in_pg))})",
+                    list(missing_in_pg)
+                )
+                rows = sq_c.fetchall()
+                cols = list(dict(rows[0]).keys()) if rows else []
+                if cols:
+                    placeholders = ', '.join(['%s'] * len(cols))
+                    col_names = ', '.join(cols)
+                    insert_sql = (
+                        f"INSERT INTO {table} ({col_names}) VALUES ({placeholders}) "
+                        f"ON CONFLICT (id) DO NOTHING"
+                    )
+                    for row in rows:
+                        row_dict = dict(row)
+                        # SQLite stores JSONB cols as JSON strings → wrap for psycopg2
+                        for col in _JSONB_COLS:
+                            if col in row_dict and isinstance(row_dict[col], str):
+                                try:
+                                    row_dict[col] = psycopg2.extras.Json(json.loads(row_dict[col]))
+                                except (json.JSONDecodeError, TypeError):
+                                    pass
+                        try:
+                            pg_c.execute(insert_sql, [row_dict[c] for c in cols])
+                            pushed_to_pg += pg_c.rowcount
+                        except Exception as e:
+                            pg_conn.rollback()
+                            errors.append(f"→PG id={row_dict.get('id')}: {e}")
+                    pg_conn.commit()
+
+            # ── 3. Supabase → SQLite (IDs only in Supabase) ──────────────
+            missing_in_sq = pg_ids - sqlite_ids
+            if missing_in_sq:
+                id_list = list(missing_in_sq)
+                pg_c.execute(
+                    f"SELECT * FROM {table} WHERE id = ANY(%s)",
+                    (id_list,)
+                )
+                rows = pg_c.fetchall()
+                cols = list(dict(rows[0]).keys()) if rows else []
+                if cols:
+                    placeholders = ', '.join(['?' for _ in cols])
+                    col_names = ', '.join(cols)
+                    insert_sql = (
+                        f"INSERT OR IGNORE INTO {table} ({col_names}) VALUES ({placeholders})"
+                    )
+                    for row in rows:
+                        row_dict = dict(row)
+                        # psycopg2 JSONB → dict; re-serialise for SQLite TEXT
+                        for col in _JSONB_COLS:
+                            if col in row_dict and isinstance(row_dict[col], dict):
+                                row_dict[col] = json.dumps(row_dict[col])
+                        try:
+                            sq_c.execute(insert_sql, [row_dict[c] for c in cols])
+                            pushed_to_sq += sq_c.rowcount
+                        except Exception as e:
+                            errors.append(f"→SQLite id={row_dict.get('id')}: {e}")
+                    sqlite_conn.commit()
+
+            results[table] = {
+                'to_supabase': pushed_to_pg,
+                'to_sqlite': pushed_to_sq,
+                'errors': errors,
+            }
+
+    finally:
+        sqlite_conn.execute("PRAGMA foreign_keys = ON")
+        sqlite_conn.close()
+        pg_conn.close()
+
+    return results
+
+
+@app.route('/sync')
+@login_required
+def sync_page():
+    """Sync page — bidirectional SQLite ↔ Supabase sync UI."""
+    from_default = (now_ist() - timedelta(days=6)).strftime('%Y-%m-%d')
+    to_default = now_ist().strftime('%Y-%m-%d')
+    return render_template(
+        'sync.html',
+        default_from=from_default,
+        default_to=to_default,
+        db_url_set=bool(os.environ.get('DATABASE_URL')),
+    )
+
+
+@app.route('/sync/fix-sequences', methods=['POST'])
+@login_required
+def fix_sequences():
+    """Reset all PostgreSQL SERIAL sequences to MAX(id) after a bulk import."""
+    if BACKEND != 'supabase':
+        return jsonify({'success': False, 'message': 'Only applicable in Supabase mode'}), 400
+    serial_tables = [
+        'profiles', 'admin_users', 'openalgo_profiles', 'subscriptions',
+        'user_preferences', 'snapshots', 'position_changes', 'notifications',
+        'ai_chat_history',
+    ]
+    conn = get_db()
+    c = conn.cursor()
+    results = []
+    for table in serial_tables:
+        c.execute(
+            f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+            f"COALESCE((SELECT MAX(id) FROM {table}), 1))"
+        )
+        row = c.fetchone()
+        val = next(iter(row.values())) if row else None
+        results.append({'table': table, 'sequence_value': val})
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'results': results})
+
+
+@app.route('/sync/run', methods=['POST'])
+@login_required
+def sync_run():
+    """Run the bidirectional sync for the given date range."""
+    if not os.environ.get('DATABASE_URL'):
+        flash('DATABASE_URL is not set. Add it to your .env to enable Supabase sync.', 'error')
+        return redirect(url_for('sync_page'))
+
+    from_date = request.form.get('from_date', '').strip()
+    to_date   = request.form.get('to_date', '').strip()
+
+    try:
+        datetime.strptime(from_date, '%Y-%m-%d')
+        datetime.strptime(to_date, '%Y-%m-%d')
+    except ValueError:
+        flash('Invalid date format. Use YYYY-MM-DD.', 'error')
+        return redirect(url_for('sync_page'))
+
+    if from_date > to_date:
+        flash('From date must be before or equal to To date.', 'error')
+        return redirect(url_for('sync_page'))
+
+    try:
+        results = sync_databases(from_date, to_date)
+    except Exception as e:
+        import traceback as _tb
+        flash(f'Sync failed: {e}', 'error')
+        app.logger.error('sync_run error: %s', _tb.format_exc())
+        return redirect(url_for('sync_page'))
+
+    from_default = (now_ist() - timedelta(days=6)).strftime('%Y-%m-%d')
+    to_default = now_ist().strftime('%Y-%m-%d')
+    return render_template(
+        'sync.html',
+        default_from=from_date,
+        default_to=to_date,
+        results=results,
+        from_date=from_date,
+        to_date=to_date,
+        db_url_set=True,
+    )
+
+
 @app.route('/export')
 @login_required
 def export_page():
     """Export page - shows UI for database export"""
-    return render_template('export.html')
+    from_default = (now_ist() - timedelta(days=29)).strftime('%Y-%m-%d')
+    to_default = now_ist().strftime('%Y-%m-%d')
+    return render_template('export.html', default_from=from_default, default_to=to_default)
 
 @app.route('/export/download')
 @login_required
@@ -4744,57 +5417,103 @@ def export_download():
         mimetype='application/x-sqlite3'
     )
 
+
+@app.route('/export/download-range', methods=['POST'])
+@login_required
+def export_download_range():
+    """
+    Build a filtered SQLite .db from the active backend for a date range
+    and serve it as a download.
+    POST body: from_date (YYYY-MM-DD), to_date (YYYY-MM-DD)
+    """
+    from flask import send_file
+    import io
+
+    from_date = request.form.get('from_date', '').strip()
+    to_date   = request.form.get('to_date', '').strip()
+
+    try:
+        datetime.strptime(from_date, '%Y-%m-%d')
+        datetime.strptime(to_date, '%Y-%m-%d')
+    except ValueError:
+        flash('Invalid date format. Use YYYY-MM-DD.', 'error')
+        return redirect(url_for('export_page'))
+
+    if from_date > to_date:
+        flash('From date must be before or equal to To date.', 'error')
+        return redirect(url_for('export_page'))
+
+    db_bytes = build_export_db(from_date, to_date)
+    buf = io.BytesIO(db_bytes)
+    buf.seek(0)
+
+    filename = f"sensibull_export_{from_date}_to_{to_date}.db"
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/x-sqlite3'
+    )
+
 @app.route('/import', methods=['GET'])
 @login_required
 def import_page():
     """Import page - shows UI for database import"""
-    return render_template('import.html')
+    supabase_mode = (BACKEND == 'supabase')
+    return render_template('import.html', supabase_mode=supabase_mode)
 
 @app.route('/import/upload', methods=['POST'])
 @login_required
 def import_upload():
-    """Handle database file upload and replacement"""
-    from werkzeug.utils import secure_filename
+    """Handle database file upload — supports merge (default) and replace modes."""
     from database import DB_PATH
     import shutil
 
+    supabase_mode = (BACKEND == 'supabase')
+
     if 'database_file' not in request.files:
-        return render_template('import.html', error='No file uploaded')
+        return render_template('import.html', error='No file uploaded', supabase_mode=supabase_mode)
 
     file = request.files['database_file']
 
     if file.filename == '':
-        return render_template('import.html', error='No file selected')
+        return render_template('import.html', error='No file selected', supabase_mode=supabase_mode)
 
     if not file.filename.endswith('.db'):
-        return render_template('import.html', error='Only .db files are allowed')
+        return render_template('import.html', error='Only .db files are allowed', supabase_mode=supabase_mode)
+
+    do_merge = request.form.get('merge') == '1'
 
     try:
         # Save uploaded file to a temporary location
         temp_path = os.path.join(os.path.dirname(DB_PATH), 'tmp_upload.db')
         file.save(temp_path)
 
-        # Verify it's a valid SQLite database
-        try:
-            conn = sqlite3.connect(temp_path)
-            conn.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
-            conn.close()
-        except Exception as e:
+        # Verify it's a valid SQLite database (only in SQLite mode)
+        if BACKEND == 'sqlite':
+            try:
+                conn = sqlite3.connect(temp_path)
+                conn.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
+                conn.close()
+            except Exception as e:
+                os.remove(temp_path)
+                return render_template('import.html', error=f'Invalid database file: {str(e)}', supabase_mode=supabase_mode)
+
+        if do_merge:
+            merge_result = merge_import_db(temp_path)
             os.remove(temp_path)
-            return render_template('import.html', error=f'Invalid database file: {str(e)}')
+            return render_template('import.html', success=True, merge_result=merge_result, supabase_mode=supabase_mode)
+        else:
+            # Replace mode: backup then swap
+            if os.path.exists(DB_PATH):
+                backup_path = DB_PATH + '.backup'
+                shutil.copy2(DB_PATH, backup_path)
 
-        # Backup existing database (if it exists)
-        if os.path.exists(DB_PATH):
-            backup_path = DB_PATH + '.backup'
-            shutil.copy2(DB_PATH, backup_path)
-
-        # Replace the database
-        shutil.move(temp_path, DB_PATH)
-
-        return render_template('import.html', success=True)
+            shutil.move(temp_path, DB_PATH)
+            return render_template('import.html', success=True, supabase_mode=supabase_mode)
 
     except Exception as e:
-        return render_template('import.html', error=f'Import failed: {str(e)}')
+        return render_template('import.html', error=f'Import failed: {str(e)}', supabase_mode=supabase_mode)
 
 # ============================================================================
 # END EXPORT / IMPORT ROUTES
@@ -5319,8 +6038,14 @@ def api_ai_chat():
 # ============================================================================
 
 if __name__ == '__main__':
-    # Initialize database (create tables if they don't exist)
-    init_db()
+    # Initialize database
+    # SQLite mode: create all tables + run migrations
+    # Supabase mode: tables already exist via supabase_schema.sql; run migrations only
+    if BACKEND == 'sqlite':
+        init_db()
+    else:
+        from migrate_db import migrate_database
+        migrate_database()
 
     # Clean up port before starting (in case of unclean shutdown)
     cleanup_port()
@@ -5333,7 +6058,9 @@ if __name__ == '__main__':
     # Record app start time for auto-start countdown
     APP_START_TIME = now_ist()
 
-    # Start monitor thread
+    # Start scraper thread (replaces subprocess/nohup model)
+    threading.Thread(target=run_scraper_loop, daemon=True).start()
+    # Start startup tasks: master contract download + staleness monitor
     threading.Thread(target=monitor_scraper, daemon=True).start()
 
     try:

@@ -1,0 +1,344 @@
+{% extends 'base.html' %}
+
+{% block title %}Sync Databases — Sensibull Tracker{% endblock %}
+
+{% block breadcrumb %}
+<li><span class="current">Sync</span></li>
+{% endblock %}
+
+{% block head %}
+<style>
+    .sync-wrapper {
+        max-width: 700px;
+        margin: 40px auto;
+        padding: 0 20px;
+    }
+
+    .sync-card {
+        background: white;
+        padding: 36px 30px;
+        border-radius: 10px;
+        box-shadow: 0 0 20px rgba(0,0,0,0.1);
+    }
+
+    .sync-card h2 { margin: 0 0 8px; color: #333; }
+    .sync-card .subtitle { color: #666; margin-bottom: 24px; font-size: 0.95em; }
+
+    .alert {
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        font-size: 0.9em;
+    }
+    .alert-info    { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    .alert-warning { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+    .alert-danger  { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+
+    .date-row {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+        align-items: flex-end;
+    }
+
+    .date-row label { display: block; margin-bottom: 4px; font-weight: 600; color: #444; }
+
+    .date-row input[type=date] {
+        padding: 8px 12px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 1rem;
+    }
+
+    .btn-sync {
+        padding: 12px 32px;
+        background: #17a2b8;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+        white-space: nowrap;
+    }
+    .btn-sync:hover { background: #138496; }
+    .btn-sync:disabled { background: #aaa; cursor: not-allowed; }
+
+    /* Results table */
+    .results-section { margin-top: 32px; }
+    .results-section h3 { margin: 0 0 12px; color: #333; font-size: 1.1rem; }
+
+    table.sync-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9em;
+    }
+
+    table.sync-table th {
+        background: #f0f0f0;
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 2px solid #ddd;
+        color: #333;
+        font-weight: 600;
+    }
+
+    table.sync-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #eee;
+        color: #444;
+        vertical-align: top;
+    }
+
+    table.sync-table tr:last-child td { border-bottom: none; }
+
+    .badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 0.82em;
+        font-weight: 600;
+    }
+    .badge-blue  { background: #cfe2ff; color: #084298; }
+    .badge-green { background: #d1e7dd; color: #0a3622; }
+    .badge-zero  { background: #e9ecef; color: #6c757d; }
+    .badge-warn  { background: #fff3cd; color: #664d03; }
+
+    .errors-list {
+        margin: 4px 0 0;
+        padding: 0 0 0 16px;
+        color: #c0392b;
+        font-size: 0.82em;
+    }
+
+    .tfoot-total td {
+        font-weight: 700;
+        background: #f8f9fa;
+        border-top: 2px solid #ddd;
+    }
+
+    .range-badge {
+        display: inline-block;
+        background: #e9ecef;
+        color: #333;
+        border-radius: 6px;
+        padding: 3px 10px;
+        font-size: 0.85em;
+        font-weight: 600;
+    }
+
+    /* Storage card */
+    .storage-card { margin-top: 24px; }
+    .storage-card h3 { margin: 0 0 16px; color: #333; font-size: 1.05rem; }
+    .storage-meta { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 0.88em; color: #555; }
+    .storage-meta strong { font-size: 1rem; color: #222; }
+    .storage-bar-wrap { background: #e9ecef; border-radius: 8px; height: 14px; overflow: hidden; }
+    .storage-bar-fill {
+        height: 100%;
+        border-radius: 8px;
+        transition: width 0.6s ease;
+        background: linear-gradient(90deg, #3ecf8e, #1a9e6a);
+    }
+    .storage-bar-fill.warn  { background: linear-gradient(90deg, #ffc107, #e0a800); }
+    .storage-bar-fill.danger { background: linear-gradient(90deg, #dc3545, #a71d2a); }
+    .storage-note { margin-top: 8px; font-size: 0.8em; color: #888; }
+    .storage-sqlite-note { font-size: 0.9em; color: #555; }
+    .storage-sqlite-note strong { color: #222; font-size: 1rem; }
+    .storage-loading { color: #888; font-size: 0.9em; }
+    .storage-error   { color: #c0392b; font-size: 0.9em; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sync-wrapper">
+    <div class="sync-card">
+        <h2>🔄 Bidirectional Sync</h2>
+        <p class="subtitle">
+            Sync all event data between SQLite (local) and Supabase (cloud) for a date range.<br>
+            Rows present in one database but missing in the other are pushed across — no row is deleted.
+        </p>
+
+        <div class="alert alert-info">
+            ℹ️ <strong>Tables synced:</strong> snapshots, position_changes, notifications, ai_chat_history.
+            Reference tables (master_contract, profiles, subscriptions, etc.) are not included.
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category == 'error' else category }}">{{ message }}</div>
+          {% endfor %}
+        {% endwith %}
+
+        {% if not db_url_set %}
+        <div class="alert alert-warning">
+            ⚠️ <strong>DATABASE_URL is not set.</strong>
+            Add <code>DATABASE_URL=postgresql://...</code> to your <code>.env</code> file and restart the app.
+            Sync always connects to both SQLite and Supabase directly, regardless of <code>DB_BACKEND</code>.
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            ℹ️ Sync connects directly to both <code>sensibull.db</code> (SQLite) and Supabase simultaneously —
+            works in any mode. Takes a few seconds for large ranges.
+        </div>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('sync_run') }}" id="syncForm">
+            <div class="date-row">
+                <div>
+                    <label for="from_date">From</label>
+                    <input type="date" id="from_date" name="from_date" required
+                           value="{{ default_from }}">
+                </div>
+                <div>
+                    <label for="to_date">To</label>
+                    <input type="date" id="to_date" name="to_date" required
+                           value="{{ default_to }}">
+                </div>
+                <button type="submit" class="btn-sync" id="syncBtn"
+                        {% if not db_url_set %}disabled title="Requires DB_BACKEND=supabase"{% endif %}>
+                    🔄 Run Sync
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- ===== STORAGE SECTION ===== -->
+    <div class="sync-card storage-card" id="storageCard">
+        <h3>💾 Storage</h3>
+        <div id="storageContent"><span class="storage-loading">Loading…</span></div>
+    </div>
+
+    {% if results is defined %}
+    <div class="sync-card" style="margin-top: 24px;">
+        <div class="results-section">
+            <h3>
+                Sync Results
+                <span class="range-badge">{{ from_date }} → {{ to_date }}</span>
+            </h3>
+
+            {% set total_pg = namespace(n=0) %}
+            {% set total_sq = namespace(n=0) %}
+            {% set total_err = namespace(n=0) %}
+
+            <table class="sync-table">
+                <thead>
+                    <tr>
+                        <th>Table</th>
+                        <th>→ Supabase</th>
+                        <th>→ SQLite</th>
+                        <th>Errors</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for table, info in results.items() %}
+                    {% set total_pg.n = total_pg.n + info.to_supabase %}
+                    {% set total_sq.n = total_sq.n + info.to_sqlite %}
+                    {% set total_err.n = total_err.n + info.errors|length %}
+                    <tr>
+                        <td><code>{{ table }}</code></td>
+                        <td>
+                            {% if info.to_supabase > 0 %}
+                                <span class="badge badge-blue">{{ info.to_supabase }} pushed</span>
+                            {% else %}
+                                <span class="badge badge-zero">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if info.to_sqlite > 0 %}
+                                <span class="badge badge-green">{{ info.to_sqlite }} pushed</span>
+                            {% else %}
+                                <span class="badge badge-zero">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if info.errors %}
+                                <span class="badge badge-warn">{{ info.errors|length }}</span>
+                                <ul class="errors-list">
+                                {% for err in info.errors[:5] %}
+                                    <li>{{ err }}</li>
+                                {% endfor %}
+                                {% if info.errors|length > 5 %}
+                                    <li>…and {{ info.errors|length - 5 }} more</li>
+                                {% endif %}
+                                </ul>
+                            {% else %}
+                                <span style="color: #28a745;">✓ none</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="tfoot-total">
+                        <td>Total</td>
+                        <td>{{ total_pg.n }} pushed</td>
+                        <td>{{ total_sq.n }} pushed</td>
+                        <td>{{ total_err.n }} errors</td>
+                    </tr>
+                </tfoot>
+            </table>
+
+            {% if total_pg.n == 0 and total_sq.n == 0 and total_err.n == 0 %}
+            <div class="alert alert-success" style="margin-top: 16px;">
+                ✅ Both databases are already in sync for this date range — no rows were missing.
+            </div>
+            {% elif total_err.n == 0 %}
+            <div class="alert alert-success" style="margin-top: 16px;">
+                ✅ Sync complete — {{ total_pg.n + total_sq.n }} row(s) pushed with no errors.
+            </div>
+            {% else %}
+            <div class="alert alert-warning" style="margin-top: 16px;">
+                ⚠️ Sync completed with {{ total_err.n }} error(s). Check the table above for details.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.getElementById('syncForm').addEventListener('submit', function() {
+    const btn = document.getElementById('syncBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Syncing…';
+});
+
+// ── Storage stats ──────────────────────────────────────────────────────────
+(function loadStorageStats() {
+    fetch('/api/storage-stats')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var el = document.getElementById('storageContent');
+            if (d.error) {
+                el.innerHTML = '<span class="storage-error">⚠ ' + d.error + '</span>';
+                return;
+            }
+            if (d.backend === 'supabase') {
+                var pct    = d.pct;
+                var cls    = pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : '';
+                var color  = pct >= 90 ? '#dc3545' : pct >= 70 ? '#ffc107' : '#3ecf8e';
+                el.innerHTML =
+                    '<div class="storage-meta">' +
+                        '<span>Supabase database &nbsp;·&nbsp; <strong>' + d.used_mb + ' MB</strong> used of <strong>' + d.limit_mb + ' MB</strong> free tier</span>' +
+                        '<span style="color:' + color + ';font-weight:700;">' + pct + '%</span>' +
+                    '</div>' +
+                    '<div class="storage-bar-wrap">' +
+                        '<div class="storage-bar-fill ' + cls + '" style="width:' + Math.min(pct, 100) + '%"></div>' +
+                    '</div>' +
+                    '<p class="storage-note">Free tier limit: 500 MB. Upgrade your Supabase plan when usage exceeds ~80%.</p>';
+            } else {
+                el.innerHTML =
+                    '<p class="storage-sqlite-note">Local SQLite &nbsp;·&nbsp; <strong>' + d.used_mb + ' MB</strong> (<code>' + d.db_name + '</code>)</p>' +
+                    '<p class="storage-note">SQLite has no hard storage limit — disk space is the only constraint.</p>';
+            }
+        })
+        .catch(function(e) {
+            document.getElementById('storageContent').innerHTML =
+                '<span class="storage-error">⚠ Could not load storage stats.</span>';
+        });
+}());
+</script>
+{% endblock %}

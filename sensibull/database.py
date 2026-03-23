@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
+from db_adapter import get_connection, BACKEND
 
 # IST Timezone constant
 IST = ZoneInfo("Asia/Kolkata")
@@ -14,9 +15,7 @@ def now_ist():
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sensibull.db')
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return get_connection()
 
 def init_db():
     conn = get_db()
@@ -227,7 +226,7 @@ def sync_profiles():
     
     # Add new profiles
     for slug in clean_slugs:
-        c.execute("INSERT OR IGNORE INTO profiles (slug, name) VALUES (?, ?)", (slug, slug))
+        c.execute("INSERT INTO profiles (slug, name) VALUES (?, ?) ON CONFLICT (slug) DO NOTHING", (slug, slug))
     
     # Remove profiles that are no longer in urls.txt
     if clean_slugs:
