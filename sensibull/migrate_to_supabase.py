@@ -102,7 +102,11 @@ def migrate(dry_run=False):
     total_inserted = 0
 
     for table in TABLES_IN_ORDER:
-        rows = sqlite_conn.execute(f"SELECT * FROM {table}").fetchall()
+        try:
+            rows = sqlite_conn.execute(f"SELECT * FROM {table}").fetchall()
+        except Exception:
+            print(f"  {table}: table not found in SQLite — skipping")
+            continue
         sqlite_count = len(rows)
 
         if dry_run:
@@ -152,22 +156,28 @@ def migrate(dry_run=False):
         # On FK violation, fall back to row-by-row for that batch only
         for i in range(0, len(all_values), BATCH_SIZE):
             batch = all_values[i:i + BATCH_SIZE]
+            pg_c.execute("SAVEPOINT batch_sp")
             try:
                 psycopg2.extras.execute_values(pg_c, batch_sql, batch, page_size=BATCH_SIZE)
                 inserted += pg_c.rowcount
+                pg_c.execute("RELEASE SAVEPOINT batch_sp")
             except Exception as e:
-                pg_conn.rollback()
+                pg_c.execute("ROLLBACK TO SAVEPOINT batch_sp")
+                pg_c.execute("RELEASE SAVEPOINT batch_sp")
                 err = str(e).lower()
                 if 'foreign key' not in err and 'fkey' not in err:
                     raise
                 # FK violation in batch — retry row by row to isolate bad rows
                 for values in batch:
+                    pg_c.execute("SAVEPOINT row_sp")
                     try:
                         pg_c.execute(insert_sql, values)
                         if pg_c.rowcount == 1:
                             inserted += 1
+                        pg_c.execute("RELEASE SAVEPOINT row_sp")
                     except Exception as e2:
-                        pg_conn.rollback()
+                        pg_c.execute("ROLLBACK TO SAVEPOINT row_sp")
+                        pg_c.execute("RELEASE SAVEPOINT row_sp")
                         err2 = str(e2).lower()
                         if 'foreign key' in err2 or 'fkey' in err2:
                             skipped_fk += 1

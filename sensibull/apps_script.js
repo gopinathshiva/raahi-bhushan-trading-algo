@@ -4,10 +4,10 @@
 // Configure the four constants below, then set up triggers.
 // ============================================================
 
-const RENDER_URL        = 'https://your-app.onrender.com';     // your Render service URL
-const SCRAPE_TOKEN      = 'your-scrape-token-here';            // matches SCRAPE_TOKEN env var
-const SUPABASE_URL      = 'https://abcdefghijkl.supabase.co';  // your Supabase project URL
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJI...';                   // Supabase anon/public key
+const RENDER_URL        = 'https://raahi-bhushan-trading-algo.onrender.com';     // your Render service URL
+const SCRAPE_TOKEN      = 'zZSIsInJlZiI6Im10YnF4b2t3a2xnaWlsbmtxc2twIi';            // matches SCRAPE_TOKEN env var
+const SUPABASE_URL      = 'https://mtbqxokwklgiilnkqskp.supabase.co';  // your Supabase project URL
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10YnF4b2t3a2xnaWlsbmtxc2twIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNDUyNTAsImV4cCI6MjA4OTgyMTI1MH0.GmD74r4-005zCPCsBqKshUJqlElO4ziKZTVmB7P9TcM';                   // Supabase anon/public key
 
 // ─────────────────────────────────────────────────────────────
 // FUNCTION 1: Keep Render awake (prevents free-tier sleep)

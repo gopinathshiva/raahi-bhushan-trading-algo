@@ -83,7 +83,7 @@ def migrate_database():
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     model TEXT,
-                    created_at TEXT DEFAULT '',
+                    created_at TEXT DEFAULT NULL,
                     FOREIGN KEY (profile_id) REFERENCES profiles (id)
                 )
             ''')
@@ -135,6 +135,54 @@ def migrate_database():
             ''')
         migrations_applied += 1
         print("    ✓ Created 'openalgo_profiles' table")
+
+    # Migration 6: Fix position_changes timestamps stored as UTC (+00) → convert to IST (+05:30)
+    # Root cause: during the Supabase migration window, psycopg2 normalized now_ist() datetime
+    # objects to UTC instead of preserving IST. This caused ORDER BY timestamp to sort those
+    # entries as earlier than IST entries from the same day, hiding them in the daily timeline.
+    if BACKEND != 'supabase':
+        from datetime import timezone, timedelta
+        from zoneinfo import ZoneInfo
+
+        IST_ZONE = ZoneInfo("Asia/Kolkata")
+        UTC_ZONE = timezone.utc
+
+        # Fetch rows where timestamp was stored in UTC (contains '+00' offset)
+        utc_rows = c.execute(
+            "SELECT id, timestamp FROM position_changes WHERE timestamp LIKE '%+00%' OR timestamp LIKE '%+00:00%'"
+        ).fetchall()
+
+        if utc_rows:
+            print(f"  - Migration 6: Converting {len(utc_rows)} UTC timestamp(s) in position_changes to IST...")
+            import re as _re
+            _TZ_RE = _re.compile(r'([+-])(\d{2}):(\d{2})$')
+
+            for row in utc_rows:
+                raw_ts = row[1] if isinstance(row, (list, tuple)) else row['timestamp']
+                row_id = row[0] if isinstance(row, (list, tuple)) else row['id']
+                try:
+                    # Normalize format
+                    s = raw_ts.replace(' ', 'T')
+                    m = _TZ_RE.search(s)
+                    if m:
+                        sign = 1 if m.group(1) == '+' else -1
+                        offset = timedelta(hours=sign * int(m.group(2)), minutes=sign * int(m.group(3)))
+                        s_naive = s[:m.start()]
+                        dt_naive = __import__('datetime').datetime.fromisoformat(s_naive)
+                        dt_aware = dt_naive.replace(tzinfo=timezone(offset))
+                    else:
+                        dt_aware = __import__('datetime').datetime.fromisoformat(s).replace(tzinfo=UTC_ZONE)
+
+                    dt_ist = dt_aware.astimezone(IST_ZONE)
+                    c.execute("UPDATE position_changes SET timestamp = ? WHERE id = ?",
+                              (dt_ist.isoformat(), row_id))
+                except Exception as e:
+                    print(f"    Warning: Could not convert timestamp '{raw_ts}' for id={row_id}: {e}")
+
+            migrations_applied += 1
+            print(f"    ✓ Converted {len(utc_rows)} UTC timestamp(s) to IST")
+        else:
+            print("  - Migration 6: No UTC timestamps found in position_changes (already clean)")
 
     # Commit all changes
     conn.commit()

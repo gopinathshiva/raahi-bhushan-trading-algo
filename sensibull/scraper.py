@@ -54,15 +54,16 @@ def fetch_data(slug):
         return None
 
 def save_snapshot(conn, profile_id, data, timestamp=None):
-    from db_adapter import last_insert_id
+    from db_adapter import BACKEND, last_insert_id
     c = conn.cursor()
+    returning = " RETURNING id" if BACKEND == 'supabase' else ""
     # Store timestamps in ISO format with timezone (e.g., "2026-02-16T10:30:00+05:30")
     if timestamp:
         ts_str = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
-        c.execute("INSERT INTO snapshots (profile_id, raw_data, created_at_source, timestamp) VALUES (?, ?, ?, ?) RETURNING id",
+        c.execute(f"INSERT INTO snapshots (profile_id, raw_data, created_at_source, timestamp) VALUES (?, ?, ?, ?){returning}",
                   (profile_id, json.dumps(data), data.get('created_at'), ts_str))
     else:
-        c.execute("INSERT INTO snapshots (profile_id, raw_data, created_at_source) VALUES (?, ?, ?) RETURNING id",
+        c.execute(f"INSERT INTO snapshots (profile_id, raw_data, created_at_source) VALUES (?, ?, ?){returning}",
                   (profile_id, json.dumps(data), data.get('created_at')))
     return last_insert_id(c)
 
@@ -540,7 +541,7 @@ def run_scraper():
         profile_id = profile['id']
         
         # Check if we have any data (Initial Snapshot Check)
-        last_snapshot = c.execute("SELECT raw_data FROM snapshots WHERE profile_id = ? ORDER BY created_at_source DESC LIMIT 1", (profile_id,)).fetchone()
+        last_snapshot = c.execute("SELECT raw_data FROM snapshots WHERE profile_id = ? ORDER BY id DESC LIMIT 1", (profile_id,)).fetchone()
         
         # DECISION: Should we run?
         # Run IF: (No data exists) OR (Market is Open)
@@ -574,7 +575,7 @@ def run_scraper():
             snapshot_id = save_snapshot(conn, profile_id, current_data, timestamp=now_ist())
             # Record explicit 'Initial' change so it shows up in UI
             c.execute("INSERT INTO position_changes (profile_id, snapshot_id, timestamp, diff_summary) VALUES (?, ?, ?, ?)",
-                      (profile_id, snapshot_id, now_ist(), "Initial Snapshot"))
+                      (profile_id, snapshot_id, now_ist().isoformat(), "Initial Snapshot"))
             conn.commit()
             continue
             
@@ -591,7 +592,7 @@ def run_scraper():
             summary = generate_diff_summary(last_data, current_data)
             
             c.execute("INSERT INTO position_changes (profile_id, snapshot_id, timestamp, diff_summary) VALUES (?, ?, ?, ?)",
-                      (profile_id, snapshot_id, now_ist(), summary))
+                      (profile_id, snapshot_id, now_ist().isoformat(), summary))
             conn.commit()
             
             # Generate notifications for subscribed items

@@ -2,6 +2,7 @@ services:
   - type: web
     name: sensibull-tracker
     runtime: python
+    rootDir: sensibull
     buildCommand: pip install -r requirements.txt
     startCommand: python3 app.py
     healthCheckPath: /health

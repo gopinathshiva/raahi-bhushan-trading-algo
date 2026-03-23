@@ -13,14 +13,14 @@ CREATE TABLE IF NOT EXISTS profiles (
     url          TEXT,
     source_url   TEXT,
     is_active    INTEGER DEFAULT 1,
-    added_at     TEXT DEFAULT ''
+    added_at     TEXT DEFAULT NULL
 );
 
 -- ─── snapshots ────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS snapshots (
     id                 SERIAL PRIMARY KEY,
     profile_id         INTEGER NOT NULL REFERENCES profiles(id),
-    timestamp          TEXT DEFAULT '',
+    timestamp          TEXT DEFAULT NULL,
     raw_data           JSONB NOT NULL,
     created_at_source  TEXT
 );
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS position_changes (
     id           SERIAL PRIMARY KEY,
     snapshot_id  INTEGER NOT NULL REFERENCES snapshots(id),
     profile_id   INTEGER NOT NULL REFERENCES profiles(id),
-    timestamp    TEXT DEFAULT '',
+    timestamp    TEXT DEFAULT NULL,
     diff_summary TEXT
 );
 
@@ -44,7 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_changes_profile_ts
 CREATE TABLE IF NOT EXISTS latest_snapshots (
     profile_id  INTEGER PRIMARY KEY REFERENCES profiles(id),
     raw_data    JSONB NOT NULL,
-    timestamp   TEXT DEFAULT ''
+    timestamp   TEXT DEFAULT NULL
 );
 
 -- ─── master_contract ──────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS master_contract (
     strike            REAL,
     lot_size          INTEGER,
     instrument_type   TEXT,
-    last_updated      TEXT DEFAULT ''
+    last_updated      TEXT DEFAULT NULL
 );
 
 -- ─── subscriptions ────────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     underlying           TEXT,
     expiry               TEXT,
     position_identifier  TEXT,
-    created_at           TEXT DEFAULT '',
+    created_at           TEXT DEFAULT NULL,
     UNIQUE(profile_id, subscription_type, underlying, expiry, position_identifier)
 );
 
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     message            TEXT NOT NULL,
     notification_type  TEXT NOT NULL,
     notification_data  TEXT,
-    created_at         TEXT DEFAULT '',
+    created_at         TEXT DEFAULT NULL,
     is_read            INTEGER DEFAULT 0
 );
 
@@ -89,8 +89,8 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     id                  SERIAL PRIMARY KEY,
     profile_id          INTEGER NOT NULL REFERENCES profiles(id),
     notification_sound  TEXT DEFAULT 'default',
-    created_at          TEXT DEFAULT '',
-    updated_at          TEXT DEFAULT '',
+    created_at          TEXT DEFAULT NULL,
+    updated_at          TEXT DEFAULT NULL,
     UNIQUE(profile_id)
 );
 
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS admin_users (
     password_hash  TEXT NOT NULL,
     email          TEXT,
     is_active      INTEGER DEFAULT 1,
-    created_at     TEXT DEFAULT '',
+    created_at     TEXT DEFAULT NULL,
     last_login     TEXT
 );
 
@@ -112,8 +112,8 @@ CREATE TABLE IF NOT EXISTS openalgo_profiles (
     host          TEXT NOT NULL,
     api_key       TEXT NOT NULL,
     is_active     INTEGER DEFAULT 1,
-    created_at    TEXT DEFAULT '',
-    updated_at    TEXT DEFAULT ''
+    created_at    TEXT DEFAULT NULL,
+    updated_at    TEXT DEFAULT NULL
 );
 
 -- ─── ai_chat_history ──────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS ai_chat_history (
     role        TEXT NOT NULL,
     content     TEXT NOT NULL,
     model       TEXT,
-    created_at  TEXT DEFAULT ''
+    created_at  TEXT DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_chat_scope

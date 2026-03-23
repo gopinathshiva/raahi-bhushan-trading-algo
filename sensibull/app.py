@@ -2,7 +2,7 @@
 # reads os.environ at import time (db_adapter.py reads DB_BACKEND at module level)
 import os
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 from brokerage import calculate_option_brokerage, get_exchange_for_underlying
@@ -97,6 +97,9 @@ SCRAPER_AUTO_START_DELAY = 30  # seconds
 # Global flag to track if the daily master contract download failed
 MASTER_CONTRACT_DOWNLOAD_FAILED = False
 
+# Process-wide mutex: ensures only one scraper run executes at a time
+SCRAPER_LOCK = threading.Lock()
+
 # Holiday API config (use {year} placeholder, e.g. https://example.com/holidays/{year})
 MARKET_HOLIDAYS_API_URL = os.environ.get('MARKET_HOLIDAYS_API_URL', '').strip()
 MARKET_HOLIDAYS_API_KEY = os.environ.get('MARKET_HOLIDAYS_API_KEY', '').strip()
@@ -136,7 +139,7 @@ def to_datetime_filter(value):
         return dt.replace(tzinfo=IST) if dt.tzinfo is None else dt
 
     try:
-        return _parse(value)
+        return _parse(value).astimezone(IST)
     except (ValueError, AttributeError):
         try:
             dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
@@ -264,7 +267,8 @@ def run_scraper_loop():
     print(f"[ScraperThread] Started at {now_ist().isoformat()}")
     while True:
         try:
-            _run_scraper_once()
+            with SCRAPER_LOCK:
+                _run_scraper_once()
         except Exception as e:
             print(f"[ScraperThread] Error: {e}")
             traceback.print_exc()
@@ -344,17 +348,28 @@ def health():
 
     last_updated = row['max_ts'] if row else None
 
-    if is_market_open() and last_updated:
-        last_dt = to_datetime_filter(last_updated)
-        if last_dt.tzinfo is None:
-            last_dt = last_dt.replace(tzinfo=IST)
-        staleness = (now_ist() - last_dt).total_seconds()
-        if staleness > 600:  # 10 minutes
-            return jsonify({
-                'status': 'degraded',
-                'reason': f'Scraper last updated {int(staleness)}s ago',
-                'last_updated': last_updated
-            }), 503
+    if is_market_open():
+        if not last_updated:
+            # No snapshots yet — degrade after startup grace period
+            if APP_START_TIME is not None:
+                uptime = (now_ist() - APP_START_TIME).total_seconds()
+                if uptime > SCRAPER_AUTO_START_DELAY:
+                    return jsonify({
+                        'status': 'degraded',
+                        'reason': 'No snapshots yet',
+                        'last_updated': None
+                    }), 503
+        else:
+            last_dt = to_datetime_filter(last_updated)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=IST)
+            staleness = (now_ist() - last_dt).total_seconds()
+            if staleness > 600:  # 10 minutes
+                return jsonify({
+                    'status': 'degraded',
+                    'reason': f'Scraper last updated {int(staleness)}s ago',
+                    'last_updated': last_updated
+                }), 503
 
     return jsonify({
         'status': 'ok',
@@ -365,11 +380,16 @@ def health():
 
 def _run_scraper_once_safe():
     """Run one scraper cycle in a fire-and-forget thread (for /api/trigger-scrape)."""
+    if not SCRAPER_LOCK.acquire(blocking=False):
+        print("[TriggerScrape] Skipped: scraper already running")
+        return
     try:
         from scraper import run_scraper
         run_scraper()
     except Exception as e:
         print(f"[TriggerScrape] Error: {e}")
+    finally:
+        SCRAPER_LOCK.release()
 
 
 @app.route('/api/trigger-scrape', methods=['POST'])
@@ -405,9 +425,9 @@ def login():
             if not username or not password or not verification_code:
                 return render_template('login.html', error='All fields are required for registration')
 
-            # Check verification code
-            REGISTRATION_CODE = os.environ.get('REGISTRATION_CODE', '1083')
-            if verification_code != REGISTRATION_CODE:
+            # Check verification code — fail closed if env var is not set
+            REGISTRATION_CODE = os.environ.get('REGISTRATION_CODE', '')
+            if not REGISTRATION_CODE or verification_code != REGISTRATION_CODE:
                 return render_template('login.html', error='Invalid verification code')
 
             # Validate password length
@@ -658,7 +678,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
     prev_change = c.execute("""
         SELECT * FROM position_changes
         WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) < ?
-        ORDER BY timestamp DESC LIMIT 1
+        ORDER BY id DESC LIMIT 1
     """, (profile_id, date)).fetchone()
 
     if prev_change:
@@ -669,7 +689,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
         first_change = c.execute("""
             SELECT * FROM position_changes
             WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
-            ORDER BY timestamp ASC LIMIT 1
+            ORDER BY id ASC LIMIT 1
         """, (profile_id, date)).fetchone()
 
         if first_change:
@@ -716,7 +736,7 @@ def get_daily_pnl_metrics(c, profile_id, date):
         latest_snapshot = c.execute("""
             SELECT * FROM snapshots
             WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
-            ORDER BY timestamp DESC LIMIT 1
+            ORDER BY id DESC LIMIT 1
         """, (profile_id, date)).fetchone()
 
         if latest_snapshot:
@@ -748,7 +768,7 @@ def daily_view(slug, date):
     changes = c.execute("""
         SELECT * FROM position_changes
         WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
-        ORDER BY timestamp DESC
+        ORDER BY id DESC
     """, (profile['id'], date)).fetchall()
 
     # Get Metrics
@@ -907,7 +927,7 @@ def daily_log(slug, date):
     changes = c.execute("""
         SELECT * FROM position_changes
         WHERE profile_id = ? AND SUBSTR(timestamp, 1, 10) = ?
-        ORDER BY timestamp ASC
+        ORDER BY id ASC
     """, (profile['id'], date)).fetchall()
 
     events = []
@@ -4023,7 +4043,7 @@ def get_simulate_events():
                   SELECT 1 FROM snapshots s
                   WHERE s.profile_id = pc.profile_id AND s.id < pc.snapshot_id
               )
-            ORDER BY pc.timestamp DESC
+            ORDER BY pc.id DESC
             LIMIT 50
         """, (profile_id,)).fetchall()
         conn.close()
@@ -5471,6 +5491,11 @@ def import_upload():
 
     supabase_mode = (BACKEND == 'supabase')
 
+    if supabase_mode:
+        return render_template('import.html',
+                               error='Import is not supported in Supabase mode. Use the Sync page to reconcile data.',
+                               supabase_mode=supabase_mode)
+
     if 'database_file' not in request.files:
         return render_template('import.html', error='No file uploaded', supabase_mode=supabase_mode)
 
@@ -6038,6 +6063,7 @@ def api_ai_chat():
 # ============================================================================
 
 if __name__ == '__main__':
+    print(f"[STARTUP] DB_BACKEND env = {os.environ.get('DB_BACKEND')!r}  →  BACKEND = {BACKEND!r}")
     # Initialize database
     # SQLite mode: create all tables + run migrations
     # Supabase mode: tables already exist via supabase_schema.sql; run migrations only

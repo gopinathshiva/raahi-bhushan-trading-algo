@@ -296,10 +296,22 @@
                 const cell = cellMap[date];
                 if (cell && cell.count > 0) {
                     const color = cell.pnl > 0 ? '#28a745' : cell.pnl < 0 ? '#dc3545' : '#666';
-                    td.innerHTML = `<a href="/profile/${slug}/${date}" target="_blank">${cell.count}</a>` +
-                        `<div style="font-size:0.85em;margin-top:4px;font-weight:bold;color:${color};">${cell.pnl.toLocaleString('en-IN', {minimumFractionDigits:1, maximumFractionDigits:1})}</div>`;
+                    td.textContent = '';
+                    const a = document.createElement('a');
+                    a.href = '/profile/' + encodeURIComponent(slug) + '/' + encodeURIComponent(date);
+                    a.target = '_blank';
+                    a.textContent = cell.count;
+                    const div = document.createElement('div');
+                    div.style.cssText = 'font-size:0.85em;margin-top:4px;font-weight:bold;color:' + color;
+                    div.textContent = cell.pnl.toLocaleString('en-IN', {minimumFractionDigits:1, maximumFractionDigits:1});
+                    td.appendChild(a);
+                    td.appendChild(div);
                 } else {
-                    td.innerHTML = '<span class="zero">-</span>';
+                    td.textContent = '';
+                    const span = document.createElement('span');
+                    span.className = 'zero';
+                    span.textContent = '-';
+                    td.appendChild(span);
                 }
             });
 
