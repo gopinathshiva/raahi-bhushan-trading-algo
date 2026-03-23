@@ -646,6 +646,9 @@
                     <span style="font-size:12px; display:inline-flex; align-items:center; gap:5px; color:#555;">
                         <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f000b8;"></span>Drawdown
                     </span>
+                    <span id="intraday-spot-legend" style="font-size:12px; display:none; align-items:center; gap:5px; color:#555;">
+                        <span style="display:inline-block; width:18px; height:2px; background:#16a34a; vertical-align:middle;"></span>Spot
+                    </span>
                     <!-- Refresh -->
                     <button id="intraday-refresh-btn" onclick="refreshIntradayPnl()" style="padding:5px 14px; background:#570df8; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:12px; font-weight:500;">Refresh</button>
                     <!-- Close -->
@@ -6441,7 +6444,7 @@
             document.getElementById('icard-dd-val').textContent = fmtInr(m.maxDD);
         }
 
-        function renderChart(points, ddPoints) {
+        function renderChart(points, ddPoints, spotPoints) {
             const canvas = document.getElementById('intraday-pnl-chart');
             const ctx = canvas.getContext('2d');
             if (_intradayChart) { _intradayChart.destroy(); _intradayChart = null; }
@@ -6454,33 +6457,75 @@
             pinkGrad.addColorStop(0, 'rgba(240,0,184,0)');
             pinkGrad.addColorStop(1, 'rgba(240,0,184,0.25)');
 
+            const hasSpot = spotPoints && spotPoints.some(p => p.spot != null);
+
+            const datasets = [
+                {
+                    label: 'MTM P&L',
+                    data: points.map(p => p.pnl),
+                    borderColor: '#570df8',
+                    backgroundColor: purpleGrad,
+                    borderWidth: 2,
+                    fill: true,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    yAxisID: 'y',
+                },
+                {
+                    label: 'Drawdown',
+                    data: ddPoints.map(p => p.dd),
+                    borderColor: '#f000b8',
+                    backgroundColor: pinkGrad,
+                    borderWidth: 2,
+                    fill: true,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    yAxisID: 'y',
+                }
+            ];
+
+            if (hasSpot) {
+                datasets.push({
+                    label: 'Spot',
+                    data: spotPoints.map(p => p.spot),
+                    borderColor: '#16a34a',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    borderDash: [4, 3],
+                    fill: false,
+                    pointRadius: 0,
+                    tension: 0.1,
+                    yAxisID: 'y1',
+                });
+            }
+
+            const scales = {
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { size: 11 }, maxTicksLimit: 10 }
+                },
+                y: {
+                    position: 'left',
+                    grid: { color: 'rgba(0,0,0,0.05)' },
+                    ticks: { callback: v => '₹' + v.toLocaleString('en-IN') }
+                }
+            };
+
+            if (hasSpot) {
+                scales.y1 = {
+                    position: 'right',
+                    grid: { display: false },
+                    ticks: {
+                        font: { size: 10 },
+                        color: '#16a34a',
+                        callback: v => v.toLocaleString('en-IN')
+                    }
+                };
+            }
+
             _intradayChart = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels: points.map(p => p.time),
-                    datasets: [
-                        {
-                            label: 'MTM P&L',
-                            data: points.map(p => p.pnl),
-                            borderColor: '#570df8',
-                            backgroundColor: purpleGrad,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                        },
-                        {
-                            label: 'Drawdown',
-                            data: ddPoints.map(p => p.dd),
-                            borderColor: '#f000b8',
-                            backgroundColor: pinkGrad,
-                            borderWidth: 2,
-                            fill: true,
-                            pointRadius: 0,
-                            tension: 0.1,
-                        }
-                    ]
-                },
+                data: { labels: points.map(p => p.time), datasets },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
@@ -6489,21 +6534,17 @@
                         legend: { display: false },
                         tooltip: {
                             callbacks: {
-                                label: ctx => ` ${ctx.dataset.label}: ${fmtInr(ctx.parsed.y)}`
+                                label: ctx => {
+                                    if (ctx.dataset.label === 'Spot') {
+                                        const v = ctx.parsed.y;
+                                        return ` Spot: ${v != null ? v.toLocaleString('en-IN') : '—'}`;
+                                    }
+                                    return ` ${ctx.dataset.label}: ${fmtInr(ctx.parsed.y)}`;
+                                }
                             }
                         }
                     },
-                    scales: {
-                        x: {
-                            grid: { display: false },
-                            ticks: { font: { size: 11 }, maxTicksLimit: 10 }
-                        },
-                        y: {
-                            position: 'left',
-                            grid: { color: 'rgba(0,0,0,0.05)' },
-                            ticks: { callback: v => '₹' + v.toLocaleString('en-IN') }
-                        }
-                    }
+                    scales
                 }
             });
         }
@@ -6542,8 +6583,13 @@
                     pnl:  d.pnl
                 }));
 
+                const spotPoints = snapJson.data.map(d => ({ spot: d.spot != null ? d.spot : null }));
+                const hasSpot = spotPoints.some(p => p.spot != null);
+                const spotLegend = document.getElementById('intraday-spot-legend');
+                if (spotLegend) spotLegend.style.display = hasSpot ? 'inline-flex' : 'none';
+
                 renderMetrics(computeMetrics(points));
-                renderChart(points, computeDrawdown(points));
+                renderChart(points, computeDrawdown(points), spotPoints);
 
                 loadEl.style.display    = 'none';
                 chartWrap.style.display = 'block';

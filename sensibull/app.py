@@ -3046,6 +3046,23 @@ def _resolve_last_trading_day_of_month(base, year, month, holiday_api_url=None, 
         candidate -= timedelta(days=1)
     return candidate.day
 
+def _lookup_expiry_day_from_master_contract(broker_symbol: str) -> Optional[int]:
+    """Return the actual expiry day for a broker symbol from the master contract, or None if not found."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        row = c.execute(
+            "SELECT expiry FROM master_contract WHERE trading_symbol = ?",
+            (broker_symbol.upper(),)
+        ).fetchone()
+        conn.close()
+        if row and row['expiry']:
+            return date.fromisoformat(row['expiry']).day
+    except Exception:
+        pass
+    return None
+
+
 def convert_broker_symbol_to_openalgo_symbol(
     symbol: str,
     holiday_api_url: Optional[str] = None,
@@ -3058,15 +3075,18 @@ def convert_broker_symbol_to_openalgo_symbol(
     m = re.fullmatch(rf"([A-Z0-9]+?)(\d{{2}})({MONTHS})(\d+(?:\.\d+)?)(CE|PE)", s)
     if m:
         base, yy, mon3, strike, opt = m.groups()
-        year = 2000 + int(yy)
-        month = MON3_TO_NUM[mon3]
-        day = _resolve_last_trading_day_of_month(
-            base,
-            year,
-            month,
-            holiday_api_url=holiday_api_url,
-            holiday_api_key=holiday_api_key
-        )
+        # First try master contract for the actual expiry date (most reliable)
+        day = _lookup_expiry_day_from_master_contract(s)
+        if day is None:
+            year = 2000 + int(yy)
+            month = MON3_TO_NUM[mon3]
+            day = _resolve_last_trading_day_of_month(
+                base,
+                year,
+                month,
+                holiday_api_url=holiday_api_url,
+                holiday_api_key=holiday_api_key
+            )
         if strike.endswith(".0"):
             strike = strike[:-2]
         return f"{base}{day:02d}{mon3}{yy}{strike}{opt}"
@@ -3459,14 +3479,21 @@ def api_openalgo_margin():
     if not profiles:
         return jsonify({'success': False, 'error': 'No active OpenAlgo profile configured. Please add one in OpenAlgo settings.'}), 404
 
-    # Convert broker symbols to OpenAlgo symbols
+    # Convert broker symbols to OpenAlgo symbols using the first active profile's holiday URL
+    first_profile = profiles[0] if profiles else None
+    margin_holiday_api_url = _build_profile_holiday_api_url(first_profile['host']) if first_profile else ''
+    margin_holiday_api_key = first_profile['api_key'] if first_profile else None
     converted_positions = []
     for pos in positions:
         converted = dict(pos)
         broker_sym = (pos.get('symbol') or '').strip().upper()
         if broker_sym:
             try:
-                converted['symbol'] = convert_broker_symbol_to_openalgo_symbol(broker_sym)
+                converted['symbol'] = convert_broker_symbol_to_openalgo_symbol(
+                    broker_sym,
+                    holiday_api_url=margin_holiday_api_url or MARKET_HOLIDAYS_API_URL,
+                    holiday_api_key=margin_holiday_api_key
+                )
             except Exception as e:
                 print(f"[OpenAlgo margin] Symbol conversion failed for {broker_sym}: {e}")
         converted_positions.append(converted)
@@ -4434,10 +4461,15 @@ def api_pnl_snapshots_by_expiry(slug, date):
     for snap in snapshots:
         raw = json.loads(snap['raw_data'])
         pnl = 0.0
+        spot_price = None
         for item in raw.get('data', []):
             item_underlying = item.get('trading_symbol') or item.get('underlying', '')
             if underlying_filter and item_underlying != underlying_filter:
                 continue
+            if spot_price is None:
+                price = item.get('underlying_price')
+                if price is not None:
+                    spot_price = price
             for trade in item.get('trades', []):
                 if symbol_set and trade.get('trading_symbol', '') not in symbol_set:
                     continue
@@ -4450,7 +4482,7 @@ def api_pnl_snapshots_by_expiry(slug, date):
         except Exception:
             ts_display = ts[:16]
 
-        result.append({'timestamp': ts_display, 'pnl': round(pnl, 2)})
+        result.append({'timestamp': ts_display, 'pnl': round(pnl, 2), 'spot': spot_price})
 
     return jsonify({'success': True, 'data': result, 'underlying': underlying_filter,
                     'count': len(result), 'from_date': from_date, 'to_date': to_date})
