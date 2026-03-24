@@ -3893,11 +3893,21 @@ def api_watch_expiries():
 @app.route('/api/notifications', methods=['GET'])
 @login_required
 def get_notifications():
-    """Get all notifications for a profile"""
+    """Get paginated notifications for a profile.
+
+    Query params:
+      profile_slug  – required
+      limit         – records per page (default 20, max 100)
+      before_id     – cursor: return only notifications with id < before_id
+    Response includes has_more and next_cursor for the next page.
+    """
     try:
         profile_slug = request.args.get('profile_slug')
         if not profile_slug:
             return jsonify({'error': 'profile_slug is required'}), 400
+
+        limit = min(int(request.args.get('limit', 20)), 100)
+        before_id = request.args.get('before_id', type=int)
 
         conn = get_db()
         c = conn.cursor()
@@ -3908,15 +3918,28 @@ def get_notifications():
             return jsonify({'error': 'Profile not found'}), 404
         profile_id = profile['id']
 
-        # Get all notifications
-        notifications = c.execute("""
-            SELECT id, subscription_id, message, notification_type, notification_data, created_at, is_read
-            FROM notifications
-            WHERE profile_id = ?
-            ORDER BY created_at DESC
-        """, (profile_id,)).fetchall()
+        # Fetch limit+1 rows so we can detect whether more pages exist
+        if before_id is not None:
+            rows = c.execute("""
+                SELECT id, subscription_id, message, notification_type, notification_data, created_at, is_read
+                FROM notifications
+                WHERE profile_id = ? AND id < ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+            """, (profile_id, before_id, limit + 1)).fetchall()
+        else:
+            rows = c.execute("""
+                SELECT id, subscription_id, message, notification_type, notification_data, created_at, is_read
+                FROM notifications
+                WHERE profile_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+            """, (profile_id, limit + 1)).fetchall()
 
         conn.close()
+
+        has_more = len(rows) > limit
+        notifications = rows[:limit]
 
         result = []
         for notif in notifications:
@@ -3937,7 +3960,13 @@ def get_notifications():
                 'is_read': notif['is_read'] == 1
             })
 
-        return jsonify({'success': True, 'notifications': result})
+        next_cursor = result[-1]['id'] if has_more and result else None
+        return jsonify({
+            'success': True,
+            'notifications': result,
+            'has_more': has_more,
+            'next_cursor': next_cursor
+        })
 
     except Exception as e:
         print(f"Error getting notifications: {e}")

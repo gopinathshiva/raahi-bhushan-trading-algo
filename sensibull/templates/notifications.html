@@ -619,6 +619,9 @@
             <div id="notifications-list">
                 <div class="empty-state">Loading notifications...</div>
             </div>
+            <div id="notifications-sentinel" style="display:none; text-align:center; padding:15px;">
+                <div id="notifications-spinner" style="display:none; color:#666; font-size:0.9em;">Loading more...</div>
+            </div>
         </div>
 
         <!-- Subscriptions Tab -->
@@ -771,6 +774,10 @@
         let baseOpenAlgoSymbol = '';
         let strikeInfo = null;
         let notificationCheckInterval = null;
+        let notificationCursor = null;
+        let notificationHasMore = true;
+        let notificationLoading = false;
+        let notificationObserver = null;
 
         const TOAST_AUTO_DISMISS_MS = 8000;
         let toastQueue = [];
@@ -872,7 +879,7 @@
             document.getElementById(`${tabName}-tab`).classList.add('active');
 
             if (tabName === 'notifications') {
-                loadNotifications();
+                loadNotifications(true);
             } else if (tabName === 'subscriptions') {
                 loadSubscriptions();
             } else if (tabName === 'settings') {
@@ -881,21 +888,50 @@
             }
         }
 
-        // Load Notifications
-        async function loadNotifications() {
+        // Load Notifications (cursor-based pagination)
+        // reset=true: reload from beginning; reset=false: load next page
+        async function loadNotifications(reset = true) {
+            if (notificationLoading) return;
+            if (!reset && !notificationHasMore) return;
+
+            notificationLoading = true;
+
+            if (reset) {
+                notificationCursor = null;
+                notificationHasMore = true;
+                notificationsData = [];
+                const container = document.getElementById('notifications-list');
+                container.innerHTML = '<div class="empty-state">Loading notifications...</div>';
+            }
+
+            const spinner = document.getElementById('notifications-spinner');
+            if (spinner) spinner.style.display = 'block';
+
             try {
-                const response = await fetch(`/api/notifications?profile_slug=${PROFILE_SLUG}`);
+                let url = `/api/notifications?profile_slug=${PROFILE_SLUG}&limit=20`;
+                if (notificationCursor !== null) url += `&before_id=${notificationCursor}`;
+
+                const response = await fetch(url);
                 const data = await response.json();
-                
+
                 if (data.success) {
-                    notificationsData = data.notifications;
-                    renderNotifications();
+                    notificationHasMore = data.has_more;
+                    notificationCursor = data.next_cursor;
+                    const newNotifs = data.notifications;
+                    renderNotifications(newNotifs, !reset);
+                    notificationsData = reset ? newNotifs : notificationsData.concat(newNotifs);
                 } else {
-                    showToast('Failed to load notifications', 'error');
+                    if (reset) showToast('Failed to load notifications', 'error');
                 }
             } catch (error) {
                 console.error('Error loading notifications:', error);
-                showToast('Error loading notifications', 'error');
+                if (reset) showToast('Error loading notifications', 'error');
+            } finally {
+                notificationLoading = false;
+                const spinner = document.getElementById('notifications-spinner');
+                if (spinner) spinner.style.display = 'none';
+                const sentinel = document.getElementById('notifications-sentinel');
+                if (sentinel) sentinel.style.display = notificationHasMore ? 'block' : 'none';
             }
         }
 
@@ -960,9 +996,9 @@
                 if (lastNotificationCount > 0 && currentCount > lastNotificationCount) {
                     const newCount = currentCount - lastNotificationCount;
 
-                    // Fetch full notifications to get details for the toast(s)
+                    // Fetch only the newest notifications for toast details (limit=5 for performance)
                     try {
-                        const notifsResponse = await fetch(`/api/notifications?profile_slug=${PROFILE_SLUG}`);
+                        const notifsResponse = await fetch(`/api/notifications?profile_slug=${PROFILE_SLUG}&limit=5`);
                         const notifsData = await notifsResponse.json();
 
                         if (notifsData.success && notifsData.notifications.length > 0) {
@@ -997,7 +1033,7 @@
                     // Reload notifications list if tab is visible
                     const notificationsTab = document.getElementById('notifications-tab');
                     if (notificationsTab && notificationsTab.classList.contains('active')) {
-                        loadNotifications();
+                        loadNotifications(true);
                     }
                 }
 
@@ -1288,16 +1324,16 @@
             }
         }
 
-        function renderNotifications() {
+        // notifications: array to render; append: true = add to existing list, false = replace
+        function renderNotifications(notifications, append = false) {
             const container = document.getElementById('notifications-list');
-            
-            if (notificationsData.length === 0) {
+
+            if (!append && notifications.length === 0) {
                 container.innerHTML = '<div class="empty-state">No notifications yet. Subscribe to underlyings or positions to get notified!</div>';
                 return;
             }
 
-            // Group notifications by change_id or date
-            container.innerHTML = notificationsData.map(notif => {
+            const html = notifications.map(notif => {
                 const data = notif.notification_data || {};
                 const type = notif.notification_type;
                 
@@ -1454,6 +1490,12 @@
                     </div>
                 `;
             }).join('');
+
+            if (append) {
+                container.insertAdjacentHTML('beforeend', html);
+            } else {
+                container.innerHTML = html;
+            }
         }
 
         async function markAsRead(notificationId) {
@@ -1466,7 +1508,7 @@
                 
                 const data = await response.json();
                 if (data.success) {
-                    loadNotifications();
+                    loadNotifications(true);
                     showToast('Marked as read', 'success');
                 }
             } catch (error) {
@@ -1485,7 +1527,7 @@
                 
                 const data = await response.json();
                 if (data.success) {
-                    loadNotifications();
+                    loadNotifications(true);
                     showToast('All notifications marked as read', 'success');
                 }
             } catch (error) {
@@ -1506,7 +1548,14 @@
                 
                 const data = await response.json();
                 if (data.success) {
-                    loadNotifications();
+                    // Remove from DOM directly to avoid resetting the scroll position
+                    const el = document.querySelector(`[onclick*="deleteNotification(${notificationId})"]`);
+                    if (el) el.closest('.notification-item').remove();
+                    notificationsData = notificationsData.filter(n => n.id !== notificationId);
+                    const container = document.getElementById('notifications-list');
+                    if (container && !container.querySelector('.notification-item')) {
+                        container.innerHTML = '<div class="empty-state">No notifications yet. Subscribe to underlyings or positions to get notified!</div>';
+                    }
                     showToast('Notification deleted', 'success');
                 }
             } catch (error) {
@@ -1977,9 +2026,20 @@
 
         // Initialize on page load
         window.addEventListener('DOMContentLoaded', () => {
-            loadNotifications();
+            loadNotifications(true);
             loadOpenAlgoProfiles();
             startNotificationChecking();
+
+            // Infinite scroll: observe sentinel to load the next page
+            const sentinel = document.getElementById('notifications-sentinel');
+            if (sentinel && 'IntersectionObserver' in window) {
+                notificationObserver = new IntersectionObserver((entries) => {
+                    if (entries[0].isIntersecting && notificationHasMore && !notificationLoading) {
+                        loadNotifications(false);
+                    }
+                }, { rootMargin: '150px' });
+                notificationObserver.observe(sentinel);
+            }
         });
 
         // Clean up on page unload
