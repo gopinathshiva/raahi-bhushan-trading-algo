@@ -3156,7 +3156,6 @@ def mask_api_key(api_key):
 
 # Underlyings that trade on BSE exchanges (not NSE)
 _BSE_OPTION_UNDERLYINGS = frozenset({'SENSEX', 'BANKEX'})
-_BSE_SPOT_UNDERLYINGS = frozenset({'SENSEX', 'BANKEX'})
 
 def _extract_underlying_from_openalgo_symbol(symbol):
     """Extract underlying name from an OpenAlgo-format option symbol like NIFTY26MAR2522500CE."""
