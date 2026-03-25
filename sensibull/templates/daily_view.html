@@ -726,8 +726,36 @@
             </div>
 
             <!-- Chart -->
-            <div style="position:relative; height:320px; margin-bottom:20px;">
+            <div style="position:relative; height:320px; margin-bottom:14px;">
                 <canvas id="payoff-canvas"></canvas>
+            </div>
+
+            <!-- Interactive Sliders -->
+            <div id="payoff-sliders-section" style="display:none; margin-bottom:16px; padding:12px 16px; background:#f8f9fa; border-radius:6px; border:1px solid #e0e0e0;">
+                <!-- Spot Slider -->
+                <div style="margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <label style="font-size:0.83em; font-weight:600; color:#555;">Target Spot Price</label>
+                        <span id="payoff-spot-slider-val" style="font-size:0.85em; font-weight:bold; color:#007bff;"></span>
+                    </div>
+                    <input type="range" id="payoff-spot-slider"
+                           style="width:100%; accent-color:#007bff; cursor:pointer;"
+                           min="0" max="0" step="1" value="0"
+                           oninput="handlePayoffSpotSlider(this.value)" />
+                </div>
+                <!-- DTE / Time Slider -->
+                <div id="payoff-dte-slider-wrap" style="display:none;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <label style="font-size:0.83em; font-weight:600; color:#555;">Time to Expiry</label>
+                        <span id="payoff-dte-slider-val" style="font-size:0.85em; font-weight:bold; color:#fd7e14;"></span>
+                    </div>
+                    <input type="range" id="payoff-dte-slider"
+                           style="width:100%; accent-color:#fd7e14; cursor:pointer;"
+                           min="0" max="0" step="1" value="0"
+                           oninput="handlePayoffDteSlider(this.value)" />
+                </div>
+                <!-- Dynamic stat cards from sliders -->
+                <div id="payoff-slider-stats" style="display:flex; gap:20px; flex-wrap:wrap; margin-top:10px; font-size:0.85em; padding-top:8px; border-top:1px solid #e0e0e0;"></div>
             </div>
 
             <!-- Margin section -->
@@ -6803,6 +6831,103 @@
             return (n < 0 ? '−' : '') + '₹' + abs.toLocaleString('en-IN', {minimumFractionDigits: 0, maximumFractionDigits: 0});
         }
 
+        // ---- Black-Scholes helpers for "P&L Today" line ----
+        function normCDF(x) {
+            const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+            const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+            const sign = x < 0 ? -1 : 1;
+            const t = 1 / (1 + p * Math.abs(x) / Math.SQRT2);
+            const poly = t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5))));
+            return 0.5 * (1 + sign * (1 - poly * Math.exp(-x * x / 2)));
+        }
+
+        function bsPrice(S, K, T, r, sigma, optType) {
+            if (T <= 0) return optType === 'CE' ? Math.max(0, S - K) : Math.max(0, K - S);
+            const sqrtT = Math.sqrt(T);
+            const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+            const d2 = d1 - sigma * sqrtT;
+            if (optType === 'CE') return S * normCDF(d1) - K * Math.exp(-r * T) * normCDF(d2);
+            return K * Math.exp(-r * T) * normCDF(-d2) - S * normCDF(-d1);
+        }
+
+        function bsVega(S, K, T, r, sigma) {
+            if (T <= 0 || sigma <= 0) return 0;
+            const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * Math.sqrt(T));
+            return S * Math.sqrt(T) * Math.exp(-d1 * d1 / 2) / Math.sqrt(2 * Math.PI);
+        }
+
+        function impliedVol(marketPrice, S, K, T, r, optType) {
+            if (T <= 0 || marketPrice <= 0 || S <= 0) return null;
+            const intrinsic = optType === 'CE' ? Math.max(0, S - K) : Math.max(0, K - S);
+            if (marketPrice < intrinsic - 0.01) return null;
+            let sigma = 0.3;
+            for (let i = 0; i < 100; i++) {
+                const price = bsPrice(S, K, T, r, sigma, optType);
+                const vega = bsVega(S, K, T, r, sigma);
+                if (Math.abs(vega) < 1e-10) break;
+                const diff = price - marketPrice;
+                if (Math.abs(diff) < 0.001) return sigma;
+                sigma -= diff / vega;
+                sigma = Math.max(0.001, Math.min(sigma, 20));
+            }
+            return (sigma > 0.001 && sigma < 20) ? sigma : null;
+        }
+
+        function computeTimeToExpiry(expiryIso) {
+            if (!expiryIso) return 0;
+            // Expiry at end of Indian trading session (10:00 UTC = 3:30 PM IST)
+            const expiry = new Date(expiryIso + 'T10:00:00Z');
+            const diffMs = expiry - Date.now();
+            return Math.max(0, diffMs / (365.25 * 24 * 3600 * 1000));
+        }
+
+        const BS_RISK_FREE_RATE = 0.065; // ~6.5% for Indian markets
+
+        // Extract per-leg IV from current LTP at current spot. Call once when modal opens.
+        function extractLegsIV(legs, currentSpot, expiryIso) {
+            const T = computeTimeToExpiry(expiryIso);
+            legs.forEach(leg => {
+                leg.iv = null;
+                if (T > 0 && leg.ltp > 0 && currentSpot > 0) {
+                    leg.iv = impliedVol(leg.ltp, currentSpot, leg.strike, T, BS_RISK_FREE_RATE, leg.optType);
+                }
+            });
+        }
+
+        // Theoretical P&L at current date for a given hypothetical spot price
+        function computeTodayPayoff(legs, hypotheticalSpot, expiryIso) {
+            const T = computeTimeToExpiry(expiryIso);
+            if (T <= 0) return null;
+            return legs.reduce((sum, leg) => {
+                const iv = leg.iv != null ? leg.iv : 0.15; // fallback 15% if IV extraction failed
+                const theorPrice = bsPrice(hypotheticalSpot, leg.strike, T, BS_RISK_FREE_RATE, iv, leg.optType);
+                return sum + (theorPrice - leg.avgPrice) * leg.qty;
+            }, 0);
+        }
+        // Variant accepting T directly — used by DTE slider (caller supplies arbitrary T in years)
+        function computeTodayPayoffAtT(legs, hypotheticalSpot, T) {
+            if (T <= 0) return null;
+            return legs.reduce((sum, leg) => {
+                const iv = leg.iv != null ? leg.iv : 0.15;
+                const theorPrice = bsPrice(hypotheticalSpot, leg.strike, T, BS_RISK_FREE_RATE, iv, leg.optType);
+                return sum + (theorPrice - leg.avgPrice) * leg.qty;
+            }, 0);
+        }
+
+        // Format hours-remaining as a human-readable date+time string in IST
+        function formatDteLabel(hoursRemaining, expiryIso) {
+            if (!expiryIso) return `${hoursRemaining}h remaining`;
+            const expiryMs = new Date(expiryIso + 'T10:00:00Z').getTime();
+            const targetMs = expiryMs - hoursRemaining * 3600 * 1000;
+            const d = new Date(targetMs);
+            return d.toLocaleString('en-IN', {
+                weekday: 'short', month: 'short', day: 'numeric',
+                hour: 'numeric', minute: '2-digit', hour12: true,
+                timeZone: 'Asia/Kolkata',
+            });
+        }
+        // ---- End Black-Scholes helpers ----
+
         // Build allPoints/allPayoffs with zero-crossing interpolation, apply offset
         function buildChartPoints(spotPoints, baseRawPayoffs, offset) {
             const shiftedPayoffs = baseRawPayoffs.map(v => v + offset);
@@ -6825,10 +6950,12 @@
 
         function renderPayoffFromState(includeBooked) {
             if (!_payoffState) return;
-            const { legs, spotPoints, baseRawPayoffs, spot, closedPnl } = _payoffState;
+            const { legs, spotPoints, baseRawPayoffs, spot, closedPnl, expiryIso } = _payoffState;
 
             const offset = includeBooked ? closedPnl : 0;
             const { allPoints, allPayoffs } = buildChartPoints(spotPoints, baseRawPayoffs, offset);
+            // Store for in-place slider updates
+            if (_payoffState) { _payoffState.allPoints = allPoints; _payoffState.allPayoffs = allPayoffs; }
 
             // Breakeven points are the inserted zero-crossing spots
             const breakevenSpots = [];
@@ -6895,21 +7022,23 @@
                 },
             ];
 
-            // Current spot vertical marker
-            if (spot) {
-                let nearestIdx = 0, nearestDist = Infinity;
-                allPoints.forEach((s, i) => {
-                    const d = Math.abs(s - spot);
-                    if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+            // "P&L Today" line — theoretical value using Black-Scholes at current T
+            const todayT = expiryIso ? computeTimeToExpiry(expiryIso) : 0;
+            if (todayT > 0) {
+                const todayPayoffs = allPoints.map(s => {
+                    const raw = computeTodayPayoff(legs, s, expiryIso);
+                    return raw != null ? raw + offset : null;
                 });
                 datasets.push({
-                    label: `Current Spot ₹${spot.toLocaleString('en-IN')}`,
-                    data: allPoints.map((_, i) => i === nearestIdx ? allPayoffs[i] : null),
-                    borderColor: '#007bff',
-                    backgroundColor: '#007bff',
-                    pointRadius: allPoints.map((_, i) => i === nearestIdx ? 9 : 0),
-                    pointStyle: 'triangle',
-                    showLine: false,
+                    label: 'P&L Today (Theoretical)',
+                    data: todayPayoffs,
+                    borderColor: '#fd7e14',
+                    borderWidth: 2,
+                    borderDash: [6, 3],
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: false,
+                    order: 2,
                 });
             }
 
@@ -6917,6 +7046,7 @@
             const ctx = document.getElementById('payoff-canvas').getContext('2d');
             _payoffChart = new Chart(ctx, {
                 type: 'line',
+                plugins: [_payoffVLinePlugin],
                 data: { labels: allPoints, datasets },
                 options: {
                     responsive: true,
@@ -6946,7 +7076,7 @@
                                 callback: (_, i) => `₹${Math.round(allPoints[i] ?? 0).toLocaleString('en-IN')}`,
                                 maxRotation: 45,
                             },
-                            title: { display: true, text: 'Underlying Spot Price at Expiry' }
+                            title: { display: true, text: 'Underlying Spot Price' }
                         },
                         y: {
                             title: { display: true, text: 'Strategy P&L (₹)' },
@@ -6955,6 +7085,14 @@
                     }
                 }
             });
+
+            // Store dataset index for the Today line (used by DTE slider in-place updates)
+            if (_payoffState) {
+                _payoffState._todayLineIdx = -1;
+                _payoffChart.data.datasets.forEach((ds, i) => {
+                    if (ds.label === 'P&L Today (Theoretical)') _payoffState._todayLineIdx = i;
+                });
+            }
 
             // Stats row
             const currentPnlLabel = includeBooked ? 'Current P&L (LTP + Booked)' : 'Current P&L (LTP)';
@@ -6977,6 +7115,170 @@
                  <div style="font-size:1.05em;font-weight:bold;color:${s.color};">${s.value}</div></div>`
             ).join('');
         }
+
+        // ---- Vertical line plugin — drawn via canvas afterDraw, moves with _sliderSpot ----
+        const _payoffVLinePlugin = {
+            id: 'payoffVLine',
+            afterDraw(chart) {
+                if (!_payoffState || _sliderSpot == null) return;
+                const { legs, closedPnl, allPoints } = _payoffState;
+                if (!allPoints || allPoints.length === 0) return;
+
+                // Nearest allPoints index to _sliderSpot
+                let nearestIdx = 0, nearestDist = Infinity;
+                allPoints.forEach((s, i) => {
+                    const d = Math.abs(s - _sliderSpot);
+                    if (d < nearestDist) { nearestDist = d; nearestIdx = i; }
+                });
+
+                const meta = chart.getDatasetMeta(0); // 'P&L at Expiry' is always index 0
+                if (!meta || !meta.data[nearestIdx]) return;
+                const x = meta.data[nearestIdx].x;
+
+                const includeBooked = document.getElementById('payoff-include-booked')?.checked;
+                const offset = includeBooked ? (closedPnl || 0) : 0;
+                const expiryPnl = computePayoff(legs, _sliderSpot) + offset;
+                const color = expiryPnl >= 0 ? '#28a745' : '#dc3545';
+
+                // ROI from margin cache
+                const roiMargin = _payoffMarginContext
+                    ? ((_getMarginCache(`exp_${_payoffMarginContext.expiryId}`) || {}).total_margin_required || 0)
+                    : 0;
+                const roiStr = roiMargin > 0
+                    ? ` (${(expiryPnl / roiMargin * 100).toFixed(1)}%)`
+                    : '';
+
+                const { ctx, chartArea } = chart;
+                const isRightHalf = x > (chartArea.left + chartArea.right) / 2;
+                const labelX = isRightHalf ? x - 7 : x + 7;
+                const txAlign = isRightHalf ? 'right' : 'left';
+
+                ctx.save();
+
+                // Dashed vertical line
+                ctx.beginPath();
+                ctx.moveTo(x, chartArea.top);
+                ctx.lineTo(x, chartArea.bottom);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([5, 3]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.font = 'bold 11px system-ui, sans-serif';
+                ctx.textAlign = txAlign;
+
+                // Helper: draw text with white background pill
+                function pill(text, px, py, baseline) {
+                    ctx.textBaseline = baseline;
+                    const mw = ctx.measureText(text).width;
+                    const ph = 15, pad = 5;
+                    const bx = txAlign === 'right' ? px - mw - pad : px - pad;
+                    const by = baseline === 'top' ? py - 2 : py - ph;
+                    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+                    ctx.fillRect(bx, by, mw + pad * 2, ph + 2);
+                    ctx.fillStyle = color;
+                    ctx.fillText(text, px, py);
+                }
+
+                // Top label — current price
+                pill(`₹${Math.round(_sliderSpot).toLocaleString('en-IN')}`, labelX, chartArea.top + 5, 'top');
+
+                // Bottom label — projected P&L + ROI
+                const pnlText = fmtInrPayoff(expiryPnl) + roiStr;
+                pill(pnlText, labelX, chartArea.bottom - 5, 'bottom');
+
+                ctx.restore();
+            },
+        };
+        // ---- End vertical line plugin ----
+
+        // ---- Slider state ----
+        let _sliderSpot = null;
+        let _sliderDte  = null;
+
+        function updateSliderStatCards(spotVal, dteHours) {
+            if (!_payoffState) return;
+            const { legs, closedPnl, expiryIso } = _payoffState;
+            const includeBooked = document.getElementById('payoff-include-booked').checked;
+            const offset = includeBooked ? closedPnl : 0;
+            const items = [];
+
+            if (spotVal != null) {
+                const expiryPnl = computePayoff(legs, spotVal) + offset;
+                const pctFromReal = _payoffState.spot
+                    ? ` (${((spotVal - _payoffState.spot) / _payoffState.spot * 100).toFixed(1)}% from spot)`
+                    : '';
+                items.push({
+                    label: `Expiry P&L @ ₹${Math.round(spotVal).toLocaleString('en-IN')}${pctFromReal}`,
+                    value: fmtInrPayoff(expiryPnl),
+                    color: expiryPnl >= 0 ? '#28a745' : '#dc3545',
+                });
+                if (dteHours != null && dteHours > 0) {
+                    const T = dteHours / (365.25 * 24);
+                    const theorPnl = computeTodayPayoffAtT(legs, spotVal, T);
+                    if (theorPnl != null) {
+                        const withOffset = theorPnl + offset;
+                        items.push({
+                            label: `Theoretical P&L @ ${formatDteLabel(dteHours, expiryIso)}`,
+                            value: fmtInrPayoff(withOffset),
+                            color: withOffset >= 0 ? '#28a745' : '#dc3545',
+                        });
+                    }
+                }
+            }
+
+            document.getElementById('payoff-slider-stats').innerHTML = items.map(s =>
+                `<div>
+                    <div style="font-size:0.76em;color:#888;text-transform:uppercase;letter-spacing:0.04em;">${s.label}</div>
+                    <div style="font-size:1.0em;font-weight:bold;color:${s.color};">${s.value}</div>
+                </div>`
+            ).join('');
+        }
+
+        function updateSpotSlider(newSpot) {
+            if (!_payoffState || !_payoffChart) return;
+            _sliderSpot = newSpot;
+            _payoffChart.update('none'); // triggers _payoffVLinePlugin.afterDraw
+            updateSliderStatCards(newSpot, _sliderDte);
+        }
+
+        function updateDteSlider(newDteHours) {
+            if (!_payoffState || !_payoffChart) return;
+            _sliderDte = newDteHours;
+            const { legs, allPoints, closedPnl, expiryIso } = _payoffState;
+            const includeBooked = document.getElementById('payoff-include-booked').checked;
+            const offset = includeBooked ? closedPnl : 0;
+            const T = newDteHours / (365.25 * 24);
+            if (_payoffState._todayLineIdx >= 0 && allPoints) {
+                const todayPayoffs = allPoints.map(s => {
+                    const raw = computeTodayPayoffAtT(legs, s, T);
+                    return raw != null ? raw + offset : null;
+                });
+                const ds = _payoffChart.data.datasets[_payoffState._todayLineIdx];
+                ds.data = todayPayoffs;
+                ds.label = newDteHours === 0
+                    ? 'P&L at Expiry (DTE=0)'
+                    : `P&L @ ${formatDteLabel(newDteHours, expiryIso)}`;
+            }
+            _payoffChart.update('none');
+            updateSliderStatCards(_sliderSpot, newDteHours);
+        }
+
+        window.handlePayoffSpotSlider = function(val) {
+            const newSpot = Number(val);
+            document.getElementById('payoff-spot-slider-val').textContent =
+                '₹' + Math.round(newSpot).toLocaleString('en-IN');
+            updateSpotSlider(newSpot);
+        };
+
+        window.handlePayoffDteSlider = function(val) {
+            const newDteHours = Number(val);
+            document.getElementById('payoff-dte-slider-val').textContent =
+                formatDteLabel(newDteHours, _payoffState ? _payoffState.expiryIso : null);
+            updateDteSlider(newDteHours);
+        };
+        // ---- End Slider state ----
 
         window.openPayoffChart = async function(underlying, expiryId, expiryIso, expiryLabel) {
             const cached = _expiryEventsCache[expiryId];
@@ -7052,8 +7354,19 @@
             // Closed legs for the table
             const closedLegs = getClosedLegs(cached.events || []);
 
+            // Extract per-leg IV from current LTP for "P&L Today" line
+            if (spot) extractLegsIV(legs, spot, expiryIso);
+
+            // Compute total hours to expiry for DTE slider
+            const totalHours = Math.round(computeTimeToExpiry(expiryIso) * 365.25 * 24);
+
             // Store state for checkbox re-render
-            _payoffState = { legs, closedLegs, spotPoints, baseRawPayoffs, spot, closedPnl };
+            _payoffState = {
+                legs, closedLegs, spotPoints, baseRawPayoffs, spot, closedPnl, expiryIso,
+                spotMin, spotMax, totalHours,
+                allPoints: null, allPayoffs: null,
+                _todayLineIdx: -1,
+            };
 
             // Store context for margin fetch button
             _payoffMarginContext = { underlying, expiryId, legs };
@@ -7080,6 +7393,38 @@
 
             renderPayoffFromState(false);
             renderPayoffLegsTable(legs, closedLegs, false);
+
+            // Initialise sliders
+            _sliderSpot = spot || mid;
+            _sliderDte  = totalHours;
+
+            const spotSliderEl = document.getElementById('payoff-spot-slider');
+            const spotStepVal = Math.max(1, Math.round((_sliderSpot) * 0.005)); // 0.5% of spot
+            spotSliderEl.min   = spotMin;
+            spotSliderEl.max   = spotMax;
+            spotSliderEl.step  = spotStepVal;
+            spotSliderEl.value = _sliderSpot;
+            document.getElementById('payoff-spot-slider-val').textContent =
+                '₹' + Math.round(_sliderSpot).toLocaleString('en-IN');
+
+            const dteWrap = document.getElementById('payoff-dte-slider-wrap');
+            if (totalHours > 0) {
+                const dteSliderEl = document.getElementById('payoff-dte-slider');
+                dteSliderEl.min   = 0;
+                dteSliderEl.max   = totalHours;
+                dteSliderEl.step  = 1;
+                dteSliderEl.value = totalHours;
+                document.getElementById('payoff-dte-slider-val').textContent =
+                    formatDteLabel(totalHours, expiryIso);
+                dteWrap.style.display = 'block';
+            } else {
+                dteWrap.style.display = 'none';
+            }
+
+            document.getElementById('payoff-sliders-section').style.display = 'block';
+            updateSliderStatCards(_sliderSpot, _sliderDte);
+            // Trigger initial draw of the vertical line (plugin reads _sliderSpot set above)
+            if (_payoffChart) _payoffChart.update('none');
         };
 
         // Checkbox handler
@@ -7087,6 +7432,9 @@
             renderPayoffFromState(this.checked);
             if (_payoffState) {
                 renderPayoffLegsTable(_payoffState.legs, _payoffState.closedLegs, this.checked);
+                // Restore slider positions on the freshly-created chart
+                if (_sliderSpot !== null) updateSpotSlider(_sliderSpot);
+                if (_sliderDte  !== null) updateDteSlider(_sliderDte);
             }
         });
 
@@ -7095,6 +7443,11 @@
             if (_payoffChart) { _payoffChart.destroy(); _payoffChart = null; }
             _payoffState = null;
             _payoffMarginContext = null;
+            _sliderSpot = null;
+            _sliderDte  = null;
+            document.getElementById('payoff-sliders-section').style.display = 'none';
+            document.getElementById('payoff-dte-slider-wrap').style.display = 'none';
+            document.getElementById('payoff-slider-stats').innerHTML = '';
         };
 
         document.getElementById('payoff-modal').addEventListener('click', function(e) {
