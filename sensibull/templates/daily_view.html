@@ -37,6 +37,31 @@
         border: none; background: none; font-size: 1em; padding: 0;
     }
 
+    .timeline-diff-slider {
+        max-height: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: max-height 0.28s ease, opacity 0.22s ease, margin-top 0.22s ease;
+        margin-top: 0;
+    }
+
+    .timeline-diff-slider.open {
+        max-height: 70vh;
+        opacity: 1;
+        margin-top: 12px;
+        overflow-y: auto;
+    }
+
+    .timeline-diff-body {
+        border-top: 1px solid #e9ecef;
+        padding-top: 12px;
+    }
+
+    .timeline-diff-body h3 {
+        margin: 0 0 10px 0;
+        font-size: 1.05em;
+    }
+
     #modal {
         display: none; position: fixed; top: 0; left: 0;
         width: 100%; height: 100%; background: rgba(0,0,0,0.5);
@@ -404,7 +429,11 @@
             <div class="summary">
                 <span class="diff-summary" data-change-id="{{ change.id }}">{{ change.diff_summary or 'Position Update' }}</span>
                 &nbsp;
-                <button class="details-link" onclick="showDiff({{ change.id }})">(View Details)</button>
+                <button class="details-link timeline-details-link" data-change-id="{{ change.id }}"
+                    onclick="toggleTimelineDiff({{ change.id }}, this)">(View Details)</button>
+            </div>
+            <div id="timeline-diff-{{ change.id }}" class="timeline-diff-slider" data-change-id="{{ change.id }}" aria-hidden="true">
+                <div id="timeline-diff-content-{{ change.id }}" class="timeline-diff-body"></div>
             </div>
         </div>
         {% else %}
@@ -439,7 +468,7 @@
                             <th style="min-width: 150px;">Time</th>
                             <th style="min-width: 110px;">Type</th>
                             <th>Symbol</th>
-                            <th style="min-width: 70px;">Product</th>
+                            <th style="min-width: 120px;" class="num">Spot Price</th>
                             <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
                             <th style="min-width: 140px;" class="num">Avg (Before)</th>
                             <th style="min-width: 140px;" class="num">Avg (After)</th>
@@ -456,6 +485,14 @@
         </div>
 
         <div id="tab-panel-underlyings" class="tab-panel">
+            <!-- Live LTP WebSocket Panel -->
+            <div id="ltp-ws-bar" style="background:#f0f8ff; border:1px solid #b8d8f0; border-radius:6px; padding:10px 14px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                <span style="font-weight:600; font-size:0.9em; color:#0056b3;">Live LTP</span>
+                <span id="ltp-ws-status" style="font-size:0.82em; padding:3px 8px; border-radius:10px; background:#e0e0e0; color:#555;">Disconnected</span>
+                <span id="ltp-ws-url-display" style="font-size:0.78em; color:#888;"></span>
+                <button id="ltp-disconnect-btn" onclick="disconnectLtpWs()" style="display:none; padding:3px 10px; font-size:0.82em; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer;">Disconnect</button>
+                <a href="/openalgo" target="_blank" style="font-size:0.78em; color:#0056b3; margin-left:auto;">Configure profiles →</a>
+            </div>
             <div class="search-row">
                 <select id="underlying-filter">
                     <option value="">All Underlyings</option>
@@ -480,6 +517,13 @@
                     <input type="checkbox" id="consolidate-trades" style="margin-right:6px;" />
                     Consolidate Trades (1 row per symbol)
                 </label>
+            </div>
+            <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <label style="cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; padding:5px 12px; background:#e8f4fd; border:1px solid #b8d8f0; border-radius:4px; font-size:0.88em; color:#0056b3;" title="Subscribe live LTP for all open positions across all expiries">
+                    <input type="checkbox" id="ltp-subscribe-all" onchange="toggleAllLtp(this.checked)" style="margin:0;" />
+                    Live LTP (All Open Positions)
+                </label>
+                <span id="ltp-all-count" style="font-size:0.82em; color:#888;"></span>
             </div>
             <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:18px;">
                 <span style="font-weight:bold; font-size:0.9em; color:#555;">Show:</span>
@@ -1119,6 +1163,15 @@
             return null;
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         // ========== End of utility functions ==========
 
         function renderLifecycleEvents(events) {
@@ -1175,12 +1228,15 @@
                 const unbookedPnl = Number(e.after_unbooked_pnl || 0);
                 const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
                 const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
+                const parsedSpot = Number(e.spot_price);
+                const hasSpot = e.spot_price !== null && e.spot_price !== undefined && e.spot_price !== '' && Number.isFinite(parsedSpot);
+                const spotPriceHtml = hasSpot ? `₹${fmtNum(parsedSpot, 2)}` : '<span style="color:#aaa;">-</span>';
 
                 tr.innerHTML = `
                     <td>${fmtTimestamp(e.timestamp)}</td>
                     <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
                     <td>${e.symbol || ''}</td>
-                    <td>${e.product || ''}</td>
+                    <td class="num">${spotPriceHtml}</td>
                     <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
                     <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
                     <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
@@ -2117,7 +2173,7 @@
             return { bookedPnl, unbookedPnl, exitPnl, active, closed, brokerage, symbols: Object.keys(latestBySymbol).length, peSellQty, peBuyQty, ceSellQty, ceBuyQty };
         }
 
-        function renderStatsBadge(stats, compact) {
+        function renderStatsBadge(stats, compact, expiryId) {
             const c = v => v > 0 ? '#28a745' : (v < 0 ? '#dc3545' : '#888');
             const total = stats.bookedPnl + stats.unbookedPnl;
             // Build PE/CE open quantity display (sell qty / buy qty)
@@ -2134,11 +2190,16 @@
             const qtyHtml = qtyParts.length
                 ? `<span style="display:inline-flex;gap:6px;padding:1px 7px;background:#f0f0f0;border-radius:3px;border:1px solid #ddd;">${qtyParts.join(' ')}</span>`
                 : '';
+            const bkdId   = expiryId ? ` id="expiry-badge-bkd-${expiryId}"` : '';
+            const unbkdId = expiryId ? ` id="expiry-badge-unbkd-${expiryId}"` : '';
+            const totalId = expiryId ? ` id="expiry-badge-total-${expiryId}"` : '';
+            // data-value stores the raw number so JS can read it without locale-sensitive parsing
+            const bkdDataVal = expiryId ? ` data-value="${stats.bookedPnl}"` : '';
             if (compact) {
                 return `<span style="display:inline-flex;gap:10px;align-items:center;font-size:0.8em;font-weight:normal;margin-left:8px;">` +
-                    `<span title="Latest booked P&amp;L across positions in this expiry">Bkd: <b style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
-                    `<span title="Latest unbooked P&amp;L across open positions">Unbkd: <b style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
-                    `<span title="Total P&amp;L" style="color:${c(total)}; font-weight:bold;">= ₹${fmtNum(total,0)}</span>` +
+                    `<span title="Latest booked P&amp;L across positions in this expiry">Bkd: <b${bkdId}${bkdDataVal} style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
+                    `<span title="Latest unbooked P&amp;L across open positions">Unbkd: <b${unbkdId} style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
+                    `<span title="Total P&amp;L" style="color:${c(total)}; font-weight:bold;">= <b${totalId} style="color:${c(total)}">₹${fmtNum(total,0)}</b></span>` +
                     `<span title="Total brokerage charges" style="color:#dc3545;">Brok: <b>₹${fmtNum(stats.brokerage||0,0)}</b></span>` +
                     `<span title="Open positions" style="color:#555;">● ${stats.active}</span>` +
                     `<span title="Closed positions" style="color:#999;">✕ ${stats.closed}</span>` +
@@ -2156,7 +2217,7 @@
                 `</span>`;
         }
 
-        function buildConsolidatedExpirySummaryHtml(consolidatedRows) {
+        function buildConsolidatedExpirySummaryHtml(consolidatedRows, expiryId) {
             if (!consolidatedRows || consolidatedRows.length === 0) {
                 return '<div style="padding:8px 10px; color:#999; font-size:0.85em;">No positions match filters.</div>';
             }
@@ -2177,14 +2238,16 @@
             const tbc = totalBooked > 0 ? '#28a745' : (totalBooked < 0 ? '#dc3545' : '#888');
             const tuc = totalUnbooked > 0 ? '#28a745' : (totalUnbooked < 0 ? '#dc3545' : '#888');
             const tgc = grandTotal > 0 ? '#28a745' : (grandTotal < 0 ? '#dc3545' : '#888');
+            const unbkdId = expiryId ? ` id="cons-badge-unbkd-${expiryId}"` : '';
+            const totalId = expiryId ? ` id="cons-badge-total-${expiryId}"` : '';
 
             return `<div style="border:1px solid #dee2e6; border-radius:6px; overflow:hidden; margin-bottom:8px;">
                 <div style="background:#f2f4f8; padding:6px 10px; font-weight:bold; font-size:0.78em; color:#555; text-transform:uppercase; letter-spacing:0.04em; border-bottom:1px solid #dee2e6;">Consolidated P&amp;L Summary</div>
                 <div style="display:flex; gap:16px; align-items:center; padding:10px 10px; background:#fff; flex-wrap:wrap; border-bottom:1px solid #f0f0f0;">
                     <span style="font-size:0.82em; font-weight:bold; min-width:180px; color:#333;">Filtered Positions (${consolidatedRows.length} total)</span>
                     <span style="font-size:0.82em; color:#555;">Booked: <b style="color:${tbc};">₹${fmtNum(totalBooked, 2)}</b></span>
-                    <span style="font-size:0.82em; color:#555;">Unbooked: <b style="color:${tuc};">₹${fmtNum(totalUnbooked, 2)}</b></span>
-                    <span style="font-size:0.82em; font-weight:bold; color:${tgc};">Total: ₹${fmtNum(grandTotal, 2)}</span>
+                    <span style="font-size:0.82em; color:#555;">Unbooked: <b${unbkdId} style="color:${tuc};">₹${fmtNum(totalUnbooked, 2)}</b></span>
+                    <span style="font-size:0.82em; font-weight:bold; color:${tgc};">Total: <b${totalId} style="color:${tgc};">₹${fmtNum(grandTotal, 2)}</b></span>
                 </div>
                 <div style="display:flex; gap:16px; align-items:center; padding:8px 10px; background:#f8f9fa; flex-wrap:wrap; font-size:0.82em; color:#666;">
                     <span>● ${openCount} open</span>
@@ -2193,7 +2256,7 @@
             </div>`;
         }
 
-        function renderEventRow(e, underlying) {
+        function renderEventRow(e, underlying, isSubRow = false) {
             const typeLower = (e.type || '').toLowerCase();
             const pillClass = typeLower === 'entered' ? 'entered' : (typeLower === 'modified' ? 'modified' : 'exited');
 
@@ -2257,7 +2320,7 @@
                 <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
                 <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
                 <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
-                <td class="num">₹${fmtNum(e.after_last_price || 0, 2)}</td>
+                <td class="num" ${!isSubRow && Number(e.after_quantity || 0) !== 0 ? `data-ltp-cell="${e.symbol}" data-avg-entry="${e.after_average_price || 0}" data-net-qty="${e.after_quantity || 0}"` : ''}>₹${fmtNum(e.after_last_price || 0, 2)}</td>
                 <td class="num">${bookedPnlHtml}</td>
                 <td class="num">${unbookedPnlHtml}</td>
                 <td class="num">${brokerageHtml}</td>
@@ -2503,7 +2566,7 @@
 
                 // Sub-rows: sort latest first (same as default view)
                 const subEvents = row.events.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                const subRowsHtml = subEvents.map(e => renderEventRow(e, underlying)).join('');
+                const subRowsHtml = subEvents.map(e => renderEventRow(e, underlying, true)).join('');
 
                 return `
                     <tr class="consolidated-row" onclick="toggleConsolidatedRow('${rowId}')" style="cursor:pointer;">
@@ -2515,11 +2578,11 @@
                         <td style="font-size:0.9em;">${row.exitDate ? fmtTimestamp(row.exitDate) : '<span style="color:#aaa;">—</span>'}</td>
                         <td class="num">${row.netQty !== 0 ? row.netQty : '<span style="color:#aaa;">0</span>'}</td>
                         <td class="num">₹${fmtNum(row.avgEntryPrice, 2)}</td>
-                        <td class="num">${row.isOpen
+                        <td class="num" ${row.isOpen ? `data-ltp-cell="${row.symbol}" data-avg-entry="${row.avgEntryPrice}" data-net-qty="${row.netQty}"` : ''}>${row.isOpen
                             ? `<span style="color:#555;" title="Last Traded Price">LTP: ₹${fmtNum(row.ltp, 2)}</span>`
                             : `₹${fmtNum(row.avgExitPrice, 2)}`}</td>
                         <td class="num"><span style="color:${pnlColor}; font-weight:bold;">₹${fmtNum(row.totalExitPnl, 2)}</span></td>
-                        <td class="num">${row.isOpen
+                        <td class="num" ${row.isOpen ? `data-upnl-cell="${row.symbol}"` : ''}>${row.isOpen
                             ? `<span style="color:${unbookedColor}; font-weight:bold;">₹${fmtNum(row.unbookedPnl, 2)}</span>`
                             : '<span style="color:#aaa;">—</span>'}</td>
                         <td style="text-align:center;">${actionHtml}</td>
@@ -2795,7 +2858,7 @@
 
                 if (hasTypeFilter || hasOptTypeFilter || hasDateFilter || hasPositionFilter) {
                     // Show consolidated summary when any filter is active
-                    summaryEl.innerHTML = buildConsolidatedExpirySummaryHtml(consolidatedRows);
+                    summaryEl.innerHTML = buildConsolidatedExpirySummaryHtml(consolidatedRows, expiryId);
                 } else {
                     // No filters active → no summary
                     summaryEl.innerHTML = '';
@@ -2832,7 +2895,7 @@
                 `;
 
                 const subEvents = row.events.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                const subRowsHtml = subEvents.map(e => renderEventRow(e, underlying)).join('');
+                const subRowsHtml = subEvents.map(e => renderEventRow(e, underlying, true)).join('');
 
                 return `
                     <tr class="consolidated-row" onclick="toggleConsolidatedRow('${rowId}')" style="cursor:pointer;">
@@ -2844,11 +2907,11 @@
                         <td style="font-size:0.9em;">${row.exitDate ? fmtTimestamp(row.exitDate) : '<span style="color:#aaa;">—</span>'}</td>
                         <td class="num">${row.netQty !== 0 ? row.netQty : '<span style="color:#aaa;">0</span>'}</td>
                         <td class="num">₹${fmtNum(row.avgEntryPrice, 2)}</td>
-                        <td class="num">${row.isOpen
+                        <td class="num" ${row.isOpen ? `data-ltp-cell="${row.symbol}" data-avg-entry="${row.avgEntryPrice}" data-net-qty="${row.netQty}"` : ''}>${row.isOpen
                             ? `<span style="color:#555;" title="Last Traded Price">LTP: ₹${fmtNum(row.ltp, 2)}</span>`
                             : `₹${fmtNum(row.avgExitPrice, 2)}`}</td>
                         <td class="num"><span style="color:${pnlColor}; font-weight:bold;">₹${fmtNum(row.totalExitPnl, 2)}</span></td>
-                        <td class="num">${row.isOpen
+                        <td class="num" ${row.isOpen ? `data-upnl-cell="${row.symbol}"` : ''}>${row.isOpen
                             ? `<span style="color:${unbookedColor}; font-weight:bold;">₹${fmtNum(row.unbookedPnl, 2)}</span>`
                             : '<span style="color:#aaa;">—</span>'}</td>
                         <td style="text-align:center;">${actionHtml}</td>
@@ -2964,23 +3027,23 @@
                 </div>
                 <div class="metric-box">
                     <div class="metric-title">Total Booked P&amp;L</div>
-                    <div class="metric-value ${pnlClass(bookedPnl)}">${fmt(bookedPnl)}</div>
+                    <div id="summary-card-booked" data-value="${bookedPnl}" class="metric-value ${pnlClass(bookedPnl)}">${fmt(bookedPnl)}</div>
                 </div>
                 <div class="metric-box">
                     <div class="metric-title">Total Unbooked P&amp;L</div>
-                    <div class="metric-value ${pnlClass(unbookedPnl)}">${fmt(unbookedPnl)}</div>
+                    <div id="summary-card-unbooked" class="metric-value ${pnlClass(unbookedPnl)}">${fmt(unbookedPnl)}</div>
                 </div>
                 <div class="metric-box">
                     <div class="metric-title">Gross P&amp;L</div>
-                    <div class="metric-value ${pnlClass(grossPnl)}">${fmt(grossPnl)}</div>
+                    <div id="summary-card-gross" class="metric-value ${pnlClass(grossPnl)}">${fmt(grossPnl)}</div>
                 </div>
                 <div class="metric-box">
                     <div class="metric-title">Total Brokerage</div>
-                    <div class="metric-value" style="color:#dc3545;">${fmt(totalBrokerage)}</div>
+                    <div id="summary-card-brokerage" data-value="${totalBrokerage}" class="metric-value" style="color:#dc3545;">${fmt(totalBrokerage)}</div>
                 </div>
                 <div class="metric-box">
                     <div class="metric-title">Net P&amp;L</div>
-                    <div class="metric-value ${pnlClass(netPnl)}">${fmt(netPnl)}</div>
+                    <div id="summary-card-net" class="metric-value ${pnlClass(netPnl)}">${fmt(netPnl)}</div>
                 </div>
             `;
             cardsEl.style.display = 'flex';
@@ -3064,7 +3127,8 @@
                         const pctColor = pctVal >= 0 ? '#28a745' : '#dc3545';
                         pctHtml = `<span class="underlying-pct-change" style="font-size:0.82em;font-weight:600;color:${pctColor};background:${pctVal >= 0 ? '#d4edda' : '#f8d7da'};padding:1px 5px;border-radius:3px;">${pctSign}${pctVal}%</span>`;
                     }
-                    priceHtml = `<span class="underlying-ltp" style="font-size:0.88em;color:#555;font-weight:500;">₹${ltpStr}</span>${pctHtml}`;
+                    const _prevClose = priceInfo.prev_close != null ? priceInfo.prev_close : '';
+                    priceHtml = `<span data-spot-underlying="${underlying}" data-spot-prev-close="${_prevClose}" style="display:inline-flex;align-items:center;gap:4px;"><span class="underlying-ltp" style="font-size:0.88em;color:#555;font-weight:500;">₹${ltpStr}</span>${pctHtml}</span>`;
                 }
                 titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span>${priceHtml}<span class="underlying-count">(${visibleEventList.length} events)</span>${renderStatsBadge(underlyingStats, false)}`;
 
@@ -3232,7 +3296,7 @@
                     expiryHtml += `
                         <div class="expiry-section" style="margin-top: 15px; border-left: 3px solid #ddd; padding-left: 15px;">
                             <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-                                <span onclick="toggleExpiryGroup('${safeExpiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true)}</span>
+                                <span onclick="toggleExpiryGroup('${safeExpiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true, safeExpiryId)}</span>
                                 <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
                                     <button
                                         data-subscribe-btn="true"
@@ -3268,6 +3332,10 @@
                                         style="padding: 4px 10px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;">
                                         &#x1F916; Ask AI
                                     </button>
+                                    <label onclick="event.stopPropagation();" style="display:flex; align-items:center; gap:5px; font-size:0.82em; color:#0056b3; cursor:pointer; padding:4px 8px; background:#e8f4fd; border:1px solid #b8d8f0; border-radius:4px;" title="Subscribe to live LTP via OpenAlgo WebSocket">
+                                        <input type="checkbox" id="ltp-chk-${expiryId}" onchange="toggleExpiryLtp('${expiryId}', '${safeUnderlying}', this.checked)" style="margin:0;" />
+                                        Live LTP
+                                    </label>
                                     <span class="expiry-toggle" id="expiry-toggle-${expiryId}" onclick="toggleExpiryGroup('${expiryId}')" style="cursor: pointer;">▶</span>
                                 </div>
                                 <div id="margin-exp-${expiryId}" style="flex-basis:100%; display:none;"></div>
@@ -4941,6 +5009,76 @@
             }
         });
 
+        function buildRecentChangesOnlyHtml(diff) {
+            if (!diff) {
+                return '<h3>Recent Changes</h3><p>No structured diff available.</p>';
+            }
+            const addedCount = (diff.added || []).length;
+            const removedCount = (diff.removed || []).length;
+            const modifiedCount = (diff.modified || []).length;
+            return `<h3>Recent Changes (Added: ${addedCount}, Removed: ${removedCount}, Modified: ${modifiedCount})</h3>${buildDiffTable(diff)}`;
+        }
+
+        function closeAllTimelineDiffPanels() {
+            document.querySelectorAll('.timeline-diff-slider.open').forEach(panel => {
+                panel.classList.remove('open');
+                panel.setAttribute('aria-hidden', 'true');
+                const changeId = panel.getAttribute('data-change-id');
+                if (!changeId) return;
+                const btn = document.querySelector(`.timeline-details-link[data-change-id="${changeId}"]`);
+                if (btn) btn.textContent = '(View Details)';
+            });
+        }
+
+        function toggleTimelineDiff(changeId, buttonEl) {
+            const panel = document.getElementById(`timeline-diff-${changeId}`);
+            const content = document.getElementById(`timeline-diff-content-${changeId}`);
+            if (!panel || !content) {
+                // Fallback to legacy modal behavior if inline container is not present.
+                showDiff(changeId);
+                return;
+            }
+
+            const isOpen = panel.classList.contains('open');
+            if (isOpen) {
+                panel.classList.remove('open');
+                panel.setAttribute('aria-hidden', 'true');
+                if (buttonEl) buttonEl.textContent = '(View Details)';
+                return;
+            }
+
+            closeAllTimelineDiffPanels();
+            panel.classList.add('open');
+            panel.setAttribute('aria-hidden', 'false');
+            if (buttonEl) {
+                buttonEl.textContent = '(Hide Details)';
+                buttonEl.disabled = true;
+            }
+
+            if (panel.dataset.loaded === 'true') {
+                if (buttonEl) buttonEl.disabled = false;
+                return;
+            }
+
+            content.innerHTML = '<p style="color:#666;">Loading recent changes...</p>';
+            fetch('/api/diff/' + changeId)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        content.innerHTML = '<p class="error">' + escapeHtml(data.error) + '</p>';
+                        return;
+                    }
+                    content.innerHTML = buildRecentChangesOnlyHtml(data.diff);
+                    panel.dataset.loaded = 'true';
+                })
+                .catch(() => {
+                    content.innerHTML = '<p class="error">Unable to load recent changes.</p>';
+                })
+                .finally(() => {
+                    if (buttonEl) buttonEl.disabled = false;
+                });
+        }
+
         function showDiff(changeId) {
             document.getElementById('modal').style.display = 'block';
             document.getElementById('diff-content').innerHTML = 'Loading...';
@@ -4951,7 +5089,7 @@
                     let html = '';
 
                     if (data.error) {
-                        html += '<p class="error">' + data.error + '</p>';
+                        html += '<p class="error">' + escapeHtml(data.error) + '</p>';
                     } else {
                         // 1. Changes Table
                         if (data.diff) {
@@ -7755,6 +7893,587 @@
                 infoEl.innerHTML = buildMarginInfoHtml(cached, bookedPnl, unbookedPnl);
             });
         };
+    })();
+    </script>
+
+    <!-- ==================== LIVE LTP WEBSOCKET MANAGER ==================== -->
+    <script>
+    (function () {
+        'use strict';
+
+        // ---------- state ----------
+        const _ltpWs = {
+            conn: null,
+            authenticated: false,
+            intentionalClose: false,   // true when user clicks Disconnect
+            allProfiles: [],           // [{id, profile_name, ws_url, is_ws_default}] — loaded at startup
+            triedProfileIds: new Set(),// profile IDs tried in current connection cycle
+            activeProfileId: null,     // profile currently connected
+            // openalgoSym (upper) → Set<brokerSym>
+            openalgoToBroker: {},
+            // brokerSym → openalgoSym
+            brokerToOpenalgo: {},
+            // expiryId → [brokerSyms of open positions]
+            expirySubscriptions: {},
+            // brokerSym → expiryId (for header badge updates)
+            brokerSymToExpiry: {},
+            // brokerSym → last applied ltp (skip DOM update if unchanged)
+            lastLtp: {},
+            // true while _tryNextProfile fetch is in-flight (before _ltpWs.conn is set)
+            connecting: false,
+            // Spot index LTP tracking
+            spotSymToUnderlying: {},   // openalgoSym.upper() → underlying name
+            spotSubscriptions: {},     // underlying → {openalgo_symbol, exchange}
+            lastSpotLtp: {},           // underlying → last applied ltp
+        };
+
+        // ---------- UI helpers ----------
+        function _setWsStatus(text, color) {
+            const el = document.getElementById('ltp-ws-status');
+            if (!el) return;
+            el.textContent = text;
+            el.style.background = color;
+            el.style.color = (color === '#ffc107' || color === '#e0e0e0') ? '#333' : '#fff';
+        }
+
+        function _setWsWarning(msg) {
+            let warn = document.getElementById('ltp-ws-warning');
+            if (!warn) {
+                warn = document.createElement('div');
+                warn.id = 'ltp-ws-warning';
+                warn.style.cssText = 'flex-basis:100%; margin-top:6px; padding:8px 12px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; font-size:0.83em; color:#856404;';
+                const bar = document.getElementById('ltp-ws-bar');
+                if (bar) bar.appendChild(warn);
+            }
+            warn.style.display = msg ? '' : 'none';
+            warn.textContent = msg || '';
+        }
+
+        function _clearWsWarning() { _setWsWarning(''); }
+
+        function _setActiveProfileLabel(profileName) {
+            const el = document.getElementById('ltp-ws-url-display');
+            if (el) el.textContent = profileName ? `Using: ${profileName}` : '';
+        }
+
+        // ---------- load profiles (ordered: WS default first) ----------
+        async function _loadLtpProfiles() {
+            try {
+                const res = await fetch('/api/openalgo/profiles');
+                const data = await res.json();
+                if (!data.success) return;
+                // Sort: WS default first, then others
+                _ltpWs.allProfiles = data.profiles
+                    .map(p => ({ id: p.id, profile_name: p.profile_name, ws_url: p.ws_url || '', is_ws_default: p.is_ws_default || false }))
+                    .sort((a, b) => (b.is_ws_default ? 1 : 0) - (a.is_ws_default ? 1 : 0));
+            } catch (e) { /* ignore */ }
+        }
+
+        // ---------- fallback orchestrator ----------
+        async function _connectWithFallback() {
+            _ltpWs.intentionalClose = false;
+            _ltpWs.triedProfileIds = new Set();
+            _ltpWs.connecting = true;
+            await _tryNextProfile();
+        }
+
+        async function _tryNextProfile() {
+            if (_ltpWs.intentionalClose) return;
+
+            // allProfiles is already sorted: WS default first, then others
+            const ordered = _ltpWs.allProfiles
+                .filter(p => p.ws_url && !_ltpWs.triedProfileIds.has(String(p.id)));
+
+            if (!ordered.length) {
+                // All profiles exhausted
+                _ltpWs.connecting = false;
+                _setWsStatus('All WS failed', '#dc3545');
+                _setActiveProfileLabel('');
+                document.getElementById('ltp-disconnect-btn').style.display = 'none';
+                document.querySelectorAll('[id^="ltp-chk-"]').forEach(cb => { cb.checked = false; });
+                const tried = _ltpWs.allProfiles.filter(p => p.ws_url).map(p => p.profile_name).join(', ');
+                _setWsWarning(
+                    `Live LTP is unavailable. Could not connect to OpenAlgo WebSocket on any profile` +
+                    (tried ? ` (tried: ${tried})` : '') +
+                    `. Check that OpenAlgo is running and the WS URL is correct in your profile settings.`
+                );
+                return;
+            }
+
+            const next = ordered[0];
+            _ltpWs.triedProfileIds.add(String(next.id));
+
+            // Fetch api_key for this profile
+            let apiKey = '';
+            try {
+                const res = await fetch(`/api/openalgo/active_profile?profile_id=${next.id}`);
+                const data = await res.json();
+                if (!data.success || !data.profile.api_key) throw new Error('no api_key');
+                apiKey = data.profile.api_key;
+            } catch (e) {
+                // Can't fetch key — skip to next
+                await _tryNextProfile();
+                return;
+            }
+
+            _setWsStatus(`Connecting… (${next.profile_name})`, '#ffc107');
+            _clearWsWarning();
+            _connectLtpWs(next, apiKey);
+        }
+
+        // ---------- low-level connect for a single profile ----------
+        function _connectLtpWs(profile, apiKey) {
+            if (_ltpWs.conn && _ltpWs.conn.readyState < 2) {
+                // Nullify handlers BEFORE closing so the stale onclose doesn't
+                // fire with intentionalClose=false and trigger a reconnect loop.
+                const stale = _ltpWs.conn;
+                stale.onopen = stale.onclose = stale.onerror = stale.onmessage = null;
+                stale.close();
+            }
+
+            let ws;
+            try {
+                ws = new WebSocket(profile.ws_url);
+            } catch (e) {
+                // Bad URL — try next
+                setTimeout(_tryNextProfile, 0);
+                return;
+            }
+
+            _ltpWs.conn = ws;
+            _ltpWs.connecting = false;  // conn is now set; guard no longer needed
+            _ltpWs.authenticated = false;
+            _ltpWs.activeProfileId = profile.id;
+
+            ws.onopen = () => {
+                _setWsStatus(`Authenticating… (${profile.profile_name})`, '#ffc107');
+                ws.send(JSON.stringify({ action: 'authenticate', api_key: apiKey }));
+            };
+
+            ws.onmessage = (evt) => {
+                const raw = evt.data;
+                if (raw === 'ping' || raw === '{"type":"ping"}') { ws.send('pong'); return; }
+                let msg;
+                try { msg = JSON.parse(raw); } catch (_) { return; }
+
+                if (!_ltpWs.authenticated) {
+                    if (msg.status === 'error') {
+                        _setWsStatus('Auth failed', '#dc3545');
+                        ws.close();   // triggers onclose → fallback
+                        return;
+                    }
+                    _ltpWs.authenticated = true;
+                    _setWsStatus(`Connected (${profile.profile_name})`, '#28a745');
+                    _setActiveProfileLabel(profile.profile_name);
+                    document.getElementById('ltp-disconnect-btn').style.display = '';
+                    _clearWsWarning();
+                    _resubscribeAll();
+                    _subscribeSpotSymbols(); // fire-and-forget: subscribe spot index LTPs
+                    return;
+                }
+
+                // LTP update — OpenAlgo wraps tick data under msg.data
+                const sym = (msg.symbol || '').toUpperCase();
+                const ltpRaw = (msg.data != null ? msg.data.ltp : null) ?? msg.ltp ?? null;
+                const ltp = ltpRaw != null ? Number(ltpRaw) : null;
+                if (sym && ltp != null) _applyLtpUpdate(sym, ltp);
+            };
+
+            ws.onerror = () => {
+                // onerror is always followed by onclose — handle fallback there
+                _setWsStatus(`Failed (${profile.profile_name})`, '#dc3545');
+            };
+
+            ws.onclose = () => {
+                _ltpWs.authenticated = false;
+                _ltpWs.conn = null;
+                if (_ltpWs.intentionalClose) {
+                    // User pressed Disconnect
+                    _setWsStatus('Disconnected', '#e0e0e0');
+                    _setActiveProfileLabel('');
+                    document.getElementById('ltp-disconnect-btn').style.display = 'none';
+                    document.querySelectorAll('[id^="ltp-chk-"]').forEach(cb => { cb.checked = false; });
+                    return;
+                }
+                // Unexpected close — try next profile
+                _tryNextProfile();
+            };
+        }
+
+        // ---------- disconnect ----------
+        window.disconnectLtpWs = function () {
+            _ltpWs.intentionalClose = true;
+            _ltpWs.connecting = false;
+            _ltpWs.triedProfileIds = new Set();
+            if (_ltpWs.conn) {
+                _ltpWs.conn.close();
+                _ltpWs.conn = null;  // null immediately so reconnect guard evaluates correctly
+            } else {
+                _setWsStatus('Disconnected', '#e0e0e0');
+                _setActiveProfileLabel('');
+                document.getElementById('ltp-disconnect-btn').style.display = 'none';
+                document.querySelectorAll('[id^="ltp-chk-"]').forEach(cb => { cb.checked = false; });
+            }
+            _ltpWs.expirySubscriptions = {};
+            _clearWsWarning();
+        };
+
+        // ---------- subscribe helpers ----------
+        function _wsExchange(openalgoSym) {
+            const u = (openalgoSym.match(/^([A-Z]+?)\d{2}[A-Z]{3}\d{2}/)?.[1] || '');
+            return ['SENSEX', 'BANKEX'].includes(u) ? 'BFO' : 'NFO';
+        }
+
+        function _sendSubscribe(openalgoSym) {
+            if (!_ltpWs.conn || _ltpWs.conn.readyState !== 1 || !_ltpWs.authenticated) return;
+            _ltpWs.conn.send(JSON.stringify({
+                action: 'subscribe',
+                symbols: [{ symbol: openalgoSym, exchange: _wsExchange(openalgoSym) }],
+                mode: 1
+            }));
+        }
+
+        function _sendUnsubscribe(openalgoSym) {
+            if (!_ltpWs.conn || _ltpWs.conn.readyState !== 1) return;
+            _ltpWs.conn.send(JSON.stringify({
+                action: 'unsubscribe',
+                symbols: [{ symbol: openalgoSym, exchange: _wsExchange(openalgoSym) }],
+                mode: 1
+            }));
+        }
+
+        function _resubscribeAll() {
+            Object.keys(_ltpWs.openalgoToBroker).forEach(_sendSubscribe);
+            // Resubscribe spot index symbols
+            Object.values(_ltpWs.spotSubscriptions).forEach(info => {
+                if (!_ltpWs.conn || _ltpWs.conn.readyState !== 1 || !_ltpWs.authenticated) return;
+                _ltpWs.conn.send(JSON.stringify({
+                    action: 'subscribe',
+                    symbols: [{ symbol: info.openalgo_symbol, exchange: info.exchange }],
+                    mode: 1
+                }));
+            });
+        }
+
+        async function _subscribeSpotSymbols() {
+            const underlyings = [...new Set(
+                [...document.querySelectorAll('[data-spot-underlying]')]
+                    .map(el => el.dataset.spotUnderlying)
+                    .filter(Boolean)
+            )];
+            if (!underlyings.length) return;
+            try {
+                const res = await fetch('/api/openalgo/spot_symbols?underlyings=' + underlyings.join(','));
+                const data = await res.json();
+                if (!data.success) return;
+                data.symbols.forEach(item => {
+                    const oa = item.openalgo_symbol.toUpperCase();
+                    _ltpWs.spotSymToUnderlying[oa] = item.underlying;
+                    _ltpWs.spotSubscriptions[item.underlying] = {
+                        openalgo_symbol: item.openalgo_symbol,
+                        exchange: item.exchange,
+                    };
+                    if (_ltpWs.conn && _ltpWs.conn.readyState === 1 && _ltpWs.authenticated) {
+                        _ltpWs.conn.send(JSON.stringify({
+                            action: 'subscribe',
+                            symbols: [{ symbol: item.openalgo_symbol, exchange: item.exchange }],
+                            mode: 1
+                        }));
+                    }
+                });
+            } catch (_e) { /* fallback: snapshot data already shown */ }
+        }
+
+        // ---------- checkbox toggle ----------
+        window.toggleExpiryLtp = async function (expiryId, underlying, checked) {
+
+            if (checked) {
+                // Ensure connected (skip if a connection attempt is already in flight)
+                if (!_ltpWs.connecting && (!_ltpWs.conn || _ltpWs.conn.readyState >= 2)) {
+                    await _connectWithFallback();
+                }
+
+                // Collect open-position broker symbols from the expiry table (consolidated or non-consolidated)
+                const tbody = document.getElementById(`cons-tbody-${expiryId}`)
+                    || document.getElementById(`etf-tbody-${expiryId}`);
+                if (!tbody) return;
+                const brokerSymsSet = new Set();
+                tbody.querySelectorAll('[data-ltp-cell]').forEach(td => {
+                    const sym = td.dataset.ltpCell;
+                    if (sym) brokerSymsSet.add(sym);
+                });
+                const brokerSyms = [...brokerSymsSet];
+                if (!brokerSyms.length) return;
+
+                _ltpWs.expirySubscriptions[expiryId] = brokerSyms;
+
+                // Convert broker → OpenAlgo symbols
+                try {
+                    const res = await fetch('/api/openalgo/convert_symbols', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            broker_symbols: brokerSyms,
+                            profile_id: _ltpWs.activeProfileId || null
+                        })
+                    });
+                    const data = await res.json();
+                    if (!data.success) return;
+                    data.symbols.forEach(item => {
+                        if (!item.openalgo_symbol) return;
+                        const oa = item.openalgo_symbol.toUpperCase();
+                        const br = item.broker_symbol;
+                        _ltpWs.brokerToOpenalgo[br] = oa;
+                        _ltpWs.brokerSymToExpiry[br] = expiryId;
+                        if (!_ltpWs.openalgoToBroker[oa]) _ltpWs.openalgoToBroker[oa] = new Set();
+                        _ltpWs.openalgoToBroker[oa].add(br);
+                        if (_ltpWs.conn && _ltpWs.conn.readyState === 1 && _ltpWs.authenticated) {
+                            _sendSubscribe(oa);
+                        }
+                    });
+                } catch (e) { console.error('convert_symbols failed', e); }
+
+            } else {
+                // Unsubscribe symbols no longer needed by any checked expiry
+                const brokerSyms = _ltpWs.expirySubscriptions[expiryId] || [];
+                delete _ltpWs.expirySubscriptions[expiryId];
+                const stillNeeded = new Set(Object.values(_ltpWs.expirySubscriptions).flat());
+                brokerSyms.forEach(br => {
+                    if (stillNeeded.has(br)) return;
+                    const oa = _ltpWs.brokerToOpenalgo[br];
+                    if (!oa) return;
+                    _sendUnsubscribe(oa);
+                    if (_ltpWs.openalgoToBroker[oa]) {
+                        _ltpWs.openalgoToBroker[oa].delete(br);
+                        if (_ltpWs.openalgoToBroker[oa].size === 0) delete _ltpWs.openalgoToBroker[oa];
+                    }
+                    delete _ltpWs.brokerToOpenalgo[br];
+                });
+            }
+        };
+
+        // ---------- apply spot index LTP update to underlying header ----------
+        function _applySpotLtpUpdate(underlying, ltp) {
+            if (_ltpWs.lastSpotLtp[underlying] === ltp) return;
+            _ltpWs.lastSpotLtp[underlying] = ltp;
+            const ltpStr = ltp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.querySelectorAll(`[data-spot-underlying="${underlying}"]`).forEach(container => {
+                const ltpSpan = container.querySelector('.underlying-ltp');
+                if (ltpSpan) {
+                    ltpSpan.textContent = `₹${ltpStr}`;
+                    ltpSpan.style.color = '#0056b3';
+                    ltpSpan.title = 'Live Spot LTP';
+                }
+                const prevClose = parseFloat(container.dataset.spotPrevClose) || 0;
+                const pctSpan = container.querySelector('.underlying-pct-change');
+                if (pctSpan && prevClose) {
+                    const pct = (ltp - prevClose) / prevClose * 100;
+                    const pctFixed = pct.toFixed(2);
+                    const pctSign = pct >= 0 ? '+' : '';
+                    pctSpan.textContent = `${pctSign}${pctFixed}%`;
+                    pctSpan.style.color = pct >= 0 ? '#155724' : '#721c24';
+                    pctSpan.style.background = pct >= 0 ? '#d4edda' : '#f8d7da';
+                }
+            });
+        }
+
+        // ---------- apply LTP update to DOM ----------
+        function _applyLtpUpdate(openalgoSym, ltp) {
+            // Route spot index symbols to the underlying header
+            const spotUnderlying = _ltpWs.spotSymToUnderlying[openalgoSym];
+            if (spotUnderlying) _applySpotLtpUpdate(spotUnderlying, ltp);
+
+            const brokerSet = _ltpWs.openalgoToBroker[openalgoSym];
+            if (!brokerSet) return;
+            const ltpStr = ltp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const affectedExpiries = new Set();
+            brokerSet.forEach(brokerSym => {
+                // Skip DOM update entirely if value hasn't changed
+                if (_ltpWs.lastLtp[brokerSym] === ltp) return;
+                _ltpWs.lastLtp[brokerSym] = ltp;
+
+                document.querySelectorAll(`[data-ltp-cell="${brokerSym}"]`).forEach(td => {
+                    // Reuse existing span to avoid innerHTML teardown/rebuild (prevents flicker)
+                    let span = td.querySelector('[data-ltp-value]');
+                    if (!span) {
+                        span = document.createElement('span');
+                        span.dataset.ltpValue = '';
+                        span.style.color = '#0056b3';
+                        span.style.fontWeight = '600';
+                        span.title = 'Live LTP';
+                        td.textContent = '';
+                        td.appendChild(span);
+                    }
+                    span.textContent = `LTP: ₹${ltpStr}`;
+
+                    const avgEntry = parseFloat(td.dataset.avgEntry) || 0;
+                    const netQty = parseFloat(td.dataset.netQty) || 0;
+                    if (netQty !== 0) {
+                        const upnl = (ltp - avgEntry) * netQty;
+                        const upnlColor = upnl > 0 ? '#28a745' : (upnl < 0 ? '#dc3545' : '#888');
+                        const upnlStr = upnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                        document.querySelectorAll(`[data-upnl-cell="${brokerSym}"]`).forEach(pnlTd => {
+                            let pnlSpan = pnlTd.querySelector('[data-upnl-value]');
+                            if (!pnlSpan) {
+                                pnlSpan = document.createElement('span');
+                                pnlSpan.dataset.upnlValue = '';
+                                pnlSpan.style.fontWeight = 'bold';
+                                pnlTd.textContent = '';
+                                pnlTd.appendChild(pnlSpan);
+                            }
+                            pnlSpan.style.color = upnlColor;
+                            pnlSpan.textContent = `₹${upnlStr}`;
+                        });
+                    }
+                });
+
+                const eid = _ltpWs.brokerSymToExpiry[brokerSym];
+                if (eid) affectedExpiries.add(eid);
+            });
+
+            // Update expiry header badge and consolidated summary for all affected expiries
+            const pnlColor = v => v > 0 ? '#28a745' : (v < 0 ? '#dc3545' : '#888');
+            affectedExpiries.forEach(expiryId => {
+                // Recalculate total unbooked P&L for this expiry using lastLtp values
+                const seenSyms = new Set();
+                let expiryUpnl = 0;
+                (_ltpWs.expirySubscriptions[expiryId] || []).forEach(sym => {
+                    if (seenSyms.has(sym)) return;
+                    seenSyms.add(sym);
+                    const symLtp = _ltpWs.lastLtp[sym];
+                    if (symLtp == null) return;
+                    const td = document.querySelector(`[data-ltp-cell="${sym}"]`);
+                    if (!td) return;
+                    const avgEntry = parseFloat(td.dataset.avgEntry) || 0;
+                    const netQty = parseFloat(td.dataset.netQty) || 0;
+                    if (netQty !== 0) expiryUpnl += (symLtp - avgEntry) * netQty;
+                });
+                const upnlColor = pnlColor(expiryUpnl);
+                const upnlStr0 = fmtNum(expiryUpnl, 0);
+                const upnlStr2 = fmtNum(expiryUpnl, 2);
+
+                // Header badge (compact stats)
+                const badgeUnbkd = document.getElementById(`expiry-badge-unbkd-${expiryId}`);
+                if (badgeUnbkd) { badgeUnbkd.textContent = `₹${upnlStr0}`; badgeUnbkd.style.color = upnlColor; }
+                const badgeTotal = document.getElementById(`expiry-badge-total-${expiryId}`);
+                const badgeBkd = document.getElementById(`expiry-badge-bkd-${expiryId}`);
+                if (badgeTotal && badgeBkd) {
+                    const booked = parseFloat(badgeBkd.dataset.value) || 0;  // data-value avoids locale parsing
+                    const newTotal = booked + expiryUpnl;
+                    badgeTotal.textContent = `₹${fmtNum(newTotal, 0)}`;
+                    badgeTotal.style.color = pnlColor(newTotal);
+                }
+
+                // Consolidated summary row
+                const consUnbkd = document.getElementById(`cons-badge-unbkd-${expiryId}`);
+                if (consUnbkd) { consUnbkd.textContent = `₹${upnlStr2}`; consUnbkd.style.color = upnlColor; }
+            });
+
+            // Update global summary cards (Total Unbooked, Gross, Net P&L)
+            const unbookedCard = document.getElementById('summary-card-unbooked');
+            const grossCard    = document.getElementById('summary-card-gross');
+            const netCard      = document.getElementById('summary-card-net');
+            if (unbookedCard || grossCard || netCard) {
+                // Sum live unbooked P&L across all subscribed positions (deduped by brokerSym)
+                const seenGlobal = new Set();
+                let totalUnbooked = 0;
+                Object.values(_ltpWs.expirySubscriptions).forEach(syms => {
+                    (syms || []).forEach(sym => {
+                        if (seenGlobal.has(sym)) return;
+                        seenGlobal.add(sym);
+                        const symLtp = _ltpWs.lastLtp[sym];
+                        if (symLtp == null) return;
+                        const td = document.querySelector(`[data-ltp-cell="${sym}"]`);
+                        if (!td) return;
+                        const avgEntry = parseFloat(td.dataset.avgEntry) || 0;
+                        const netQty   = parseFloat(td.dataset.netQty) || 0;
+                        if (netQty !== 0) totalUnbooked += (symLtp - avgEntry) * netQty;
+                    });
+                });
+                const totalUnbookedStr = `₹${fmtNum(totalUnbooked, 0)}`;
+                const unbookedCls = totalUnbooked > 0 ? 'val-pos' : (totalUnbooked < 0 ? 'val-neg' : 'val-neu');
+                if (unbookedCard) { unbookedCard.textContent = totalUnbookedStr; unbookedCard.className = `metric-value ${unbookedCls}`; }
+
+                if (grossCard) {
+                    // Read static booked P&L via data-value (avoids locale-sensitive text parsing)
+                    const bookedCard = document.getElementById('summary-card-booked');
+                    const booked     = parseFloat(bookedCard?.dataset.value) || 0;
+                    const gross      = booked + totalUnbooked;
+                    const grossCls   = gross > 0 ? 'val-pos' : (gross < 0 ? 'val-neg' : 'val-neu');
+                    grossCard.textContent = `₹${fmtNum(gross, 0)}`;
+                    grossCard.className   = `metric-value ${grossCls}`;
+
+                    if (netCard) {
+                        const brokCard = document.getElementById('summary-card-brokerage');
+                        const brok     = parseFloat(brokCard?.dataset.value) || 0;
+                        const net      = gross - brok;
+                        const netCls   = net > 0 ? 'val-pos' : (net < 0 ? 'val-neg' : 'val-neu');
+                        netCard.textContent = `₹${fmtNum(net, 0)}`;
+                        netCard.className   = `metric-value ${netCls}`;
+                    }
+                }
+            }
+        }
+
+        // ---------- global "Live LTP (All Open Positions)" checkbox ----------
+        window.toggleAllLtp = async function(checked) {
+            const countEl = document.getElementById('ltp-all-count');
+            if (checked) {
+                // Find all per-expiry LTP checkboxes (id="ltp-chk-<expiryId>")
+                const expiryChks = document.querySelectorAll('[id^="ltp-chk-"]');
+                if (!expiryChks.length) {
+                    if (countEl) countEl.textContent = 'No open positions found';
+                    document.getElementById('ltp-subscribe-all').checked = false;
+                    return;
+                }
+                // Fire each per-expiry checkbox change if not already checked
+                // Use sequential await to avoid race on the WS connection
+                for (const chk of expiryChks) {
+                    if (!chk.checked) {
+                        chk.checked = true;
+                        // Extract expiryId and underlying from the onchange attribute
+                        // toggleExpiryLtp is already window-scoped; trigger via event
+                        chk.dispatchEvent(new Event('change'));
+                        // Small yield to let async toggleExpiryLtp start without blocking the loop
+                        await new Promise(r => setTimeout(r, 0));
+                    }
+                }
+                // Subscription counts update asynchronously (each toggleExpiryLtp awaits a fetch).
+                // Poll once after a short delay so the displayed count is accurate.
+                if (countEl) countEl.textContent = 'Subscribing…';
+                setTimeout(() => {
+                    const allSyms = new Set(Object.values(_ltpWs.expirySubscriptions).flat());
+                    const n = allSyms.size;
+                    if (countEl) countEl.textContent = n > 0 ? `${n} symbol${n !== 1 ? 's' : ''} subscribed` : '';
+                }, 3000);
+            } else {
+                // Uncheck all per-expiry checkboxes
+                document.querySelectorAll('[id^="ltp-chk-"]').forEach(chk => {
+                    if (chk.checked) {
+                        chk.checked = false;
+                        chk.dispatchEvent(new Event('change'));
+                    }
+                });
+                if (countEl) countEl.textContent = '';
+            }
+        };
+
+        // Sync global checkbox when all per-expiry checkboxes are manually toggled
+        document.addEventListener('change', function(evt) {
+            const chk = evt.target;
+            if (!chk.id || !chk.id.startsWith('ltp-chk-')) return;
+            const globalChk = document.getElementById('ltp-subscribe-all');
+            if (!globalChk) return;
+            const allChks = document.querySelectorAll('[id^="ltp-chk-"]');
+            const allChecked = [...allChks].every(c => c.checked);
+            const noneChecked = [...allChks].every(c => !c.checked);
+            if (allChecked)        { globalChk.indeterminate = false; globalChk.checked = true; }
+            else if (noneChecked)  { globalChk.indeterminate = false; globalChk.checked = false; }
+            else                   { globalChk.indeterminate = true; }  // some but not all checked
+        });
+
+        // init
+        document.addEventListener('DOMContentLoaded', _loadLtpProfiles);
     })();
     </script>
 

@@ -19,8 +19,8 @@ The entry point of the application, listing all tracked profiles.
 A detailed timeline showing exactly when changes were detected.
 ![Daily View](https://github.com/Raahi-Bhushan/trading-algo/blob/main/sensibull/assets/sensibull_details_popup_walkthrough_1765520300012.webp)
 
-### Position Details Popup
-Clicking "View Details" on any timeline entry opens a popup that prioritizes **Recent Changes**. It clearly separates what was just Added, Removed, or Modified before showing the Overall Position.
+### Position Details (Timeline)
+Clicking "View Details" on a **Daily Timeline** entry expands an inline section on the page that shows **Recent Changes** (Added, Removed, Modified). It no longer opens a popup for timeline entries and does not include the Overall Position table in that inline view.
 ![Popup Details](https://github.com/Raahi-Bhushan/trading-algo/blob/main/sensibull/assets/sensibull_popup_noprice_verification_1765523585229.webp)
 
 ### Daily Change Log

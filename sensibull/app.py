@@ -12,6 +12,12 @@ import sqlite3
 import json
 import requests as http_requests
 
+try:
+    from openalgo import api as _OpenAlgoAPI
+    _OPENALGO_SDK_AVAILABLE = True
+except ImportError:
+    _OPENALGO_SDK_AVAILABLE = False
+
 def _json_loads(value):
     """Parse JSON string or return value as-is if already deserialized (Supabase)."""
     if isinstance(value, (dict, list)):
@@ -1556,6 +1562,8 @@ def api_profile_symbol_lifecycle(slug):
         return jsonify({'error': 'symbol is required', 'events': []}), 400
 
     symbol_norm = symbol.upper()
+    m = re.match(r'^[A-Z&-]+', symbol_norm)
+    symbol_underlying = m.group(0) if m else symbol_norm
 
     conn = get_db()
     c = conn.cursor()
@@ -1593,6 +1601,32 @@ def api_profile_symbol_lifecycle(slug):
         except Exception:
             raw = {}
 
+        # Best-effort event-time underlying spot for this symbol in this snapshot.
+        # First, try exact trade-symbol membership inside an underlying bucket.
+        # If not found, fall back to underlying-name match. If still missing,
+        # EXITED rows can use last seen spot from state.
+        snapshot_spot_price = None
+        for item in raw.get('data', []):
+            raw_spot = item.get('underlying_price')
+            if raw_spot is None:
+                continue
+
+            item_match = False
+            for tr in (item.get('trades') or []):
+                if (tr.get('trading_symbol') or '').upper() == symbol_norm:
+                    item_match = True
+                    break
+            if not item_match:
+                item_sym = (item.get('trading_symbol') or '').upper()
+                item_match = (item_sym == symbol_underlying)
+            if not item_match:
+                continue
+            try:
+                snapshot_spot_price = float(raw_spot)
+            except (TypeError, ValueError):
+                snapshot_spot_price = None
+            break
+
         trades_map = normalize_trades_for_diff(raw.get('data', []))
 
         matching_keys = []
@@ -1622,6 +1656,7 @@ def api_profile_symbol_lifecycle(slug):
                 'present': False,
                 'last_trade': None,
                 'last_good_trade': None,
+                'last_spot_price': None,
             }
 
             prev_present = bool(st.get('present'))
@@ -1699,6 +1734,7 @@ def api_profile_symbol_lifecycle(slug):
                     'type': event_type,
                     'symbol': symbol_norm,
                     'product': product_val,
+                    'spot_price': snapshot_spot_price if snapshot_spot_price is not None else st.get('last_spot_price'),
                     'expiry_date': _parse_expiry_from_symbol(symbol_norm),
                     'before_quantity': before_qty,
                     'after_quantity': after_qty,
@@ -1718,6 +1754,8 @@ def api_profile_symbol_lifecycle(slug):
             # Persist updated state
             st['present'] = curr_present
             st['last_trade'] = curr_trade if curr_trade is not None else None
+            if snapshot_spot_price is not None:
+                st['last_spot_price'] = snapshot_spot_price
             state[key] = st
 
     conn.close()
@@ -2948,8 +2986,8 @@ def subscribe():
                 VALUES (?, ?, ?, ?, ?, ?)
                 RETURNING id
             """, (profile_id, subscription_type, underlying, expiry, position_id_str, now_ist().isoformat()))
-            conn.commit()
             subscription_id = last_insert_id(c)
+            conn.commit()
             conn.close()
 
             return jsonify({'success': True, 'message': 'Subscription created successfully', 'subscription_id': subscription_id})
@@ -3115,6 +3153,29 @@ def mask_api_key(api_key):
     if len(key) <= 8:
         return '*' * len(key)
     return f"{key[:6]}...{key[-4:]}"
+
+# Underlyings that trade on BSE exchanges (not NSE)
+_BSE_OPTION_UNDERLYINGS = frozenset({'SENSEX', 'BANKEX'})
+_BSE_SPOT_UNDERLYINGS = frozenset({'SENSEX', 'BANKEX'})
+
+def _extract_underlying_from_openalgo_symbol(symbol):
+    """Extract underlying name from an OpenAlgo-format option symbol like NIFTY26MAR2522500CE."""
+    m = re.match(r'^([A-Z]+?)\d{2}[A-Z]{3}\d{2}', (symbol or '').upper())
+    return m.group(1) if m else ''
+
+def _get_option_exchange_for_placeorder(openalgo_symbol):
+    """Returns 'BSE' for SENSEX/BANKEX options, 'NFO' for all others."""
+    underlying = _extract_underlying_from_openalgo_symbol(openalgo_symbol)
+    return 'BSE' if underlying in _BSE_OPTION_UNDERLYINGS else 'NFO'
+
+def get_openalgo_client(profile):
+    """Create an OpenAlgo SDK client from a profile row dict."""
+    if not _OPENALGO_SDK_AVAILABLE:
+        raise RuntimeError("openalgo package not installed. Run: pip install openalgo")
+    return _OpenAlgoAPI(
+        api_key=profile['api_key'],
+        host=normalize_openalgo_host(profile['host'])
+    )
 
 MONTHS = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
 MON3_TO_NUM = {m: i for i, m in enumerate(MONTHS.split("|"), 1)}
@@ -3390,7 +3451,7 @@ def api_get_openalgo_profiles():
     c = conn.cursor()
 
     profiles = c.execute("""
-        SELECT id, profile_name, host, api_key, is_active, created_at, updated_at
+        SELECT id, profile_name, host, api_key, ws_url, is_ws_default, is_active, created_at, updated_at
         FROM openalgo_profiles
         WHERE is_active = 1
         ORDER BY profile_name
@@ -3403,6 +3464,8 @@ def api_get_openalgo_profiles():
             'id': row['id'],
             'profile_name': row['profile_name'],
             'host': row['host'],
+            'ws_url': row['ws_url'] or '',
+            'is_ws_default': bool(row['is_ws_default']),
             'api_key_masked': mask_api_key(row['api_key']),
             'is_active': bool(row['is_active']),
             'created_at': row['created_at'],
@@ -3421,6 +3484,7 @@ def api_create_openalgo_profile():
     profile_name = (data.get('profile_name') or '').strip()
     host = normalize_openalgo_host(data.get('host'))
     api_key = (data.get('api_key') or '').strip()
+    ws_url = (data.get('ws_url') or '').strip()
 
     if not profile_name:
         return jsonify({'success': False, 'error': 'Profile name is required'}), 400
@@ -3435,14 +3499,14 @@ def api_create_openalgo_profile():
     c = conn.cursor()
     try:
         c.execute("""
-            INSERT INTO openalgo_profiles (profile_name, host, api_key, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, 1, ?, ?)
+            INSERT INTO openalgo_profiles (profile_name, host, api_key, ws_url, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
             RETURNING id
-        """, (profile_name, host, api_key, now_ist().isoformat(), now_ist().isoformat()))
-        conn.commit()
+        """, (profile_name, host, api_key, ws_url, now_ist().isoformat(), now_ist().isoformat()))
         profile_id = last_insert_id(c)
+        conn.commit()
         created = c.execute("""
-            SELECT id, profile_name, host, api_key, is_active, created_at, updated_at
+            SELECT id, profile_name, host, api_key, ws_url, is_active, created_at, updated_at
             FROM openalgo_profiles
             WHERE id = ?
         """, (profile_id,)).fetchone()
@@ -3454,6 +3518,7 @@ def api_create_openalgo_profile():
                 'id': created['id'],
                 'profile_name': created['profile_name'],
                 'host': created['host'],
+                'ws_url': created['ws_url'] or '',
                 'api_key_masked': mask_api_key(created['api_key']),
                 'is_active': bool(created['is_active']),
                 'created_at': created['created_at'],
@@ -3466,6 +3531,249 @@ def api_create_openalgo_profile():
     except sqlite3.Error as exc:
         conn.close()
         return jsonify({'success': False, 'error': f'Database error: {str(exc)}'}), 500
+
+@app.route('/api/openalgo/profiles/<int:profile_id>', methods=['PUT'])
+@login_required
+def api_update_openalgo_profile(profile_id):
+    """Update an existing OpenAlgo profile."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+
+    profile_name = (data.get('profile_name') or '').strip()
+    host = normalize_openalgo_host(data.get('host'))
+    api_key_input = (data.get('api_key') or '').strip()
+    ws_url = (data.get('ws_url') or '').strip()
+
+    if not profile_name:
+        return jsonify({'success': False, 'error': 'Profile name is required'}), 400
+    if not host:
+        return jsonify({'success': False, 'error': 'Host is required'}), 400
+    if not is_valid_host_url(host):
+        return jsonify({'success': False, 'error': 'Host must be a valid http/https URL'}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    # fetchall() fully consumes the SQLite statement handle; fetchone() leaves it
+    # open and causes "SQL statements in progress" when conn.commit() is called later.
+    rows = c.execute(
+        "SELECT id, api_key FROM openalgo_profiles WHERE id = ? AND is_active = 1", (profile_id,)
+    ).fetchall()
+    existing = rows[0] if rows else None
+    if not existing:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+
+    # If the submitted api_key matches the masked value or is empty, keep the existing key
+    current_masked = mask_api_key(existing['api_key'])
+    if not api_key_input or api_key_input == current_masked:
+        api_key = existing['api_key']
+    else:
+        api_key = api_key_input
+
+    try:
+        c.execute("""
+            UPDATE openalgo_profiles
+            SET profile_name = ?, host = ?, api_key = ?, ws_url = ?, updated_at = ?
+            WHERE id = ?
+        """, (profile_name, host, api_key, ws_url, now_ist().isoformat(), profile_id))
+        conn.commit()
+        updated = c.execute("""
+            SELECT id, profile_name, host, api_key, ws_url, is_ws_default, is_active, created_at, updated_at
+            FROM openalgo_profiles WHERE id = ?
+        """, (profile_id,)).fetchone()
+        conn.close()
+        return jsonify({
+            'success': True,
+            'message': 'Profile updated successfully',
+            'profile': {
+                'id': updated['id'],
+                'profile_name': updated['profile_name'],
+                'host': updated['host'],
+                'ws_url': updated['ws_url'] or '',
+                'is_ws_default': bool(updated['is_ws_default']),
+                'api_key_masked': mask_api_key(updated['api_key']),
+                'created_at': updated['created_at'],
+                'updated_at': updated['updated_at']
+            }
+        })
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile name already exists'}), 400
+    except sqlite3.Error as exc:
+        conn.close()
+        return jsonify({'success': False, 'error': f'Database error: {str(exc)}'}), 500
+
+@app.route('/api/openalgo/profiles/<int:profile_id>', methods=['DELETE'])
+@login_required
+def api_delete_openalgo_profile(profile_id):
+    """Delete (soft-delete) an OpenAlgo profile."""
+    conn = get_db()
+    c = conn.cursor()
+    rows = c.execute(
+        "SELECT id, profile_name FROM openalgo_profiles WHERE id = ? AND is_active = 1", (profile_id,)
+    ).fetchall()
+    existing = rows[0] if rows else None
+    if not existing:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+    c.execute("UPDATE openalgo_profiles SET is_active = 0 WHERE id = ?", (profile_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'message': f'Profile "{existing["profile_name"]}" deleted'})
+
+@app.route('/api/openalgo/active_profile', methods=['GET'])
+@login_required
+def api_openalgo_active_profile():
+    """Return an active OpenAlgo profile with api_key + ws_url (for WS use).
+
+    Optional query param ?profile_id=X fetches that specific profile.
+    Without it, returns the first active profile ordered by id.
+    """
+    profile_id = request.args.get('profile_id', type=int)
+    conn = get_db()
+    c = conn.cursor()
+    if profile_id:
+        profile = c.execute("""
+            SELECT id, profile_name, host, api_key, ws_url, is_ws_default
+            FROM openalgo_profiles
+            WHERE id = ? AND is_active = 1
+        """, (profile_id,)).fetchone()
+    else:
+        # Default WS profile first, then fall back to any active profile
+        profile = c.execute("""
+            SELECT id, profile_name, host, api_key, ws_url, is_ws_default
+            FROM openalgo_profiles
+            WHERE is_active = 1
+            ORDER BY is_ws_default DESC, id ASC
+            LIMIT 1
+        """).fetchone()
+    conn.close()
+    if not profile:
+        return jsonify({'success': False, 'error': 'No active OpenAlgo profile found'}), 404
+    return jsonify({
+        'success': True,
+        'profile': {
+            'id': profile['id'],
+            'profile_name': profile['profile_name'],
+            'host': profile['host'],
+            'api_key': profile['api_key'],
+            'ws_url': profile['ws_url'] or '',
+            'is_ws_default': bool(profile['is_ws_default'])
+        }
+    })
+
+@app.route('/api/openalgo/profiles/<int:profile_id>/set_ws_default', methods=['POST'])
+@login_required
+def api_openalgo_set_ws_default(profile_id):
+    """Mark a profile as the default for WebSocket LTP. Clears the flag on all others."""
+    conn = get_db()
+    c = conn.cursor()
+    # Verify profile exists and is active — use fetchall() to fully consume the cursor
+    # before the subsequent UPDATE+commit (fetchone() leaves the statement open).
+    rows = c.execute("""
+        SELECT id, profile_name FROM openalgo_profiles WHERE id = ? AND is_active = 1
+    """, (profile_id,)).fetchall()
+    profile = rows[0] if rows else None
+    if not profile:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+    # Clear all, then set the chosen one
+    c.execute("UPDATE openalgo_profiles SET is_ws_default = 0")
+    c.execute("UPDATE openalgo_profiles SET is_ws_default = 1 WHERE id = ?", (profile_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'message': f'{profile["profile_name"]} set as WS default'})
+
+@app.route('/api/openalgo/profiles/clear_ws_default', methods=['POST'])
+@login_required
+def api_openalgo_clear_ws_default():
+    """Clear the WS default flag from all profiles."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("UPDATE openalgo_profiles SET is_ws_default = 0")
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/openalgo/convert_symbols', methods=['POST'])
+@login_required
+def api_openalgo_convert_symbols():
+    """Convert broker symbols to OpenAlgo symbols and return their WS exchange codes."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Invalid JSON'}), 400
+
+    broker_symbols = data.get('broker_symbols', [])
+    profile_id = data.get('profile_id')
+
+    if not broker_symbols:
+        return jsonify({'success': True, 'symbols': []}), 200
+
+    holiday_api_url = ''
+    holiday_api_key = ''
+    if profile_id:
+        conn = get_db()
+        c = conn.cursor()
+        p = c.execute("""
+            SELECT host, api_key FROM openalgo_profiles WHERE id = ? AND is_active = 1
+        """, (profile_id,)).fetchone()
+        conn.close()
+        if p:
+            holiday_api_url = _build_profile_holiday_api_url(p['host'])
+            holiday_api_key = p['api_key']
+
+    results = []
+    for broker_sym in broker_symbols:
+        try:
+            openalgo_sym = convert_broker_symbol_to_openalgo_symbol(
+                broker_sym,
+                holiday_api_url=holiday_api_url,
+                holiday_api_key=holiday_api_key
+            )
+            underlying = _extract_underlying_from_openalgo_symbol(openalgo_sym)
+            exchange_ws = 'BFO' if underlying in _BSE_OPTION_UNDERLYINGS else 'NFO'
+            results.append({
+                'broker_symbol': broker_sym,
+                'openalgo_symbol': openalgo_sym,
+                'exchange_ws': exchange_ws
+            })
+        except Exception as exc:
+            results.append({
+                'broker_symbol': broker_sym,
+                'openalgo_symbol': '',
+                'exchange_ws': 'NFO',
+                'error': str(exc)
+            })
+
+    return jsonify({'success': True, 'symbols': results})
+
+_UNDERLYING_TO_SPOT_SYMBOL = {
+    'NIFTY':       {'exchange': 'NSE', 'symbol': 'Nifty 50'},
+    'BANKNIFTY':   {'exchange': 'NSE', 'symbol': 'Nifty Bank'},
+    'FINNIFTY':    {'exchange': 'NSE', 'symbol': 'Nifty Fin Service'},
+    'MIDCPNIFTY':  {'exchange': 'NSE', 'symbol': 'NIFTY MID SELECT'},
+    'SENSEX':      {'exchange': 'BSE', 'symbol': 'SENSEX'},
+    'BANKEX':      {'exchange': 'BSE', 'symbol': 'BANKEX'},
+}
+
+@app.route('/api/openalgo/spot_symbols')
+@login_required
+def api_openalgo_spot_symbols():
+    """Return OpenAlgo exchange+symbol for each requested underlying (for spot LTP WebSocket)."""
+    raw = request.args.get('underlyings', '')
+    underlyings = [u.strip().upper() for u in raw.split(',') if u.strip()]
+    results = []
+    for u in underlyings:
+        info = _UNDERLYING_TO_SPOT_SYMBOL.get(u)
+        if info:
+            results.append({
+                'underlying': u,
+                'openalgo_symbol': info['symbol'],
+                'exchange': info['exchange'],
+            })
+    return jsonify({'success': True, 'symbols': results})
+
 
 @app.route('/api/openalgo/host_status', methods=['GET'])
 @login_required
@@ -3570,11 +3878,10 @@ def api_openalgo_place_order():
         return jsonify({'success': False, 'error': 'quantity must be greater than 0'}), 400
 
     host = normalize_openalgo_host(profile['host'])
-    order_url = f"{host}/api/v1/placeorder"
+    exchange = _get_option_exchange_for_placeorder(openalgo_symbol)
     order_payload = {
-        'apikey': profile['api_key'],
         'symbol': openalgo_symbol,
-        'exchange': 'NFO',
+        'exchange': exchange,
         'action': action,
         'product': 'NRML',
         'pricetype': 'MARKET',
@@ -3584,18 +3891,18 @@ def api_openalgo_place_order():
     }
 
     try:
-        response = http_requests.post(
-            order_url,
-            headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
-            json=order_payload,
-            timeout=12
+        client = get_openalgo_client(profile)
+        response_data = client.placeorder(
+            symbol=openalgo_symbol,
+            exchange=exchange,
+            action=action,
+            product='NRML',
+            pricetype='MARKET',
+            strategy='from sensibull tracker',
+            quantity=str(quantity),
+            price='0'
         )
-        try:
-            response_data = response.json()
-        except ValueError:
-            response_data = {'raw_response': response.text}
-
-        success = response.ok
+        success = isinstance(response_data, dict) and response_data.get('status') == 'success'
         return jsonify({
             'success': success,
             'message': 'Order placed successfully' if success else 'OpenAlgo rejected order',
@@ -3611,10 +3918,9 @@ def api_openalgo_place_order():
                 'holiday_api_url': profile_holiday_api_url or MARKET_HOLIDAYS_API_URL
             },
             'order_payload': order_payload,
-            'response_status_code': response.status_code,
             'response_data': response_data
         }), (200 if success else 502)
-    except http_requests.RequestException as exc:
+    except Exception as exc:
         return jsonify({
             'success': False,
             'message': 'Failed to reach OpenAlgo host',
@@ -4364,8 +4670,8 @@ def api_add_profile():
             RETURNING id
         """, (slug, name, url, url, now_ist().isoformat()))
 
-        conn.commit()
         profile_id = last_insert_id(c)
+        conn.commit()
 
         profile = c.execute("""
             SELECT id, slug, name, source_url, is_active, added_at
