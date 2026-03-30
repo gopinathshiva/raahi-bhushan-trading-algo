@@ -136,7 +136,21 @@ def migrate_database():
         migrations_applied += 1
         print("    ✓ Created 'openalgo_profiles' table")
 
-    # Migration 6: Fix position_changes timestamps stored as UTC (+00) → convert to IST (+05:30)
+    # Migration 6: Add ws_url column to openalgo_profiles
+    if table_exists(c, 'openalgo_profiles') and not column_exists(c, 'openalgo_profiles', 'ws_url'):
+        print("  - Adding 'ws_url' column to 'openalgo_profiles' table...")
+        c.execute("ALTER TABLE openalgo_profiles ADD COLUMN ws_url TEXT DEFAULT ''")
+        migrations_applied += 1
+        print("    ✓ Added 'ws_url' column")
+
+    # Migration 7: Add is_ws_default column to openalgo_profiles
+    if table_exists(c, 'openalgo_profiles') and not column_exists(c, 'openalgo_profiles', 'is_ws_default'):
+        print("  - Adding 'is_ws_default' column to 'openalgo_profiles' table...")
+        c.execute("ALTER TABLE openalgo_profiles ADD COLUMN is_ws_default INTEGER DEFAULT 0")
+        migrations_applied += 1
+        print("    ✓ Added 'is_ws_default' column")
+
+    # Migration 8: Fix position_changes timestamps stored as UTC (+00) → convert to IST (+05:30)
     # Root cause: during the Supabase migration window, psycopg2 normalized now_ist() datetime
     # objects to UTC instead of preserving IST. This caused ORDER BY timestamp to sort those
     # entries as earlier than IST entries from the same day, hiding them in the daily timeline.

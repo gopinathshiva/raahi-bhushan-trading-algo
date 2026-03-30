@@ -8,25 +8,16 @@
 
 {% block head %}
 <style>
-    .container {
-        max-width: 980px;
-        margin: 0 auto;
-        padding: 20px;
-    }
+    .container { max-width: 1080px; margin: 0 auto; padding: 20px; }
 
     .section {
         background: #fff;
         border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         padding: 20px;
         margin-bottom: 20px;
     }
-
-    .section h2 {
-        margin-top: 0;
-        margin-bottom: 16px;
-        color: #222;
-    }
+    .section h2 { margin-top: 0; margin-bottom: 16px; color: #222; }
 
     .grid {
         display: grid;
@@ -35,91 +26,63 @@
         align-items: end;
     }
 
-    .form-group label {
-        display: block;
-        font-size: 13px;
-        color: #555;
-        margin-bottom: 6px;
-    }
-
+    .form-group label { display: block; font-size: 13px; color: #555; margin-bottom: 6px; }
     .form-group input {
-        width: 100%;
-        border: 1px solid #d7d7d7;
-        border-radius: 6px;
-        padding: 10px;
-        font-size: 14px;
+        width: 100%; border: 1px solid #d7d7d7; border-radius: 6px;
+        padding: 8px 10px; font-size: 14px; box-sizing: border-box;
+    }
+    .form-group input:focus { outline: none; border-color: #007bff; box-shadow: 0 0 0 2px rgba(0,123,255,0.15); }
+
+    .btn { border: none; border-radius: 5px; padding: 7px 13px; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: #007bff; color: #fff; }
+    .btn-primary:hover { background: #0069d9; }
+    .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
+    .btn-success { background: #28a745; color: #fff; }
+    .btn-success:hover { background: #218838; }
+    .btn-danger  { background: #dc3545; color: #fff; }
+    .btn-danger:hover  { background: #c82333; }
+    .btn-secondary { background: #6c757d; color: #fff; }
+    .btn-secondary:hover { background: #5a6268; }
+    .btn-outline { background: #fff; border: 1px solid #0056b3; color: #0056b3; }
+    .btn-outline:hover { background: #e8f0fe; }
+    .btn-outline.active { background: #0056b3; color: #fff; }
+    .btn-sm { padding: 4px 9px; font-size: 12px; }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #ececec; padding: 9px 10px; text-align: left; font-size: 13px; }
+    th { background: #f8f9fa; font-weight: 600; font-size: 13px; }
+    tr:hover td { background: #fafafa; }
+    tr.editing td { background: #fffde7; }
+
+    .status { margin-top: 12px; font-size: 13px; padding: 10px; border-radius: 6px; display: none; }
+    .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; display: block; }
+    .status.error   { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; display: block; }
+
+    .empty { color: #777; text-align: center; padding: 14px; }
+
+    .ws-badge {
+        display: inline-block; background: #0056b3; color: #fff;
+        font-size: 10px; font-weight: 700; padding: 1px 6px;
+        border-radius: 9px; margin-left: 5px; vertical-align: middle;
     }
 
-    .btn-primary {
-        border: none;
-        border-radius: 6px;
-        background: #007bff;
-        color: #fff;
-        padding: 10px 14px;
-        cursor: pointer;
-        font-size: 14px;
+    .edit-input {
+        width: 100%; border: 1px solid #adb5bd; border-radius: 4px;
+        padding: 5px 7px; font-size: 13px; box-sizing: border-box;
     }
+    .edit-input:focus { outline: none; border-color: #007bff; }
 
-    .btn-primary:disabled {
-        opacity: 0.65;
-        cursor: not-allowed;
-    }
-
-    .table-wrap {
-        overflow-x: auto;
-    }
-
-    table {
-        width: 100%;
-        border-collapse: collapse;
-    }
-
-    th, td {
-        border-bottom: 1px solid #ececec;
-        padding: 10px;
-        text-align: left;
-        font-size: 14px;
-    }
-
-    th {
-        background: #f8f9fa;
-        font-weight: 600;
-    }
-
-    .status {
-        margin-top: 12px;
-        font-size: 13px;
-        padding: 10px;
-        border-radius: 6px;
-        display: none;
-    }
-
-    .status.success {
-        background: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
-        display: block;
-    }
-
-    .status.error {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
-        display: block;
-    }
-
-    .empty {
-        color: #777;
-        text-align: center;
-        padding: 14px;
-    }
+    .action-btns { display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container">
+
+    <!-- Create Form -->
     <div class="section">
-        <h2>⚡ Create OpenAlgo Profile</h2>
+        <h2>⚡ Add OpenAlgo Profile</h2>
         <div class="grid">
             <div class="form-group">
                 <label for="profileName">Profile Name</label>
@@ -134,122 +97,246 @@
                 <input id="apiKey" type="text" placeholder="OpenAlgo API key" />
             </div>
             <div class="form-group">
-                <button class="btn-primary" id="saveBtn" onclick="createProfile()">Save Profile</button>
+                <label for="wsUrl">WebSocket URL <span style="color:#888;font-weight:normal;">(for live LTP)</span></label>
+                <input id="wsUrl" type="text" placeholder="e.g., ws://127.0.0.1:8765" />
+            </div>
+            <div class="form-group" style="display:flex;align-items:flex-end;">
+                <button class="btn btn-primary" id="saveBtn" onclick="createProfile()" style="width:100%;padding:9px 14px;font-size:14px;">Save Profile</button>
             </div>
         </div>
         <div id="formStatus" class="status"></div>
     </div>
 
+    <!-- Profiles Table -->
     <div class="section">
         <h2>Saved OpenAlgo Profiles</h2>
+        <p style="font-size:13px;color:#666;margin-top:0;margin-bottom:14px;">
+            Click <strong>Edit</strong> to modify a profile. Use <strong>Set as WS Default</strong> to choose which profile
+            drives Live LTP in trade views — other profiles are used as fallback automatically.
+        </p>
         <div class="table-wrap">
-            <table>
+            <table id="profilesTable">
                 <thead>
                     <tr>
                         <th>Name</th>
                         <th>Host</th>
+                        <th>WS URL</th>
                         <th>API Key</th>
-                        <th>Created</th>
+                        <th style="text-align:center;">Live LTP</th>
+                        <th style="text-align:center;white-space:nowrap;">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="profilesBody">
-                    <tr><td colspan="4" class="empty">Loading profiles...</td></tr>
+                    <tr><td colspan="6" class="empty">Loading…</td></tr>
                 </tbody>
             </table>
         </div>
+        <div id="tableStatus" class="status" style="margin-top:10px;"></div>
     </div>
+
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    function showFormStatus(message, type = 'success') {
-        const status = document.getElementById('formStatus');
-        status.className = `status ${type}`;
-        status.textContent = message;
+(function () {
+    'use strict';
+
+    let _profiles = [];
+    let _editingId = null;
+
+    // ── status helpers ─────────────────────────────────────────────────
+    function showStatus(elId, msg, type) {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        el.className = `status ${type}`;
+        el.textContent = msg;
+        if (type === 'success') setTimeout(() => { el.className = 'status'; }, 3500);
     }
 
-    function clearForm() {
-        document.getElementById('profileName').value = '';
-        document.getElementById('host').value = '';
-        document.getElementById('apiKey').value = '';
-    }
-
-    function formatDateTime(timestamp) {
-        if (!timestamp) return '-';
-        const dt = new Date(timestamp);
-        return dt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-    }
-
+    // ── load & render ──────────────────────────────────────────────────
     async function loadProfiles() {
         const body = document.getElementById('profilesBody');
         try {
-            const response = await fetch('/api/openalgo/profiles');
-            const data = await response.json();
-            if (!data.success) {
-                body.innerHTML = '<tr><td colspan="4" class="empty">Failed to load profiles</td></tr>';
-                return;
-            }
-
-            if (!data.profiles.length) {
-                body.innerHTML = '<tr><td colspan="4" class="empty">No OpenAlgo profiles saved yet</td></tr>';
-                return;
-            }
-
-            body.innerHTML = data.profiles.map(profile => `
-                <tr>
-                    <td>${profile.profile_name}</td>
-                    <td>${profile.host}</td>
-                    <td><code>${profile.api_key_masked}</code></td>
-                    <td>${formatDateTime(profile.created_at)}</td>
-                </tr>
-            `).join('');
-        } catch (error) {
-            console.error('Error loading OpenAlgo profiles:', error);
-            body.innerHTML = '<tr><td colspan="4" class="empty">Error loading profiles</td></tr>';
+            const res = await fetch('/api/openalgo/profiles');
+            const data = await res.json();
+            if (!data.success) { body.innerHTML = '<tr><td colspan="6" class="empty">Failed to load profiles</td></tr>'; return; }
+            _profiles = data.profiles;
+            renderProfiles();
+        } catch (e) {
+            body.innerHTML = '<tr><td colspan="6" class="empty">Error loading profiles</td></tr>';
         }
     }
 
-    async function createProfile() {
-        const profileName = document.getElementById('profileName').value.trim();
-        const host = document.getElementById('host').value.trim();
-        const apiKey = document.getElementById('apiKey').value.trim();
+    function renderProfiles() {
+        const body = document.getElementById('profilesBody');
+        if (!_profiles.length) {
+            body.innerHTML = '<tr><td colspan="6" class="empty">No OpenAlgo profiles saved yet</td></tr>';
+            return;
+        }
+        body.innerHTML = _profiles.map(p => renderRow(p)).join('');
+    }
 
-        if (!profileName || !host || !apiKey) {
-            showFormStatus('Profile name, host and API key are required.', 'error');
+    function renderRow(p) {
+        const wsBadge = p.is_ws_default ? '<span class="ws-badge">WS Default</span>' : '';
+        const wsBtn = p.ws_url
+            ? `<button class="btn btn-sm btn-outline ${p.is_ws_default ? 'active' : ''}" onclick="setWsDefault(${p.id})">${p.is_ws_default ? '✓ WS Default' : 'Set WS Default'}</button>`
+            : `<button class="btn btn-sm btn-outline" disabled title="Set a WS URL first">Set WS Default</button>`;
+        const wsDisplay = p.ws_url
+            ? `<code style="font-size:11px;">${p.ws_url}</code>`
+            : '<span style="color:#aaa;">—</span>';
+        return `
+        <tr id="row-${p.id}">
+            <td>${escHtml(p.profile_name)}${wsBadge}</td>
+            <td style="font-size:12px;">${escHtml(p.host)}</td>
+            <td>${wsDisplay}</td>
+            <td><code style="font-size:12px;">${escHtml(p.api_key_masked)}</code></td>
+            <td style="text-align:center;">${wsBtn}</td>
+            <td style="text-align:center;">
+                <div class="action-btns">
+                    <button class="btn btn-sm btn-secondary" onclick="startEdit(${p.id})">Edit</button>
+                    <button class="btn btn-sm btn-danger"    onclick="deleteProfile(${p.id})">Delete</button>
+                </div>
+            </td>
+        </tr>`;
+    }
+
+    function renderEditRow(p) {
+        return `
+        <tr id="row-${p.id}" class="editing">
+            <td><input class="edit-input" id="edit-name-${p.id}"   value="${escAttr(p.profile_name)}" placeholder="Profile name" /></td>
+            <td><input class="edit-input" id="edit-host-${p.id}"   value="${escAttr(p.host)}"         placeholder="http://..." /></td>
+            <td><input class="edit-input" id="edit-wsurl-${p.id}"  value="${escAttr(p.ws_url || '')}"  placeholder="ws://..." /></td>
+            <td><input class="edit-input" id="edit-apikey-${p.id}" value="${escAttr(p.api_key_masked)}" placeholder="Enter new key (leave masked to keep current)" /></td>
+            <td style="text-align:center; color:#888; font-size:12px;">—</td>
+            <td style="text-align:center;">
+                <div class="action-btns">
+                    <button class="btn btn-sm btn-success"   onclick="saveEdit(${p.id})">Save</button>
+                    <button class="btn btn-sm btn-secondary" onclick="cancelEdit(${p.id})">Cancel</button>
+                </div>
+            </td>
+        </tr>`;
+    }
+
+    // ── edit helpers ───────────────────────────────────────────────────
+    window.startEdit = function (id) {
+        if (_editingId && _editingId !== id) cancelEdit(_editingId);
+        _editingId = id;
+        const p = _profiles.find(x => x.id === id);
+        if (!p) return;
+        const row = document.getElementById(`row-${id}`);
+        if (row) row.outerHTML = renderEditRow(p);
+        document.getElementById(`edit-name-${id}`)?.focus();
+    };
+
+    window.cancelEdit = function (id) {
+        _editingId = null;
+        const p = _profiles.find(x => x.id === id);
+        if (!p) return;
+        const row = document.getElementById(`row-${id}`);
+        if (row) row.outerHTML = renderRow(p);
+    };
+
+    window.saveEdit = async function (id) {
+        const name   = document.getElementById(`edit-name-${id}`)?.value.trim();
+        const host   = document.getElementById(`edit-host-${id}`)?.value.trim();
+        const wsUrl  = document.getElementById(`edit-wsurl-${id}`)?.value.trim();
+        const apiKeyRaw = document.getElementById(`edit-apikey-${id}`)?.value.trim();
+
+        if (!name || !host) { showStatus('tableStatus', 'Name and host are required.', 'error'); return; }
+
+        // Send the raw value; backend detects masked value and keeps the existing key
+        const payload = { profile_name: name, host, ws_url: wsUrl, api_key: apiKeyRaw };
+
+        try {
+            const res = await fetch(`/api/openalgo/profiles/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                showStatus('tableStatus', data.error || 'Failed to update profile', 'error');
+                return;
+            }
+            _editingId = null;
+            showStatus('tableStatus', data.message, 'success');
+            await loadProfiles();
+        } catch (e) {
+            showStatus('tableStatus', 'Failed to update profile', 'error');
+        }
+    };
+
+    // ── delete ─────────────────────────────────────────────────────────
+    window.deleteProfile = async function (id) {
+        const p = _profiles.find(x => x.id === id);
+        if (!confirm(`Delete profile "${p?.profile_name}"? This cannot be undone.`)) return;
+        try {
+            const res = await fetch(`/api/openalgo/profiles/${id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok || !data.success) { showStatus('tableStatus', data.error || 'Failed to delete', 'error'); return; }
+            showStatus('tableStatus', data.message, 'success');
+            await loadProfiles();
+        } catch (e) {
+            showStatus('tableStatus', 'Failed to delete profile', 'error');
+        }
+    };
+
+    // ── WS default ─────────────────────────────────────────────────────
+    window.setWsDefault = async function (id) {
+        try {
+            const res = await fetch(`/api/openalgo/profiles/${id}/set_ws_default`, { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok || !data.success) { showStatus('tableStatus', data.error || 'Failed', 'error'); return; }
+            showStatus('tableStatus', data.message, 'success');
+            await loadProfiles();
+        } catch (e) {
+            showStatus('tableStatus', 'Failed to update WS default', 'error');
+        }
+    };
+
+    // ── create ─────────────────────────────────────────────────────────
+    window.createProfile = async function () {
+        const name   = document.getElementById('profileName').value.trim();
+        const host   = document.getElementById('host').value.trim();
+        const apiKey = document.getElementById('apiKey').value.trim();
+        const wsUrl  = document.getElementById('wsUrl').value.trim();
+
+        if (!name || !host || !apiKey) {
+            showStatus('formStatus', 'Profile name, host and API key are required.', 'error');
             return;
         }
 
-        const saveBtn = document.getElementById('saveBtn');
-        saveBtn.disabled = true;
+        const btn = document.getElementById('saveBtn');
+        btn.disabled = true;
         try {
-            const response = await fetch('/api/openalgo/profiles', {
+            const res = await fetch('/api/openalgo/profiles', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    profile_name: profileName,
-                    host,
-                    api_key: apiKey
-                })
+                body: JSON.stringify({ profile_name: name, host, api_key: apiKey, ws_url: wsUrl })
             });
-            const data = await response.json();
-
-            if (!response.ok || !data.success) {
-                showFormStatus(data.error || 'Failed to save profile', 'error');
-                return;
-            }
-
-            showFormStatus('OpenAlgo profile saved successfully.', 'success');
-            clearForm();
+            const data = await res.json();
+            if (!res.ok || !data.success) { showStatus('formStatus', data.error || 'Failed to save profile', 'error'); return; }
+            showStatus('formStatus', 'Profile saved successfully.', 'success');
+            document.getElementById('profileName').value = '';
+            document.getElementById('host').value = '';
+            document.getElementById('apiKey').value = '';
+            document.getElementById('wsUrl').value = '';
             await loadProfiles();
-        } catch (error) {
-            console.error('Error creating OpenAlgo profile:', error);
-            showFormStatus('Failed to save OpenAlgo profile.', 'error');
+        } catch (e) {
+            showStatus('formStatus', 'Failed to save OpenAlgo profile.', 'error');
         } finally {
-            saveBtn.disabled = false;
+            btn.disabled = false;
         }
-    }
+    };
 
-    window.addEventListener('DOMContentLoaded', loadProfiles);
+    // ── utils ──────────────────────────────────────────────────────────
+    function escHtml(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function escAttr(s) { return escHtml(s); }
+
+    document.addEventListener('DOMContentLoaded', loadProfiles);
+})();
 </script>
 {% endblock %}

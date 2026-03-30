@@ -153,6 +153,8 @@ def init_db():
             profile_name TEXT UNIQUE NOT NULL,
             host TEXT NOT NULL,
             api_key TEXT NOT NULL,
+            ws_url TEXT DEFAULT '',
+            is_ws_default INTEGER DEFAULT 0,
             is_active INTEGER DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

@@ -191,21 +191,19 @@ def last_insert_id(cursor) -> int:
     """
     Return the ID of the last inserted row in a portable way.
 
-    SQLite:    cursor.lastrowid works after a plain INSERT.
-    Supabase:  requires RETURNING id in the INSERT statement;
-               call cursor.fetchone()[0] (or ['id']) after the execute.
-               This helper reads from fetchone() for the Supabase path.
+    For SQLite: uses cursor.lastrowid (no RETURNING needed).
+    For Supabase/PostgreSQL: reads the RETURNING id row from the cursor.
     """
-    if BACKEND == 'supabase':
-        row = cursor.fetchone()
-        if row is None:
-            raise RuntimeError("last_insert_id: no row returned — did you add RETURNING id to the INSERT?")
-        # RealDictCursor returns a dict-like; support both dict and tuple access
-        try:
-            return row['id']
-        except (KeyError, TypeError):
-            return row[0]
-    return cursor.lastrowid
+    if BACKEND != 'supabase':
+        return cursor.lastrowid
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("last_insert_id: no row returned — did you add RETURNING id to the INSERT?")
+    # RealDictCursor (Supabase) and sqlite3.Row (SQLite) both support dict-style access
+    try:
+        return row['id']
+    except (KeyError, TypeError):
+        return row[0]
 
 
 # Expose BACKEND for other modules that need to branch on it.
