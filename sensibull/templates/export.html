@@ -10,60 +10,92 @@
 <style>
     .export-wrapper {
         max-width: 600px;
-        margin: 50px auto;
-        padding: 0 20px;
+        margin: 24px auto;
     }
 
     .export-card {
-        background: white;
-        padding: 40px 30px;
-        border-radius: 10px;
-        box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        background: #fff;
+        padding: 28px 24px;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 2px rgba(15,23,42,0.06);
         text-align: center;
     }
 
-    .export-icon { font-size: 4rem; margin-bottom: 20px; }
+    .stack-24 { margin-top: 24px; }
 
-    .export-card h2 { margin: 0 0 16px; color: #333; }
+    .export-icon { font-size: 2rem; margin-bottom: 12px; }
 
-    .export-card p { color: #666; margin-bottom: 20px; }
+    .export-card h2 { margin: 0 0 10px; color: #0f172a; font-size: 1.2rem; }
+
+    .export-card p { color: #64748b; margin-bottom: 16px; }
 
     .alert {
         padding: 12px 16px;
-        border-radius: 6px;
-        margin-bottom: 20px;
+        border-radius: 10px;
+        margin-bottom: 16px;
         text-align: left;
-        font-size: 0.9em;
+        font-size: 0.9rem;
     }
 
-    .alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    .alert-info { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; }
 
     .btn-download {
         display: inline-block;
-        padding: 14px 32px;
-        background: #007bff;
-        color: white;
+        padding: 11px 18px;
+        background: #4f46e5;
+        color: #fff;
+        border: 1px solid #4338ca;
         text-decoration: none;
-        border-radius: 6px;
-        font-size: 1.1rem;
+        border-radius: 10px;
+        font-size: 0.95rem;
         font-weight: 600;
-        transition: background 0.2s;
+        transition: background-color 130ms ease, transform 130ms ease, box-shadow 130ms ease;
     }
-    .btn-download:hover { background: #0056b3; color: white; text-decoration: none; }
+
+    .btn-download:hover {
+        background: #4338ca;
+        color: #fff;
+        text-decoration: none;
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(79,70,229,0.24);
+    }
 
     hr { margin: 30px 0; border: none; border-top: 1px solid #eee; }
 
     .db-info { text-align: left; }
-    .db-info h5 { margin-bottom: 10px; color: #333; }
-    .db-info ul { list-style: none; padding: 0; margin: 0; color: #555; }
+    .db-info h5 { margin-bottom: 10px; color: #0f172a; }
+    .db-info ul { list-style: none; padding: 0; margin: 0; color: #64748b; }
     .db-info li { padding: 4px 0; }
+
+    .date-fields {
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .date-fields label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+        color: #475569;
+        font-size: 13px;
+        text-align: left;
+    }
+
+    .range-note {
+        margin-top: 16px;
+        text-align: left;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="export-wrapper">
     <div class="export-card">
-        <div class="export-icon">⬇️</div>
+        <div class="export-icon">Export</div>
         <h2>Export Database</h2>
         <p>
             Download the complete database file (<strong>sensibull.db</strong>) containing all profiles,
@@ -74,7 +106,7 @@
             ℹ️ <strong>Note:</strong> This file can be imported into another instance of the application.
         </div>
 
-        <a href="{{ url_for('export_download') }}" class="btn-download">⬇ Download Database</a>
+        <a href="{{ url_for('export_download') }}" class="btn-download">Download Database</a>
 
         <hr>
 
@@ -88,8 +120,8 @@
     </div>
 
     <!-- Date Range Export -->
-    <div class="export-card" style="margin-top: 24px;">
-        <div class="export-icon">📅</div>
+    <div class="export-card stack-24">
+        <div class="export-icon">Date Range</div>
         <h2>Export Date Range</h2>
         <p>
             Download a filtered database containing only data from a specific date range.
@@ -97,24 +129,22 @@
         </p>
 
         <form method="POST" action="{{ url_for('export_download_range') }}" id="rangeForm">
-            <div style="display: flex; gap: 16px; justify-content: center; margin-bottom: 20px; flex-wrap: wrap;">
+            <div class="date-fields">
                 <div>
-                    <label for="from_date" style="display: block; margin-bottom: 4px; font-weight: 600;">From</label>
+                    <label for="from_date">From</label>
                     <input type="date" id="from_date" name="from_date" required
-                           value="{{ default_from }}"
-                           style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem;">
+                           value="{{ default_from }}">
                 </div>
                 <div>
-                    <label for="to_date" style="display: block; margin-bottom: 4px; font-weight: 600;">To</label>
+                    <label for="to_date">To</label>
                     <input type="date" id="to_date" name="to_date" required
-                           value="{{ default_to }}"
-                           style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem;">
+                           value="{{ default_to }}">
                 </div>
             </div>
-            <button type="submit" class="btn-download" id="rangeBtn">⬇ Download Range</button>
+            <button type="submit" class="btn-download" id="rangeBtn">Download Range</button>
         </form>
 
-        <div class="alert alert-info" style="margin-top: 16px; text-align: left;">
+        <div class="alert alert-info range-note">
             ℹ️ <strong>What's included:</strong> Snapshots, position changes, notifications,
             and AI chat history for the selected date range. Profiles, subscriptions, and
             admin users are always included. Maximum recommended range: 30 days.

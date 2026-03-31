@@ -5,78 +5,108 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Sensibull Tracker{% endblock %}</title>
     <style>
-        /* ===================== RESET & BASE ===================== */
+        @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+        :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-soft: #f3f6fb;
+            --text: #111827;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --accent: #4f46e5;
+            --accent-soft: #eef2ff;
+            --success: #15803d;
+            --danger: #dc2626;
+            --warning: #ca8a04;
+            --radius-sm: 8px;
+            --radius-md: 10px;
+            --radius-lg: 12px;
+            --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+            --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+            --space-1: 8px;
+            --space-2: 16px;
+            --space-3: 24px;
+            --space-4: 32px;
+        }
+
         *, *::before, *::after { box-sizing: border-box; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             margin: 0;
             padding: 0;
-            background: #f4f4f9;
-            color: #333;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
         }
 
-        /* ===================== NAVBAR ===================== */
+        h1, h2, h3, h4 { margin: 0; line-height: 1.25; }
+        p { margin: 0; color: var(--text-muted); }
+        a { color: var(--accent); transition: color 160ms ease; }
+        a:hover { color: #3730a3; }
+
         .nav {
-            background: #1a1a2e;
-            color: #fff;
             position: sticky;
             top: 0;
             z-index: 1000;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border);
         }
 
         .nav-inner {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 20px;
-            height: 56px;
-            max-width: 100%;
+            gap: var(--space-2);
+            padding: 0 var(--space-2);
+            height: 60px;
+            max-width: 1280px;
+            margin: 0 auto;
         }
 
-        /* Brand */
         .nav-brand {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--space-1);
             text-decoration: none;
-            color: #fff;
-            font-size: 1.1rem;
+            color: var(--text);
+            font-size: 1rem;
             font-weight: 700;
             white-space: nowrap;
-            flex-shrink: 0;
+            letter-spacing: -0.01em;
         }
 
-        .nav-brand:hover { color: #7eb8f7; }
+        .nav-brand:hover { color: var(--accent); }
 
-        /* Hamburger toggle — hidden on desktop */
         .nav-toggle {
             display: none;
             flex-direction: column;
-            gap: 5px;
+            gap: 4px;
             cursor: pointer;
             padding: 6px;
             border: none;
             background: none;
+            border-radius: var(--radius-sm);
             flex-shrink: 0;
         }
 
         .nav-toggle span {
             display: block;
-            width: 24px;
+            width: 20px;
             height: 2px;
-            background: #fff;
+            background: #334155;
             border-radius: 2px;
-            transition: all 0.25s;
+            transition: all 220ms ease;
         }
 
-        /* Toggle → X animation */
-        .nav-toggle.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+        .nav-toggle.open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
         .nav-toggle.open span:nth-child(2) { opacity: 0; }
-        .nav-toggle.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+        .nav-toggle.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
-        /* Nav links container */
         .nav-links {
             display: flex;
             align-items: center;
@@ -89,131 +119,179 @@
         .nav-links a {
             display: block;
             padding: 8px 12px;
-            color: #ccc;
+            color: #475569;
             text-decoration: none;
-            border-radius: 6px;
-            font-size: 0.9rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.87rem;
             font-weight: 500;
             white-space: nowrap;
-            transition: background 0.15s, color 0.15s;
+            transition: background-color 140ms ease, color 140ms ease;
         }
 
-        .nav-links a:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        .nav-links a:hover {
+            background: #eef2ff;
+            color: #312e81;
+        }
 
         .nav-links a.active {
-            background: #007bff;
-            color: #fff;
+            background: var(--accent-soft);
+            color: #312e81;
+            font-weight: 600;
         }
 
-        /* Divider between main links and user section */
         .nav-divider {
             width: 1px;
-            height: 28px;
-            background: rgba(255,255,255,0.2);
-            margin: 0 6px;
+            height: 24px;
+            background: var(--border);
+            margin: 0 4px;
             flex-shrink: 0;
         }
 
         .nav-user {
-            font-size: 0.85rem;
-            color: #aaa;
+            font-size: 0.84rem;
+            color: var(--text-muted);
             padding: 8px 10px;
             white-space: nowrap;
         }
 
-        .nav-logout {
-            color: #ff7b7b !important;
-        }
-
+        .nav-logout { color: #b91c1c !important; }
         .nav-logout:hover {
-            background: rgba(255, 80, 80, 0.15) !important;
-            color: #ff9999 !important;
+            background: #fee2e2 !important;
+            color: #991b1b !important;
         }
 
         .db-badge {
             display: inline-flex;
             align-items: center;
-            gap: 5px;
-            padding: 3px 10px;
-            border-radius: 12px;
-            font-size: 0.75rem;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.74rem;
             font-weight: 700;
-            letter-spacing: 0.03em;
+            letter-spacing: 0.02em;
             white-space: nowrap;
+            border: 1px solid transparent;
             flex-shrink: 0;
         }
-        .db-badge-sqlite  { background: rgba(255,193,7,0.18); color: #ffc107; border: 1px solid rgba(255,193,7,0.35); }
-        .db-badge-supabase { background: rgba(62,207,142,0.18); color: #3ecf8e; border: 1px solid rgba(62,207,142,0.35); }
 
-        /* ===================== BREADCRUMB ===================== */
+        .db-badge-sqlite {
+            background: #fef3c7;
+            color: #92400e;
+            border-color: #fde68a;
+        }
+
+        .db-badge-supabase {
+            background: #dcfce7;
+            color: #166534;
+            border-color: #86efac;
+        }
+
         .breadcrumb-bar {
-            background: #fff;
-            border-bottom: 1px solid #e0e0e0;
-            padding: 0 20px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.85);
         }
 
         .breadcrumb {
             display: flex;
             align-items: center;
-            gap: 0;
             list-style: none;
-            margin: 0;
-            padding: 10px 0;
-            font-size: 0.85rem;
+            margin: 0 auto;
+            padding: 10px var(--space-2);
+            max-width: 1280px;
+            font-size: 0.82rem;
             flex-wrap: wrap;
         }
 
         .breadcrumb li { display: flex; align-items: center; }
-
         .breadcrumb li + li::before {
             content: "›";
             margin: 0 8px;
-            color: #aaa;
-            font-size: 1.1em;
+            color: #94a3b8;
+            font-size: 1em;
             line-height: 1;
         }
 
-        .breadcrumb a {
-            color: #007bff;
-            text-decoration: none;
-        }
+        .breadcrumb a { text-decoration: none; color: #475569; }
+        .breadcrumb a:hover { color: #1e293b; }
+        .breadcrumb .current { color: #0f172a; font-weight: 600; }
 
-        .breadcrumb a:hover { text-decoration: underline; }
-
-        .breadcrumb .current {
-            color: #555;
-            font-weight: 600;
-        }
-
-        /* ===================== PAGE CONTENT ===================== */
         .page-content {
-            /* Pages manage their own padding / width */
+            width: 100%;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: var(--space-3) var(--space-2) var(--space-4);
         }
 
-        /* ===================== RESPONSIVE ===================== */
-        @media (max-width: 768px) {
+        .section,
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn,
+        button {
+            border-radius: var(--radius-md);
+            transition: all 160ms ease;
+        }
+
+        :where(
+            input[type="text"],
+            input[type="password"],
+            input[type="date"],
+            input[type="email"],
+            input[type="number"],
+            select,
+            textarea
+        ) {
+            border: 1px solid #cbd5e1;
+            border-radius: var(--radius-md);
+            padding: 10px 12px;
+            font-size: 14px;
+            color: #0f172a;
+            background: #fff;
+            transition: border-color 140ms ease, box-shadow 140ms ease;
+        }
+
+        :where(
+            input[type="text"],
+            input[type="password"],
+            input[type="date"],
+            input[type="email"],
+            input[type="number"],
+            select,
+            textarea
+        ):focus {
+            border-color: #818cf8;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+            outline: none;
+        }
+
+        @media (max-width: 820px) {
             .nav-toggle { display: flex; }
 
             .nav-links {
                 display: none;
+                position: absolute;
+                top: 60px;
+                left: 12px;
+                right: 12px;
                 flex-direction: column;
                 align-items: stretch;
-                gap: 0;
-                position: absolute;
-                top: 56px;
-                left: 0;
-                right: 0;
-                background: #1a1a2e;
-                padding: 8px 12px 12px;
-                border-top: 1px solid rgba(255,255,255,0.1);
-                box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+                gap: 2px;
+                padding: 10px;
+                border: 1px solid var(--border);
+                border-radius: var(--radius-lg);
+                background: rgba(255, 255, 255, 0.98);
+                box-shadow: var(--shadow-md);
             }
 
             .nav-links.open { display: flex; }
 
             .nav-links a {
                 padding: 10px 12px;
-                font-size: 1rem;
+                font-size: 0.94rem;
             }
 
             .nav-divider {
@@ -222,9 +300,12 @@
                 margin: 6px 0;
             }
 
-            .nav-user {
-                padding: 10px 12px;
-                font-size: 0.9rem;
+            .page-content {
+                padding: var(--space-2) 12px var(--space-3);
+            }
+
+            .breadcrumb {
+                padding: 8px 12px;
             }
         }
     </style>
@@ -235,9 +316,7 @@
 <!-- ===== NAVBAR ===== -->
 <nav class="nav">
     <div class="nav-inner">
-        <a href="{{ url_for('index') }}" class="nav-brand">
-            📊 Sensibull Tracker
-        </a>
+        <a href="{{ url_for('index') }}" class="nav-brand">Sensibull Tracker</a>
         {% if db_backend == 'supabase' %}
         <span class="db-badge db-badge-supabase">☁ Supabase</span>
         {% else %}
@@ -252,43 +331,43 @@
             <li>
                 <a href="{{ url_for('index') }}"
                    class="{{ 'active' if request.endpoint == 'index' else '' }}">
-                    🏠 Dashboard
+                    Dashboard
                 </a>
             </li>
             <li>
                 <a href="{{ url_for('manage_profiles') }}"
                    class="{{ 'active' if request.endpoint == 'manage_profiles' else '' }}">
-                    👤 Profiles
+                    Profiles
                 </a>
             </li>
             <li>
                 <a href="{{ url_for('openalgo_profiles_page') }}"
                    class="{{ 'active' if request.endpoint == 'openalgo_profiles_page' else '' }}">
-                    ⚡ OpenAlgo
+                    OpenAlgo
                 </a>
             </li>
             <li>
                 <a href="{{ url_for('historical_data') }}"
                    class="{{ 'active' if request.endpoint == 'historical_data' else '' }}">
-                    📈 Historical Data
+                    Historical Data
                 </a>
             </li>
             <li>
                 <a href="{{ url_for('export_page') }}"
                    class="{{ 'active' if request.endpoint == 'export_page' else '' }}">
-                    ⬇ Export
+                    Export
                 </a>
             </li>
             <li>
                 <a href="{{ url_for('import_page') }}"
                    class="{{ 'active' if request.endpoint == 'import_page' else '' }}">
-                    ⬆ Import
+                    Import
                 </a>
             </li>
             <li>
                 <a href="{{ url_for('sync_page') }}"
                    class="{{ 'active' if request.endpoint in ('sync_page', 'sync_run') else '' }}">
-                    🔄 Sync
+                    Sync
                 </a>
             </li>
 
@@ -296,10 +375,10 @@
 
             {% if current_user.is_authenticated %}
             <li>
-                <span class="nav-user">👤 {{ current_user.username }}</span>
+                <span class="nav-user">{{ current_user.username }}</span>
             </li>
             <li>
-                <a href="{{ url_for('logout') }}" class="nav-logout">🚪 Logout</a>
+                <a href="{{ url_for('logout') }}" class="nav-logout">Logout</a>
             </li>
             {% endif %}
         </ul>

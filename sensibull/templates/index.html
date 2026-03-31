@@ -8,54 +8,325 @@
 
 {% block head %}
 <style>
-    .container {
+    .dashboard-container {
         width: 100%;
-        margin: 0;
-        padding: 20px;
-        box-sizing: border-box;
     }
 
-    @media (max-width: 600px) {
-        .container { padding: 12px; }
+    .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
     }
 
-    h1 { color: #333; }
+    .dashboard-title {
+        font-size: clamp(1.25rem, 2.4vw, 1.8rem);
+        letter-spacing: -0.02em;
+    }
 
-    table {
-        border-collapse: collapse;
-        width: 100%;
+    .header-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .btn {
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+    }
+
+    .btn:hover {
+        transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+        cursor: not-allowed;
+        transform: none;
+        opacity: 0.75;
+    }
+
+    .btn-accent {
+        background: #4f46e5;
+        border-color: #4338ca;
+        color: #fff;
+    }
+
+    .btn-accent:hover {
+        background: #4338ca;
+        box-shadow: 0 8px 18px rgba(79, 70, 229, 0.24);
+    }
+
+    .btn-success {
+        background: #15803d;
+        border-color: #166534;
+        color: #fff;
+    }
+
+    .btn-success:hover {
+        background: #166534;
+        box-shadow: 0 8px 18px rgba(22, 101, 52, 0.2);
+    }
+
+    .btn-danger {
+        background: #dc2626;
+        border-color: #b91c1c;
+        color: #fff;
+    }
+
+    .btn-danger:hover {
+        background: #b91c1c;
+        box-shadow: 0 8px 18px rgba(185, 28, 28, 0.2);
+    }
+
+    .status-line {
+        margin-bottom: 16px;
+        color: #64748b;
+        font-size: 0.9rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .status-pill {
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 4px 10px;
+        border: 1px solid transparent;
+    }
+
+    .status-pill-ok {
+        color: #166534;
+        background: #dcfce7;
+        border-color: #86efac;
+    }
+
+    .status-pill-error {
+        color: #991b1b;
+        background: #fee2e2;
+        border-color: #fecaca;
+    }
+
+    .table-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
         background: #fff;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+        overflow: hidden;
     }
 
-    th, td {
+    .table-scroll {
+        overflow-x: auto;
+        width: 100%;
+    }
+
+    .matrix-table {
+        border-collapse: separate;
+        border-spacing: 0;
+        width: 100%;
+        min-width: 720px;
+    }
+
+    .matrix-table th,
+    .matrix-table td {
         padding: 12px;
         text-align: center;
-        border-bottom: 1px solid #ddd;
+        border-bottom: 1px solid #e2e8f0;
+        background: #fff;
     }
 
-    th { background: #eee; }
-    tr:hover { background: #f1f1f1; }
+    .matrix-table thead th {
+        background: #f8fafc;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 600;
+    }
 
-    a {
+    .matrix-table tr:hover td {
+        background: #f8fafc;
+    }
+
+    .sticky-profile-head {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: #f8fafc !important;
+    }
+
+    .sticky-profile-cell {
+        position: sticky;
+        left: 0;
+        z-index: 1;
+        text-align: left !important;
+        white-space: nowrap;
+        border-right: 1px solid #e2e8f0;
+        font-weight: 600;
+    }
+
+    .profile-name-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .notification-link {
         text-decoration: none;
-        color: #007bff;
-        font-weight: bold;
+        position: relative;
+        display: inline-flex;
+        color: #475569;
     }
 
-    a:hover { text-decoration: underline; }
+    .notification-link:hover {
+        color: #1e293b;
+    }
 
-    .zero { color: #ccc; font-weight: normal; }
+    .notification-badge {
+        display: none;
+        position: absolute;
+        top: -8px;
+        right: -10px;
+        background: #dc2626;
+        color: #fff;
+        border-radius: 999px;
+        padding: 2px 6px;
+        font-size: 11px;
+        font-weight: 700;
+        min-width: 16px;
+        text-align: center;
+        line-height: 1;
+    }
+
+    .load-btn {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        color: #334155;
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .load-btn:hover {
+        background: #eef2ff;
+        border-color: #c7d2fe;
+    }
+
+    .cell-link {
+        text-decoration: none;
+        color: #4338ca;
+        font-weight: 600;
+    }
+
+    .cell-link:hover {
+        text-decoration: underline;
+    }
+
+    .pnl-value {
+        font-size: 0.82rem;
+        margin-top: 4px;
+        font-weight: 600;
+    }
+
+    .pnl-positive { color: #15803d; }
+    .pnl-negative { color: #b91c1c; }
+    .pnl-neutral { color: #64748b; }
+    .zero { color: #94a3b8; }
+
+    .date-delete-btn {
+        cursor: pointer;
+        margin-left: 6px;
+        color: #dc2626;
+        opacity: 0.8;
+        transition: opacity 120ms ease;
+    }
+
+    .date-delete-btn:hover {
+        opacity: 1;
+    }
+
+    .status-modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.42);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+    }
+
+    .status-modal-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        max-width: 620px;
+        width: 100%;
+        box-shadow: 0 24px 56px rgba(15, 23, 42, 0.2);
+        padding: 24px;
+    }
+
+    .status-modal-title {
+        margin-top: 0;
+        margin-bottom: 16px;
+    }
+
+    .status-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .status-row-label {
+        min-width: 180px;
+        font-weight: 600;
+        color: #334155;
+    }
+
+    .chip {
+        padding: 4px 12px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .chip-ok { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .chip-bad { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+    .chip-warn { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+
+    .status-modal-actions {
+        margin-top: 16px;
+        text-align: right;
+    }
+
+    .btn-ghost {
+        background: #f8fafc;
+        color: #334155;
+        border: 1px solid #cbd5e1;
+    }
+
+    .btn-ghost:hover {
+        background: #eef2ff;
+    }
 
     .toast {
         position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: #333;
-        color: white;
-        padding: 15px 20px;
-        border-radius: 4px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        bottom: 16px;
+        right: 16px;
+        background: #0f172a;
+        color: #fff;
+        padding: 12px 16px;
+        border-radius: 10px;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.15);
         display: none;
         z-index: 2000;
         max-width: 360px;
@@ -64,62 +335,60 @@
 
     .toast.show {
         display: block;
-        animation: toastSlideIn 0.3s ease-out;
+        animation: toastSlideIn 0.24s ease-out;
     }
 
-    .toast.error  { background: #dc3545; }
-    .toast.success { background: #28a745; }
+    .toast.error  { background: #b91c1c; }
+    .toast.success { background: #166534; }
 
     @keyframes toastSlideIn {
-        from { transform: translateX(400px); opacity: 0; }
-        to   { transform: translateX(0);    opacity: 1; }
+        from { transform: translateX(120%); opacity: 0; }
+        to   { transform: translateX(0); opacity: 1; }
     }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <h1 style="margin: 0;">Sensibull Tracker Dashboard</h1>
-        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <button onclick="fetchScraperStatus()"
-                style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 15px;">
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h1 class="dashboard-title">Sensibull Tracker Dashboard</h1>
+        <div class="header-actions">
+            <button class="btn btn-accent" onclick="fetchScraperStatus()">
                 Scraper Status
             </button>
-            <button onclick="downloadMasterContract()"
-                style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 15px;">
+            <button class="btn btn-success" onclick="downloadMasterContract(this)">
                 Download Master Contract
             </button>
-            <button onclick="restartApp()"
-                style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 15px;">
+            <button class="btn btn-danger" onclick="restartApp()">
                 Restart Scraper
             </button>
         </div>
     </div>
 
     {% if last_updated %}
-    <div style="color: #666; font-size: 0.9em; margin-top: 8px;">
+    <div class="status-line">
         Last Updated: {{ last_updated | to_datetime | attr('strftime')('%H:%M:%S') }}
         {% if scraper_error %}
-        <span style="color: red; font-weight: bold; margin-left: 10px;">⚠ {{ scraper_error }}</span>
+        <span class="status-pill status-pill-error">{{ scraper_error }}</span>
         {% else %}
-        <span style="color: green; font-weight: bold; margin-left: 10px;">● Scraper Running</span>
+        <span class="status-pill status-pill-ok">Scraper Running</span>
         {% endif %}
     </div>
     {% endif %}
 
     <div id="toast" class="toast"></div>
 
-    <div style="overflow-x: auto; width: 100%; margin-top: 20px;">
-        <table>
+    <div class="table-card">
+        <div class="table-scroll">
+        <table class="matrix-table">
             <thead>
                 <tr>
-                    <th style="position: sticky; left: 0; background: #eee; z-index: 1;">Profile</th>
+                    <th class="sticky-profile-head">Profile</th>
                     {% for date in dates %}
-                    <th style="min-width: 100px;">
+                    <th>
                         {{ date }}
                         <span onclick="deleteDate('{{ date }}')"
-                            style="cursor: pointer; margin-left: 5px; color: #dc3545;"
+                            class="date-delete-btn"
                             title="Delete data for {{ date }}">&#128465;</span>
                     </th>
                     {% endfor %}
@@ -128,19 +397,19 @@
             <tbody>
                 {% for profile in profiles %}
                 <tr id="row-{{ profile.id }}" data-profile-id="{{ profile.id }}" data-profile-slug="{{ profile.slug }}">
-                    <td style="text-align: left; font-weight: bold; position: sticky; left: 0; background: #fff; z-index: 1; border-right: 2px solid #ddd; white-space: nowrap;">
+                    <td class="sticky-profile-cell">
+                        <span class="profile-name-wrap">
                         {{ profile.name }}
-                        <a href="/notifications/{{ profile.slug }}" style="margin-left: 8px; text-decoration: none; position: relative; display: inline-block; vertical-align: middle;">
-                            <span style="font-size: 1.2em;">🔔</span>
+                        <a href="/notifications/{{ profile.slug }}" class="notification-link" title="Notifications">
+                            <span aria-hidden="true">🔔</span>
                             <span class="notification-badge" data-profile-slug="{{ profile.slug }}"
-                                  style="display: none; position: absolute; top: -8px; right: -8px; background: #dc3545; color: white;
-                                         border-radius: 10px; padding: 2px 6px; font-size: 0.7em; font-weight: bold; min-width: 16px;
-                                         text-align: center; line-height: 1;">0</span>
+                                  >0</span>
                         </a>
+                        </span>
                         {% if lazy_rows %}
                         <button onclick="loadProfileRow({{ profile.id }})"
                                 id="load-btn-{{ profile.id }}"
-                                style="margin-left: 8px; padding: 2px 8px; font-size: 0.75em; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; vertical-align: middle;">
+                                class="load-btn">
                             Load
                         </button>
                         {% endif %}
@@ -152,8 +421,8 @@
                         {% else %}
                         {% set val = matrix.get((profile.id, date), {'count': 0, 'pnl': 0}) %}
                         {% if val.count > 0 %}
-                        <a href="{{ url_for('daily_view', slug=profile.slug, date=date) }}" target="_blank">{{ val.count }}</a>
-                        <div style="font-size: 0.85em; margin-top: 4px; font-weight: bold; color: {{ '#28a745' if val.pnl > 0 else '#dc3545' if val.pnl < 0 else '#666' }};">
+                        <a class="cell-link" href="{{ url_for('daily_view', slug=profile.slug, date=date) }}" target="_blank">{{ val.count }}</a>
+                        <div class="pnl-value {{ 'pnl-positive' if val.pnl > 0 else 'pnl-negative' if val.pnl < 0 else 'pnl-neutral' }}">
                             {{ "{:,.1f}".format(val.pnl) }}
                         </div>
                         {% else %}
@@ -166,6 +435,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -180,40 +450,46 @@
     }
 
     function showScraperStatusModal(status) {
+        const safeStatusText = String(status.status_text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
         const modalHTML = `
-            <div id="statusModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;">
-                <div style="background:white;padding:30px;border-radius:10px;max-width:600px;width:90%;box-shadow:0 4px 6px rgba(0,0,0,0.1);">
-                    <h2 style="margin-top:0;color:#333;">Scraper Status</h2>
-                    <div style="margin:20px 0;">
-                        <div style="display:flex;align-items:center;margin-bottom:15px;">
-                            <strong style="min-width:180px;">Status:</strong>
-                            <span style="padding:5px 15px;border-radius:5px;background:${status.running?'#28a745':'#dc3545'};color:white;font-weight:bold;">
+            <div id="statusModal" class="status-modal">
+                <div class="status-modal-card">
+                    <h2 class="status-modal-title">Scraper Status</h2>
+                    <div>
+                        <div class="status-row">
+                            <strong class="status-row-label">Status:</strong>
+                            <span class="chip ${status.running ? 'chip-ok' : 'chip-bad'}">
                                 ${status.running ? '✓ Running' : '✗ Not Running'}
                             </span>
                         </div>
-                        <div style="display:flex;align-items:center;margin-bottom:15px;">
-                            <strong style="min-width:180px;">Market:</strong>
-                            <span style="padding:5px 15px;border-radius:5px;background:${status.market_open?'#28a745':'#ffc107'};color:${status.market_open?'white':'#000'};font-weight:bold;">
+                        <div class="status-row">
+                            <strong class="status-row-label">Market:</strong>
+                            <span class="chip ${status.market_open ? 'chip-ok' : 'chip-warn'}">
                                 ${status.market_open ? 'Open' : 'Closed'}
                             </span>
                         </div>
-                        <div style="display:flex;align-items:start;margin-bottom:15px;">
-                            <strong style="min-width:180px;">Status Text:</strong>
-                            <span style="color:#555;">${status.status_text}</span>
+                        <div class="status-row">
+                            <strong class="status-row-label">Status Text:</strong>
+                            <span>${safeStatusText}</span>
                         </div>
                         ${status.last_updated ? `
-                        <div style="display:flex;align-items:start;margin-bottom:15px;">
-                            <strong style="min-width:180px;">Last Updated:</strong>
-                            <span style="color:#555;">${new Date(status.last_updated).toLocaleString()}</span>
+                        <div class="status-row">
+                            <strong class="status-row-label">Last Updated:</strong>
+                            <span>${new Date(status.last_updated).toLocaleString()}</span>
                         </div>` : ''}
                         ${status.time_since_update !== null && status.time_since_update !== undefined ? `
-                        <div style="display:flex;align-items:start;margin-bottom:15px;">
-                            <strong style="min-width:180px;">Time Since Update:</strong>
-                            <span style="color:#555;">${formatTimeDiff(status.time_since_update)}</span>
+                        <div class="status-row">
+                            <strong class="status-row-label">Time Since Update:</strong>
+                            <span>${formatTimeDiff(status.time_since_update)}</span>
                         </div>` : ''}
                     </div>
-                    <div style="margin-top:20px;text-align:right;">
-                        <button onclick="closeStatusModal()" style="padding:10px 30px;background:#007bff;color:white;border:none;border-radius:5px;cursor:pointer;font-size:16px;">Close</button>
+                    <div class="status-modal-actions">
+                        <button class="btn btn-ghost" onclick="closeStatusModal()">Close</button>
                     </div>
                 </div>
             </div>`;
@@ -232,20 +508,19 @@
         if (modal) modal.remove();
     }
 
-    function downloadMasterContract() {
+    function downloadMasterContract(btn) {
         if (confirm("Download Zerodha Master Contract? This will update the instrument database.")) {
-            const btn = event.target;
             const originalText = btn.innerHTML;
             btn.disabled = true;
             btn.innerHTML = 'Downloading...';
-            btn.style.background = '#6c757d';
+            btn.classList.add('btn-ghost');
 
             fetch('/api/download_master_contract', { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
                     btn.disabled = false;
                     btn.innerHTML = originalText;
-                    btn.style.background = '#28a745';
+                    btn.classList.remove('btn-ghost');
                     if (data.success) {
                         alert(data.message + '\n\nTotal instruments: ' + data.count);
                     } else {
@@ -255,7 +530,7 @@
                 .catch(err => {
                     btn.disabled = false;
                     btn.innerHTML = originalText;
-                    btn.style.background = '#28a745';
+                    btn.classList.remove('btn-ghost');
                     alert("Error downloading master contract: " + err);
                 });
         }
@@ -284,7 +559,7 @@
 
             if (data.error) {
                 btn.textContent = 'Error';
-                btn.style.background = '#dc3545';
+                btn.classList.add('btn-danger');
                 return;
             }
 
@@ -295,14 +570,14 @@
                 const date = td.dataset.date;
                 const cell = cellMap[date];
                 if (cell && cell.count > 0) {
-                    const color = cell.pnl > 0 ? '#28a745' : cell.pnl < 0 ? '#dc3545' : '#666';
                     td.textContent = '';
                     const a = document.createElement('a');
+                    a.className = 'cell-link';
                     a.href = '/profile/' + encodeURIComponent(slug) + '/' + encodeURIComponent(date);
                     a.target = '_blank';
                     a.textContent = cell.count;
                     const div = document.createElement('div');
-                    div.style.cssText = 'font-size:0.85em;margin-top:4px;font-weight:bold;color:' + color;
+                    div.className = 'pnl-value ' + (cell.pnl > 0 ? 'pnl-positive' : cell.pnl < 0 ? 'pnl-negative' : 'pnl-neutral');
                     div.textContent = cell.pnl.toLocaleString('en-IN', {minimumFractionDigits:1, maximumFractionDigits:1});
                     td.appendChild(a);
                     td.appendChild(div);
@@ -317,10 +592,10 @@
 
             btn.textContent = 'Reload';
             btn.disabled = false;
-            btn.style.background = '#6c757d';
+            btn.classList.remove('btn-danger');
         } catch (e) {
             btn.textContent = 'Error';
-            btn.style.background = '#dc3545';
+            btn.classList.add('btn-danger');
             btn.disabled = false;
         }
     }
