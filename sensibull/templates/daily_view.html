@@ -5556,10 +5556,15 @@
 
                 const data = await response.json();
                 if (data.success) {
-                    showToast('✓ ' + data.message, 'success');
+                    const message = data.message || 'Subscription created successfully';
+                    showToast('✓ ' + message, 'success');
                     await loadSubscriptions();
+                } else if (data.success === false) {
+                    const message = data.message || data.error || 'Failed to subscribe';
+                    showToast('ℹ️ ' + message, 'info');
                 } else {
-                    showToast('ℹ️ ' + data.message, 'info');
+                    const message = data.message || data.error || 'Failed to subscribe';
+                    showToast('✗ ' + message, 'error');
                 }
             } catch (error) {
                 console.error('Error subscribing:', error);
@@ -5584,10 +5589,12 @@
 
                 const data = await response.json();
                 if (data.success) {
-                    showToast('✓ ' + data.message, 'success');
+                    const message = data.message || 'Unsubscribed successfully';
+                    showToast('✓ ' + message, 'success');
                     await loadSubscriptions();
                 } else {
-                    showToast('✗ ' + data.message, 'error');
+                    const message = data.message || data.error || 'Failed to unsubscribe';
+                    showToast('✗ ' + message, 'error');
                 }
             } catch (error) {
                 console.error('Error unsubscribing:', error);

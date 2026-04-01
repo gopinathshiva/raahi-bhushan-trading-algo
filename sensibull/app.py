@@ -2948,6 +2948,7 @@ def get_subscriptions():
 @login_required
 def subscribe():
     """Create a new subscription"""
+    conn = None
     try:
         data = request.get_json()
         profile_slug = data.get('profile_slug')
@@ -2959,6 +2960,14 @@ def subscribe():
         if not profile_slug or not subscription_type:
             return jsonify({'error': 'profile_slug and subscription_type are required'}), 400
 
+        # Validate subscription type before opening DB connection.
+        if subscription_type == 'underlying' and not underlying:
+            return jsonify({'error': 'underlying is required for underlying subscription'}), 400
+        elif subscription_type == 'expiry' and (not underlying or not expiry):
+            return jsonify({'error': 'underlying and expiry are required for expiry subscription'}), 400
+        elif subscription_type == 'position' and not position_identifier:
+            return jsonify({'error': 'position_identifier is required for position subscription'}), 400
+
         conn = get_db()
         c = conn.cursor()
 
@@ -2968,39 +2977,39 @@ def subscribe():
             return jsonify({'error': 'Profile not found'}), 404
         profile_id = profile['id']
 
-        # Validate subscription type
-        if subscription_type == 'underlying' and not underlying:
-            return jsonify({'error': 'underlying is required for underlying subscription'}), 400
-        elif subscription_type == 'expiry' and (not underlying or not expiry):
-            return jsonify({'error': 'underlying and expiry are required for expiry subscription'}), 400
-        elif subscription_type == 'position' and not position_identifier:
-            return jsonify({'error': 'position_identifier is required for position subscription'}), 400
-
         # Convert position_identifier to JSON string
         position_id_str = json.dumps(position_identifier) if position_identifier else None
 
         # Insert subscription (UNIQUE constraint will prevent duplicates)
         try:
-            c.execute("""
-                INSERT INTO subscriptions (profile_id, subscription_type, underlying, expiry, position_identifier, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                RETURNING id
-            """, (profile_id, subscription_type, underlying, expiry, position_id_str, now_ist().isoformat()))
+            if BACKEND == 'supabase':
+                c.execute("""
+                    INSERT INTO subscriptions (profile_id, subscription_type, underlying, expiry, position_identifier, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    RETURNING id
+                """, (profile_id, subscription_type, underlying, expiry, position_id_str, now_ist().isoformat()))
+            else:
+                c.execute("""
+                    INSERT INTO subscriptions (profile_id, subscription_type, underlying, expiry, position_identifier, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (profile_id, subscription_type, underlying, expiry, position_id_str, now_ist().isoformat()))
             subscription_id = last_insert_id(c)
             conn.commit()
-            conn.close()
 
             return jsonify({'success': True, 'message': 'Subscription created successfully', 'subscription_id': subscription_id})
         except Exception as e:
             _err = str(e).lower()
             if 'unique' in _err or 'duplicate' in _err:
-                conn.close()
                 return jsonify({'success': False, 'message': 'Already subscribed to this item'})
             raise
 
     except Exception as e:
         print(f"Error creating subscription: {e}")
-        return jsonify({'error': str(e)}), 500
+        error_msg = str(e)
+        return jsonify({'success': False, 'message': error_msg, 'error': error_msg}), 500
+    finally:
+        if conn:
+            conn.close()
 
 @app.route('/api/subscriptions/test_notify', methods=['POST'])
 @login_required
@@ -3100,6 +3109,7 @@ def test_subscription_notify():
 @login_required
 def unsubscribe():
     """Delete a subscription"""
+    conn = None
     try:
         data = request.get_json()
         subscription_id = data.get('subscription_id')
@@ -3114,7 +3124,6 @@ def unsubscribe():
         c.execute("DELETE FROM subscriptions WHERE id = ?", (subscription_id,))
         deleted = c.rowcount
         conn.commit()
-        conn.close()
 
         if deleted > 0:
             return jsonify({'success': True, 'message': 'Unsubscribed successfully'})
@@ -3123,7 +3132,11 @@ def unsubscribe():
 
     except Exception as e:
         print(f"Error unsubscribing: {e}")
-        return jsonify({'error': str(e)}), 500
+        error_msg = str(e)
+        return jsonify({'success': False, 'message': error_msg, 'error': error_msg}), 500
+    finally:
+        if conn:
+            conn.close()
 
 # ==================== OPENALGO HELPERS ====================
 
@@ -3494,14 +3507,21 @@ def api_create_openalgo_profile():
     if not api_key:
         return jsonify({'success': False, 'error': 'API key is required'}), 400
 
-    conn = get_db()
-    c = conn.cursor()
+    conn = None
     try:
-        c.execute("""
-            INSERT INTO openalgo_profiles (profile_name, host, api_key, ws_url, is_active, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 1, ?, ?)
-            RETURNING id
-        """, (profile_name, host, api_key, ws_url, now_ist().isoformat(), now_ist().isoformat()))
+        conn = get_db()
+        c = conn.cursor()
+        if BACKEND == 'supabase':
+            c.execute("""
+                INSERT INTO openalgo_profiles (profile_name, host, api_key, ws_url, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+                RETURNING id
+            """, (profile_name, host, api_key, ws_url, now_ist().isoformat(), now_ist().isoformat()))
+        else:
+            c.execute("""
+                INSERT INTO openalgo_profiles (profile_name, host, api_key, ws_url, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+            """, (profile_name, host, api_key, ws_url, now_ist().isoformat(), now_ist().isoformat()))
         profile_id = last_insert_id(c)
         conn.commit()
         created = c.execute("""
@@ -3509,7 +3529,6 @@ def api_create_openalgo_profile():
             FROM openalgo_profiles
             WHERE id = ?
         """, (profile_id,)).fetchone()
-        conn.close()
         return jsonify({
             'success': True,
             'message': 'OpenAlgo profile created successfully',
@@ -3524,12 +3543,14 @@ def api_create_openalgo_profile():
                 'updated_at': created['updated_at']
             }
         })
-    except sqlite3.IntegrityError:
-        conn.close()
-        return jsonify({'success': False, 'error': 'Profile name already exists'}), 400
-    except sqlite3.Error as exc:
-        conn.close()
+    except Exception as exc:
+        _err = str(exc).lower()
+        if 'unique' in _err or 'duplicate' in _err:
+            return jsonify({'success': False, 'error': 'Profile name already exists'}), 400
         return jsonify({'success': False, 'error': f'Database error: {str(exc)}'}), 500
+    finally:
+        if conn:
+            conn.close()
 
 @app.route('/api/openalgo/profiles/<int:profile_id>', methods=['PUT'])
 @login_required
@@ -4720,19 +4741,26 @@ def api_add_profile():
     if not re.match(r'^[a-z0-9-]+$', slug):
         return jsonify({'success': False, 'error': 'Invalid username format'}), 400
 
-    conn = get_db()
-    c = conn.cursor()
+    conn = None
 
     try:
+        conn = get_db()
+        c = conn.cursor()
         # Construct URL
         url = f"https://web.sensibull.com/portfolio/positions?username={slug}"
         name = slug.replace('-', ' ').title()
 
-        c.execute("""
-            INSERT INTO profiles (slug, name, url, source_url, is_active, added_at)
-            VALUES (?, ?, ?, ?, 1, ?)
-            RETURNING id
-        """, (slug, name, url, url, now_ist().isoformat()))
+        if BACKEND == 'supabase':
+            c.execute("""
+                INSERT INTO profiles (slug, name, url, source_url, is_active, added_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                RETURNING id
+            """, (slug, name, url, url, now_ist().isoformat()))
+        else:
+            c.execute("""
+                INSERT INTO profiles (slug, name, url, source_url, is_active, added_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+            """, (slug, name, url, url, now_ist().isoformat()))
 
         profile_id = last_insert_id(c)
         conn.commit()
@@ -4742,20 +4770,20 @@ def api_add_profile():
             FROM profiles WHERE id = ?
         """, (profile_id,)).fetchone()
 
-        conn.close()
-
         return jsonify({
             'success': True,
             'message': 'Profile added successfully',
             'profile': dict(profile)
         })
 
-    except sqlite3.IntegrityError:
-        conn.close()
-        return jsonify({'success': False, 'error': 'Profile already exists'}), 400
     except Exception as e:
-        conn.close()
+        _err = str(e).lower()
+        if 'unique' in _err or 'duplicate' in _err:
+            return jsonify({'success': False, 'error': 'Profile already exists'}), 400
         return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.route('/api/profiles/<int:profile_id>/toggle', methods=['POST'])
