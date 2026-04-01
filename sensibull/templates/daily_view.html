@@ -2974,6 +2974,26 @@
             }
         }
 
+        function getScopedUnderlyingEvents(eventList) {
+            const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
+            if (!excludeExpired) return eventList || [];
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            return (eventList || []).filter(e => {
+                const expiryDate = e.expiry_date
+                    ? new Date(e.expiry_date + 'T00:00:00')
+                    : getExpiryDateForSymbol(e.symbol || '');
+                return !expiryDate || expiryDate >= today;
+            });
+        }
+
+        function getUnderlyingMarginCacheKey(underlying) {
+            const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
+            return `und_${underlying}_${excludeExpired ? 'active' : 'all'}`;
+        }
+
         function renderUnderlyingSummaryCards(underlyings, events, snapshotPnl) {
             const cardsEl = document.getElementById('underlying-summary-cards');
             if (!cardsEl) return;
@@ -2985,16 +3005,7 @@
 
             // Apply exclude-expired filter so top cards stay in sync with the table rows below
             const excludeExpiredCards = document.getElementById('exclude-expired')?.checked || false;
-            const todayCards = new Date();
-            todayCards.setHours(0, 0, 0, 0);
-            const filteredEvents = excludeExpiredCards
-                ? allEvents.filter(e => {
-                    const expiryDate = e.expiry_date
-                        ? new Date(e.expiry_date + 'T00:00:00')
-                        : getExpiryDateForSymbol(e.symbol || '');
-                    return !expiryDate || expiryDate >= todayCards;
-                })
-                : allEvents;
+            const filteredEvents = getScopedUnderlyingEvents(allEvents);
 
             const stats = computeGroupStats(filteredEvents);
             const pnlClass = v => v > 0 ? 'val-pos' : (v < 0 ? 'val-neg' : 'val-neu');
@@ -3100,14 +3111,7 @@
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
 
-                const visibleEventList = excludeExpired
-                    ? eventList.filter(e => {
-                        const expiryDate = e.expiry_date
-                            ? new Date(e.expiry_date + 'T00:00:00')
-                            : getExpiryDateForSymbol(e.symbol || '');
-                        return !expiryDate || expiryDate >= today;
-                    })
-                    : eventList;
+                const visibleEventList = getScopedUnderlyingEvents(eventList);
 
                 const underlyingStats = computeGroupStats(visibleEventList);
                 const titleSpan = document.createElement('span');
@@ -3438,8 +3442,8 @@
                 });
                 // Restore cached underlying margin
                 underlyings.forEach(underlying => {
-                    const allEvents = (events[underlying] || []);
-                    const stats = computeGroupStats(allEvents);
+                    const scopedEvents = getScopedUnderlyingEvents(events[underlying] || []);
+                    const stats = computeGroupStats(scopedEvents);
                     _restoreUnderlyingMarginFromCache(underlying, stats.bookedPnl, stats.unbookedPnl);
                 });
             }, 0);
@@ -7719,11 +7723,12 @@
         // ── Underlying-level margin ──────────────────────────────────────────
         window.fetchUnderlyingMargin = function(underlying) {
             const allEvents = (_cachedUnderlyingsData?.events || {})[underlying] || [];
+            const scopedEvents = getScopedUnderlyingEvents(allEvents);
             // All expiries merged
-            const positions = getOpenPositionsForMargin(allEvents, underlying);
-            const cacheKey = `und_${underlying}`;
+            const positions = getOpenPositionsForMargin(scopedEvents, underlying);
+            const cacheKey = getUnderlyingMarginCacheKey(underlying);
             // Compute current PnL for return% display
-            const stats = computeGroupStats(allEvents);
+            const stats = computeGroupStats(scopedEvents);
             fetchMarginAndCache(cacheKey, positions, (cached, errMsg) => {
                 const el = document.getElementById(`margin-und-${underlying}`);
                 if (!el) return;
@@ -7739,7 +7744,7 @@
 
         // Restore underlying margin from cache on render
         window._restoreUnderlyingMarginFromCache = function(underlying, bookedPnl, unbookedPnl) {
-            const cached = _getMarginCache(`und_${underlying}`);
+            const cached = _getMarginCache(getUnderlyingMarginCacheKey(underlying));
             if (!cached) return;
             const el = document.getElementById(`margin-und-${underlying}`);
             if (!el) return;

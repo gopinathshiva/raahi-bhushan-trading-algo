@@ -423,7 +423,7 @@
                         {% if val.count > 0 %}
                         <a class="cell-link" href="{{ url_for('daily_view', slug=profile.slug, date=date) }}" target="_blank">{{ val.count }}</a>
                         <div class="pnl-value {{ 'pnl-positive' if val.pnl > 0 else 'pnl-negative' if val.pnl < 0 else 'pnl-neutral' }}">
-                            {{ "{:,.1f}".format(val.pnl) }}
+                            {{ val.pnl | fmt_inr }}
                         </div>
                         {% else %}
                         <span class="zero">-</span>
