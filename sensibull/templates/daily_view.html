@@ -525,6 +525,13 @@
                 </label>
                 <span id="ltp-all-count" style="font-size:0.82em; color:#888;"></span>
             </div>
+            <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                <label style="cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; padding:5px 12px; background:#fff4e8; border:1px solid #ffd8a8; border-radius:4px; font-size:0.88em; color:#8a4b08;" title="Fetch margin for all open positions across all underlyings">
+                    <input type="checkbox" id="margin-subscribe-all" onchange="toggleAllOpenMargin(this.checked)" style="margin:0;" />
+                    Margin (All Open Positions)
+                </label>
+                <span id="margin-all-count" style="font-size:0.82em; color:#888;"></span>
+            </div>
             <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:18px;">
                 <span style="font-weight:bold; font-size:0.9em; color:#555;">Show:</span>
                 <label style="cursor:pointer; user-select:none;">
@@ -542,6 +549,7 @@
             </div>
             <div id="underlying-status" class="search-help"></div>
             <div id="underlying-summary-cards" class="metrics-container" style="margin-top: 20px; display: none;"></div>
+            <div id="margin-all-open-info" style="display:none; margin-top:10px; margin-bottom:10px; padding:10px 12px; background:#fffaf3; border:1px solid #ffe3bf; border-radius:6px; font-size:0.83em;"></div>
             <div id="underlying-groups-container" style="margin-top: 10px;">
                 <!-- Collapsible groups will be inserted here -->
             </div>
@@ -1641,6 +1649,10 @@
 
                 if (underlyings.length === 0) {
                     if (status) status.textContent = 'No underlying events found.';
+                    const marginAllChk = document.getElementById('margin-subscribe-all');
+                    if (marginAllChk && marginAllChk.checked) {
+                        renderAllOpenMargin(null, { bookedPnl: 0, unbookedPnl: 0, brokerage: 0 }, 'No open positions to calculate margin for.');
+                    }
                     return;
                 }
 
@@ -1664,6 +1676,7 @@
                 
                 // Update subscription indicators after rendering buttons
                 updateSubscriptionIndicators();
+                refreshAllOpenMarginIfEnabled();
             } catch (e) {
                 if (status) status.textContent = 'Failed to load: ' + e;
             }
@@ -1674,6 +1687,7 @@
                 renderUnderlyingGroups(_cachedUnderlyingsData.underlyings, _cachedUnderlyingsData.events, _cachedUnderlyingsData.snapshotPnl, _cachedUnderlyingsData.underlyingPrices || {});
                 // Update subscription indicators after re-rendering
                 updateSubscriptionIndicators();
+                refreshAllOpenMarginIfEnabled();
             }
         }
 
@@ -2173,7 +2187,7 @@
             return { bookedPnl, unbookedPnl, exitPnl, active, closed, brokerage, symbols: Object.keys(latestBySymbol).length, peSellQty, peBuyQty, ceSellQty, ceBuyQty };
         }
 
-        function renderStatsBadge(stats, compact, expiryId) {
+        function renderStatsBadge(stats, compact, expiryId, underlyingId) {
             const c = v => v > 0 ? '#28a745' : (v < 0 ? '#dc3545' : '#888');
             const total = stats.bookedPnl + stats.unbookedPnl;
             // Build PE/CE open quantity display (sell qty / buy qty)
@@ -2193,8 +2207,13 @@
             const bkdId   = expiryId ? ` id="expiry-badge-bkd-${expiryId}"` : '';
             const unbkdId = expiryId ? ` id="expiry-badge-unbkd-${expiryId}"` : '';
             const totalId = expiryId ? ` id="expiry-badge-total-${expiryId}"` : '';
+            const underlyingKey = underlyingId ? String(underlyingId).replace(/[^a-zA-Z0-9]/g, '_') : '';
+            const undBkdId = (!compact && underlyingKey) ? ` id="underlying-badge-bkd-${underlyingKey}"` : '';
+            const undUnbkdId = (!compact && underlyingKey) ? ` id="underlying-badge-unbkd-${underlyingKey}"` : '';
+            const undTotalId = (!compact && underlyingKey) ? ` id="underlying-badge-total-${underlyingKey}"` : '';
             // data-value stores the raw number so JS can read it without locale-sensitive parsing
             const bkdDataVal = expiryId ? ` data-value="${stats.bookedPnl}"` : '';
+            const undBkdDataVal = (!compact && underlyingKey) ? ` data-value="${stats.bookedPnl}"` : '';
             if (compact) {
                 return `<span style="display:inline-flex;gap:10px;align-items:center;font-size:0.8em;font-weight:normal;margin-left:8px;">` +
                     `<span title="Latest booked P&amp;L across positions in this expiry">Bkd: <b${bkdId}${bkdDataVal} style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
@@ -2207,9 +2226,9 @@
                     `</span>`;
             }
             return `<span style="display:inline-flex;gap:14px;align-items:center;font-size:0.83em;font-weight:normal;margin-left:10px;">` +
-                `<span title="Latest booked P&amp;L across all positions">Booked: <b style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
-                `<span title="Latest unbooked P&amp;L across open positions">Unbooked: <b style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
-                `<span title="Total P&amp;L (Booked + Unbooked)" style="color:${c(total)}; font-weight:bold;">Total: ₹${fmtNum(total,0)}</span>` +
+                `<span title="Latest booked P&amp;L across all positions">Booked: <b${undBkdId}${undBkdDataVal} style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
+                `<span title="Latest unbooked P&amp;L across open positions">Unbooked: <b${undUnbkdId} style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
+                `<span title="Total P&amp;L (Booked + Unbooked)" style="color:${c(total)}; font-weight:bold;">Total: <b${undTotalId} style="color:${c(total)}">₹${fmtNum(total,0)}</b></span>` +
                 `<span title="Total brokerage charges" style="color:#dc3545;">Brokerage: <b>₹${fmtNum(stats.brokerage||0,0)}</b></span>` +
                 `<span title="Open positions" style="color:#555;">● ${stats.active} open</span>` +
                 `<span title="Closed positions" style="color:#aaa;">✕ ${stats.closed} closed</span>` +
@@ -2994,6 +3013,13 @@
             return `und_${underlying}_${excludeExpired ? 'active' : 'all'}`;
         }
 
+        function getAllOpenMarginCacheKey() {
+            const excludeExpired = document.getElementById('exclude-expired')?.checked || false;
+            const posFilter = document.querySelector('input[name="position-status-filter"]:checked')?.value || 'all';
+            const dateOnly = document.getElementById('date-filter-checkbox')?.checked ? 'date' : 'allDates';
+            return `all_open_${excludeExpired ? 'active' : 'all'}_${posFilter}_${dateOnly}`;
+        }
+
         function renderUnderlyingSummaryCards(underlyings, events, snapshotPnl) {
             const cardsEl = document.getElementById('underlying-summary-cards');
             if (!cardsEl) return;
@@ -3134,7 +3160,7 @@
                     const _prevClose = priceInfo.prev_close != null ? priceInfo.prev_close : '';
                     priceHtml = `<span data-spot-underlying="${underlying}" data-spot-prev-close="${_prevClose}" style="display:inline-flex;align-items:center;gap:4px;"><span class="underlying-ltp" style="font-size:0.88em;color:#555;font-weight:500;">₹${ltpStr}</span>${pctHtml}</span>`;
                 }
-                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span>${priceHtml}<span class="underlying-count">(${visibleEventList.length} events)</span>${renderStatsBadge(underlyingStats, false)}`;
+                titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span>${priceHtml}<span class="underlying-count">(${visibleEventList.length} events)</span>${renderStatsBadge(underlyingStats, false, null, underlying)}`;
 
                 const buttonsDiv = document.createElement('div');
                 buttonsDiv.style.display = 'flex';
@@ -3444,7 +3470,7 @@
                 underlyings.forEach(underlying => {
                     const scopedEvents = getScopedUnderlyingEvents(events[underlying] || []);
                     const stats = computeGroupStats(scopedEvents);
-                    _restoreUnderlyingMarginFromCache(underlying, stats.bookedPnl, stats.unbookedPnl);
+                    _restoreUnderlyingMarginFromCache(underlying, stats.bookedPnl, stats.unbookedPnl, stats.brokerage || 0);
                 });
             }, 0);
         }
@@ -3549,6 +3575,21 @@
             if (consolidateTradesCheckbox) {
                 consolidateTradesCheckbox.addEventListener('change', function() {
                     reRenderUnderlyingGroups();
+                });
+            }
+
+            const marginAllCheckbox = document.getElementById('margin-subscribe-all');
+            if (marginAllCheckbox) {
+                marginAllCheckbox.addEventListener('change', function() {
+                    if (!this.checked) {
+                        const countEl = document.getElementById('margin-all-count');
+                        const infoEl = document.getElementById('margin-all-open-info');
+                        if (countEl) countEl.textContent = '';
+                        if (infoEl) {
+                            infoEl.style.display = 'none';
+                            infoEl.innerHTML = '';
+                        }
+                    }
                 });
             }
 
@@ -7666,6 +7707,22 @@
             });
         }
 
+        function _toNum(value) {
+            if (value == null || value === '') return null;
+            const n = Number(value);
+            return Number.isFinite(n) ? n : null;
+        }
+
+        function _pickTotalMargin(cached) {
+            if (!cached || typeof cached !== 'object') return null;
+            const keys = ['total_margin_required', 'required_margin', 'span_margin', 'span'];
+            for (const k of keys) {
+                const v = _toNum(cached[k]);
+                if (v != null) return v;
+            }
+            return null;
+        }
+
         // Return % colored HTML
         function _returnPctHtml(pct) {
             if (pct == null || isNaN(pct)) return '<span style="color:#888;">—%</span>';
@@ -7675,23 +7732,47 @@
         }
 
         // Render inline margin info HTML given cached data + pnl values
-        function buildMarginInfoHtml(cached, bookedPnl, unbookedPnl) {
+        function buildMarginInfoHtml(cached, bookedPnl, unbookedPnl, brokerage = 0) {
             if (!cached) return '';
-            const margin = cached.total_margin_required;
+            const margin = _pickTotalMargin(cached);
             const fetchTime = _fmtFetchTime(cached.fetchedAt);
-            const netPnl = (bookedPnl || 0) + (unbookedPnl || 0);
-            const bookedPct = margin ? (bookedPnl || 0) / margin * 100 : null;
-            const unbookedPct = margin ? (unbookedPnl || 0) / margin * 100 : null;
-            const netPct = margin ? netPnl / margin * 100 : null;
+            const grossPnl = (bookedPnl || 0) + (unbookedPnl || 0);
+            const netPnl = grossPnl - (brokerage || 0);
+            const safeMargin = (margin != null && margin !== 0) ? margin : null;
+            const bookedPct = safeMargin ? (bookedPnl || 0) / safeMargin * 100 : null;
+            const unbookedPct = safeMargin ? (unbookedPnl || 0) / safeMargin * 100 : null;
+            const grossPct = safeMargin ? grossPnl / safeMargin * 100 : null;
+            const netPct = safeMargin ? netPnl / safeMargin * 100 : null;
             const sep = `<span style="color:#ccc; margin:0 4px;">·</span>`;
             return `<span style="color:#555; font-weight:600;">Margin: <b style="color:#0d6efd;">${_fmtMarginInr(margin)}</b></span>` +
                 sep +
-                `<span title="Booked P&L / Margin">Bkd%: ${_returnPctHtml(bookedPct)}</span>` +
+                `<span title="Booked Return = Booked P&L / Margin">Booked: ${_returnPctHtml(bookedPct)}</span>` +
                 sep +
-                `<span title="Unbooked P&L / Margin">Unbkd%: ${_returnPctHtml(unbookedPct)}</span>` +
+                `<span title="Unbooked Return = Unbooked P&L / Margin">Unbooked: ${_returnPctHtml(unbookedPct)}</span>` +
                 sep +
-                `<span title="Net P&L / Margin">Net%: ${_returnPctHtml(netPct)}</span>` +
+                `<span title="Gross Return = Gross P&L / Margin">Gross: ${_returnPctHtml(grossPct)}</span>` +
+                sep +
+                `<span title="Net Return = Net P&L / Margin">Net: ${_returnPctHtml(netPct)}</span>` +
                 `<span style="color:#aaa; font-size:0.9em; margin-left:6px;">· ${fetchTime}</span>`;
+        }
+
+        let _lastMissingMarginToast = { key: '', ts: 0 };
+        function _showMissingMarginToast(symbols) {
+            const unique = [...new Set((symbols || []).map(s => String(s || '').trim().toUpperCase()).filter(Boolean))];
+            if (!unique.length) return;
+            const key = unique.join('|');
+            const now = Date.now();
+            if (_lastMissingMarginToast.key === key && (now - _lastMissingMarginToast.ts) < 15000) return;
+            _lastMissingMarginToast = { key, ts: now };
+
+            const display = unique.slice(0, 12);
+            const escaped = display.map(s => escapeHtml(s));
+            const more = unique.length > display.length ? ` (+${unique.length - display.length} more)` : '';
+            showToast(`⚠️ Margin data unavailable for symbol(s): <strong>${escaped.join(', ')}</strong>${more}`, 'info');
+        }
+
+        function _showMarginDetectionUnknownToast() {
+            showToast('ℹ️ Margin fetched, but per-symbol availability could not be verified from broker response.', 'info');
         }
 
         // Core fetch: calls backend proxy, caches, then calls renderFn with the result
@@ -7708,6 +7789,10 @@
                     body: JSON.stringify({ positions })
                 });
                 const json = await resp.json();
+                _showMissingMarginToast(json.missing_margin_symbols || []);
+                if (json.missing_margin_detection_unknown) {
+                    _showMarginDetectionUnknownToast();
+                }
                 if (!json.success) {
                     renderFn(null, `Error: ${json.error || 'Unknown error'}`);
                     return;
@@ -7718,6 +7803,129 @@
             } catch (e) {
                 renderFn(null, `Network error: ${e.message}`);
             }
+        }
+
+        function collectAllOpenPositionsForMargin() {
+            const underlyings = _cachedUnderlyingsData?.underlyings || [];
+            const eventsByUnderlying = _cachedUnderlyingsData?.events || {};
+            const latestByKey = {};
+            const keyUnderlying = {};
+            const positions = [];
+            const stats = { bookedPnl: 0, unbookedPnl: 0, brokerage: 0 };
+
+            underlyings.forEach(underlying => {
+                const scopedEvents = getScopedUnderlyingEvents(eventsByUnderlying[underlying] || []);
+                scopedEvents.forEach(e => {
+                    const symbol = (e.symbol || '').trim().toUpperCase();
+                    const product = (e.product || '').trim().toUpperCase();
+                    if (!symbol) return;
+                    const key = `${symbol}|${product}`;
+                    const existing = latestByKey[key];
+                    if (!existing || new Date(e.timestamp) > new Date(existing.timestamp)) {
+                        latestByKey[key] = e;
+                        keyUnderlying[key] = underlying;
+                    }
+                });
+            });
+
+            const openKeys = new Set();
+            Object.entries(latestByKey).forEach(([key, e]) => {
+                const qty = Number(e.after_quantity || 0);
+                if (qty === 0) return;
+
+                const symbol = (e.symbol || '').trim().toUpperCase();
+                const product = (e.product || 'NRML').trim().toUpperCase();
+                const underlying = keyUnderlying[key] || '';
+                const isBFO = ['SENSEX', 'BANKEX'].includes(String(underlying).toUpperCase());
+                positions.push({
+                    symbol,
+                    exchange: isBFO ? 'BFO' : 'NFO',
+                    action: qty > 0 ? 'BUY' : 'SELL',
+                    product,
+                    pricetype: 'MARKET',
+                    quantity: String(Math.abs(qty)),
+                    price: '0'
+                });
+                openKeys.add(key);
+                stats.bookedPnl += Number(e.after_booked_pnl || 0);
+                stats.unbookedPnl += Number(e.after_unbooked_pnl || 0);
+            });
+
+            underlyings.forEach(underlying => {
+                const scopedEvents = getScopedUnderlyingEvents(eventsByUnderlying[underlying] || []);
+                scopedEvents.forEach(e => {
+                    const symbol = (e.symbol || '').trim().toUpperCase();
+                    const product = (e.product || '').trim().toUpperCase();
+                    const key = `${symbol}|${product}`;
+                    if (!openKeys.has(key)) return;
+                    stats.brokerage += Number(e.brokerage || 0);
+                });
+            });
+
+            return { positions, stats };
+        }
+
+        function renderAllOpenMargin(cached, stats, errMsg) {
+            const infoEl = document.getElementById('margin-all-open-info');
+            const countEl = document.getElementById('margin-all-count');
+            if (!infoEl) return;
+
+            if (errMsg) {
+                infoEl.style.display = 'block';
+                infoEl.innerHTML = `<span style="color:#888;">${errMsg}</span>`;
+                return;
+            }
+
+            if (!cached) {
+                infoEl.style.display = 'none';
+                infoEl.innerHTML = '';
+                return;
+            }
+
+            const positionCount = Number(cached.positionCount || 0);
+            if (countEl) {
+                countEl.textContent = `${positionCount} open position${positionCount === 1 ? '' : 's'} selected`;
+            }
+
+            infoEl.style.display = 'block';
+            infoEl.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+                <span style="font-weight:700; color:#8a4b08;">All Open Position Returns</span>
+                ${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl, stats.brokerage)}
+            </div>`;
+        }
+
+        window.toggleAllOpenMargin = async function(checked) {
+            const infoEl = document.getElementById('margin-all-open-info');
+            const countEl = document.getElementById('margin-all-count');
+
+            if (!checked) {
+                if (infoEl) {
+                    infoEl.style.display = 'none';
+                    infoEl.innerHTML = '';
+                }
+                if (countEl) countEl.textContent = '';
+                return;
+            }
+
+            if (!_cachedUnderlyingsData) {
+                await loadUnderlyingTrades();
+            }
+            if (!_cachedUnderlyingsData) {
+                renderAllOpenMargin(null, { bookedPnl: 0, unbookedPnl: 0, brokerage: 0 }, 'Unable to load underlyings data.');
+                return;
+            }
+
+            const { positions, stats } = collectAllOpenPositionsForMargin();
+            const cacheKey = getAllOpenMarginCacheKey();
+            fetchMarginAndCache(cacheKey, positions, (cached, errMsg) => {
+                renderAllOpenMargin(cached, stats, errMsg);
+            });
+        };
+
+        function refreshAllOpenMarginIfEnabled() {
+            const chk = document.getElementById('margin-subscribe-all');
+            if (!chk || !chk.checked) return;
+            window.toggleAllOpenMargin(true);
         }
 
         // ── Underlying-level margin ──────────────────────────────────────────
@@ -7738,18 +7946,18 @@
                     return;
                 }
                 el.style.display = 'block';
-                el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:5px 0 3px; border-top:1px solid #e0e8ff; margin-top:4px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl)}</div>`;
+                el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:5px 0 3px; border-top:1px solid #e0e8ff; margin-top:4px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl, stats.brokerage || 0)}</div>`;
             });
         };
 
         // Restore underlying margin from cache on render
-        window._restoreUnderlyingMarginFromCache = function(underlying, bookedPnl, unbookedPnl) {
+        window._restoreUnderlyingMarginFromCache = function(underlying, bookedPnl, unbookedPnl, brokerage = 0) {
             const cached = _getMarginCache(getUnderlyingMarginCacheKey(underlying));
             if (!cached) return;
             const el = document.getElementById(`margin-und-${underlying}`);
             if (!el) return;
             el.style.display = 'block';
-            el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:5px 0 3px; border-top:1px solid #e0e8ff; margin-top:4px; font-size:0.82em;">${buildMarginInfoHtml(cached, bookedPnl, unbookedPnl)}</div>`;
+            el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:5px 0 3px; border-top:1px solid #e0e8ff; margin-top:4px; font-size:0.82em;">${buildMarginInfoHtml(cached, bookedPnl, unbookedPnl, brokerage)}</div>`;
         };
 
         // ── Expiry-level margin ──────────────────────────────────────────────
@@ -7768,7 +7976,7 @@
                     return;
                 }
                 el.style.display = 'block';
-                el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:4px 0 2px; border-top:1px solid #e0e8ff; margin-top:2px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl)}</div>`;
+                el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:4px 0 2px; border-top:1px solid #e0e8ff; margin-top:2px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl, stats.brokerage || 0)}</div>`;
             });
         };
 
@@ -7781,7 +7989,7 @@
             const el = document.getElementById(`margin-exp-${expiryId}`);
             if (!el) return;
             el.style.display = 'block';
-            el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:4px 0 2px; border-top:1px solid #e0e8ff; margin-top:2px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl)}</div>`;
+            el.innerHTML = `<div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:4px 0 2px; border-top:1px solid #e0e8ff; margin-top:2px; font-size:0.82em;">${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl, stats.brokerage || 0)}</div>`;
         };
 
         // ── Payoff-level margin ──────────────────────────────────────────────
@@ -7895,7 +8103,7 @@
                 const unbookedPnl = legs.reduce((s, l) => s + (l.ltp - l.avgPrice) * l.qty, 0);
                 // bookedPnl from payoff state
                 const bookedPnl = _payoffState ? _payoffState.closedPnl : 0;
-                infoEl.innerHTML = buildMarginInfoHtml(cached, bookedPnl, unbookedPnl);
+                infoEl.innerHTML = buildMarginInfoHtml(cached, bookedPnl, unbookedPnl, 0);
             });
         };
     })();
@@ -7922,6 +8130,8 @@
             expirySubscriptions: {},
             // brokerSym → expiryId (for header badge updates)
             brokerSymToExpiry: {},
+            // brokerSym → underlying (for underlying header live P&L updates)
+            brokerSymToUnderlying: {},
             // brokerSym → last applied ltp (skip DOM update if unchanged)
             lastLtp: {},
             // true while _tryNextProfile fetch is in-flight (before _ltpWs.conn is set)
@@ -8120,6 +8330,8 @@
                 document.querySelectorAll('[id^="ltp-chk-"]').forEach(cb => { cb.checked = false; });
             }
             _ltpWs.expirySubscriptions = {};
+            _ltpWs.brokerSymToExpiry = {};
+            _ltpWs.brokerSymToUnderlying = {};
             _clearWsWarning();
         };
 
@@ -8211,6 +8423,7 @@
                 if (!brokerSyms.length) return;
 
                 _ltpWs.expirySubscriptions[expiryId] = brokerSyms;
+                brokerSyms.forEach(sym => { _ltpWs.brokerSymToUnderlying[sym] = underlying; });
 
                 // Convert broker → OpenAlgo symbols
                 try {
@@ -8246,13 +8459,16 @@
                 brokerSyms.forEach(br => {
                     if (stillNeeded.has(br)) return;
                     const oa = _ltpWs.brokerToOpenalgo[br];
-                    if (!oa) return;
-                    _sendUnsubscribe(oa);
-                    if (_ltpWs.openalgoToBroker[oa]) {
-                        _ltpWs.openalgoToBroker[oa].delete(br);
-                        if (_ltpWs.openalgoToBroker[oa].size === 0) delete _ltpWs.openalgoToBroker[oa];
+                    if (oa) {
+                        _sendUnsubscribe(oa);
+                        if (_ltpWs.openalgoToBroker[oa]) {
+                            _ltpWs.openalgoToBroker[oa].delete(br);
+                            if (_ltpWs.openalgoToBroker[oa].size === 0) delete _ltpWs.openalgoToBroker[oa];
+                        }
                     }
                     delete _ltpWs.brokerToOpenalgo[br];
+                    delete _ltpWs.brokerSymToExpiry[br];
+                    delete _ltpWs.brokerSymToUnderlying[br];
                 });
             }
         };
@@ -8372,6 +8588,47 @@
                 // Consolidated summary row
                 const consUnbkd = document.getElementById(`cons-badge-unbkd-${expiryId}`);
                 if (consUnbkd) { consUnbkd.textContent = `₹${upnlStr2}`; consUnbkd.style.color = upnlColor; }
+            });
+
+            // Update underlying header badges (Unbooked + Total) using live LTP.
+            const seenUnderlyingSyms = new Set();
+            const underlyingUnbooked = {};
+            Object.values(_ltpWs.expirySubscriptions).forEach(syms => {
+                (syms || []).forEach(sym => {
+                    if (seenUnderlyingSyms.has(sym)) return;
+                    seenUnderlyingSyms.add(sym);
+                    const underlying = _ltpWs.brokerSymToUnderlying[sym];
+                    if (!underlying) return;
+                    const symLtp = _ltpWs.lastLtp[sym];
+                    if (symLtp == null) return;
+                    const td = document.querySelector(`[data-ltp-cell="${sym}"]`);
+                    if (!td) return;
+                    const avgEntry = parseFloat(td.dataset.avgEntry) || 0;
+                    const netQty = parseFloat(td.dataset.netQty) || 0;
+                    if (netQty !== 0) {
+                        underlyingUnbooked[underlying] = (underlyingUnbooked[underlying] || 0) + ((symLtp - avgEntry) * netQty);
+                    }
+                });
+            });
+
+            const activeUnderlyings = new Set(Object.values(_ltpWs.brokerSymToUnderlying).filter(Boolean));
+            activeUnderlyings.forEach(underlying => {
+                const key = String(underlying).replace(/[^a-zA-Z0-9]/g, '_');
+                const unbooked = underlyingUnbooked[underlying] || 0;
+                const unbookedEl = document.getElementById(`underlying-badge-unbkd-${key}`);
+                const totalEl = document.getElementById(`underlying-badge-total-${key}`);
+                const bookedEl = document.getElementById(`underlying-badge-bkd-${key}`);
+
+                if (unbookedEl) {
+                    unbookedEl.textContent = `₹${fmtNum(unbooked, 0)}`;
+                    unbookedEl.style.color = pnlColor(unbooked);
+                }
+                if (totalEl && bookedEl) {
+                    const booked = parseFloat(bookedEl.dataset.value) || 0;
+                    const total = booked + unbooked;
+                    totalEl.textContent = `₹${fmtNum(total, 0)}`;
+                    totalEl.style.color = pnlColor(total);
+                }
             });
 
             // Update global summary cards (Total Unbooked, Gross, Net P&L)

@@ -3970,9 +3970,14 @@ def api_openalgo_margin():
     margin_holiday_api_url = _build_profile_holiday_api_url(first_profile['host']) if first_profile else ''
     margin_holiday_api_key = first_profile['api_key'] if first_profile else None
     converted_positions = []
+    requested_broker_symbols = []
+    conversion_missing_symbols = set()
+    openalgo_to_broker = {}
     for pos in positions:
         converted = dict(pos)
         broker_sym = (pos.get('symbol') or '').strip().upper()
+        if broker_sym:
+            requested_broker_symbols.append(broker_sym)
         if broker_sym:
             try:
                 converted['symbol'] = convert_broker_symbol_to_openalgo_symbol(
@@ -3982,6 +3987,12 @@ def api_openalgo_margin():
                 )
             except Exception as e:
                 print(f"[OpenAlgo margin] Symbol conversion failed for {broker_sym}: {e}")
+                conversion_missing_symbols.add(broker_sym)
+        converted_sym = (converted.get('symbol') or '').strip().upper()
+        if broker_sym and not converted_sym:
+            conversion_missing_symbols.add(broker_sym)
+        if converted_sym and broker_sym:
+            openalgo_to_broker.setdefault(converted_sym, set()).add(broker_sym)
         converted_positions.append(converted)
 
     BATCH_SIZE = 50
@@ -3992,12 +4003,35 @@ def api_openalgo_margin():
         'span_margin', 'span', 'exposure_margin', 'exposure',
         'additional_margin', 'bo_margin', 'cash_margin',
     }
+    margin_probe_keys = (
+        'total_margin_required', 'required_margin',
+        'span_margin', 'span', 'exposure_margin', 'exposure',
+        'additional_margin', 'bo_margin', 'cash_margin'
+    )
+
+    def _extract_symbols_from_payload(node):
+        symbols = set()
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in ('symbol', 'trading_symbol', 'tradingsymbol', 'tsym', 'instrument'):
+                    val = (v or '').strip().upper() if isinstance(v, str) else ''
+                    if val:
+                        symbols.add(val)
+                symbols.update(_extract_symbols_from_payload(v))
+        elif isinstance(node, list):
+            for item in node:
+                symbols.update(_extract_symbols_from_payload(item))
+        return symbols
+
+    requested_broker_symbols = sorted(set(requested_broker_symbols))
+
     last_error = None
     for profile in profiles:
         host = normalize_openalgo_host(profile['host'])
         margin_url = f"{host}/api/v1/margin"
         try:
             merged_data = None
+            returned_openalgo_symbols = set()
             batches = [converted_positions[i:i+BATCH_SIZE] for i in range(0, len(converted_positions), BATCH_SIZE)]
             failed = False
             for batch in batches:
@@ -4014,6 +4048,7 @@ def api_openalgo_margin():
                 batch_data = result.get('data', {})
                 if not isinstance(batch_data, dict):
                     continue
+                returned_openalgo_symbols.update(_extract_symbols_from_payload(batch_data))
                 if merged_data is None:
                     # First batch: take all fields as the base
                     merged_data = dict(batch_data)
@@ -4023,10 +4058,34 @@ def api_openalgo_margin():
                         if k in ADDITIVE_KEYS and isinstance(v, (int, float)):
                             merged_data[k] = (merged_data.get(k) or 0) + v
             if not failed and merged_data is not None:
+                missing_symbols = set(conversion_missing_symbols)
+                requested_openalgo_symbols = set(openalgo_to_broker.keys())
+                detection_unknown = False
+                if returned_openalgo_symbols:
+                    missing_openalgo = requested_openalgo_symbols - returned_openalgo_symbols
+                    for oa_sym in missing_openalgo:
+                        missing_symbols.update(openalgo_to_broker.get(oa_sym, set()))
+                else:
+                    # Some providers return only aggregate margin fields, without per-symbol echoes.
+                    # In that case, missing symbol detection is unknown (unless aggregate itself is absent).
+                    detection_unknown = True
+
+                has_margin_data = any(
+                    isinstance(merged_data.get(k), (int, float))
+                    for k in margin_probe_keys
+                )
+                if not has_margin_data:
+                    # If aggregate margin numbers are missing, treat all requested symbols as missing.
+                    missing_symbols.update(requested_broker_symbols)
+                    detection_unknown = False
+
                 return jsonify({
                     'success': True,
                     'data': merged_data,
-                    'profile_name': profile['profile_name']
+                    'profile_name': profile['profile_name'],
+                    'requested_symbols': requested_broker_symbols,
+                    'missing_margin_symbols': sorted(missing_symbols),
+                    'missing_margin_detection_unknown': detection_unknown
                 })
         except http_requests.RequestException as exc:
             last_error = f"Failed to reach {profile['profile_name']}: {str(exc)}"
@@ -4035,7 +4094,13 @@ def api_openalgo_margin():
 
     converted_syms = [p.get('symbol') for p in converted_positions]
     print(f"[OpenAlgo margin] Converted symbols sent: {converted_syms}. Last error: {last_error}")
-    return jsonify({'success': False, 'error': last_error or 'All OpenAlgo profiles failed'}), 502
+    return jsonify({
+        'success': False,
+        'error': last_error or 'All OpenAlgo profiles failed',
+        'requested_symbols': requested_broker_symbols,
+        'missing_margin_symbols': requested_broker_symbols,
+        'missing_margin_detection_unknown': False
+    }), 502
 
 
 # ==================== MASTER CONTRACT STRIKE INFO ====================
