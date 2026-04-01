@@ -10,51 +10,51 @@
 <style>
     .import-wrapper {
         max-width: 700px;
-        margin: 50px auto;
-        padding: 0 20px;
+        margin: 24px auto;
     }
 
     .import-card {
-        background: white;
-        padding: 40px 30px;
-        border-radius: 10px;
-        box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        background: #fff;
+        padding: 28px 24px;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 2px rgba(15,23,42,0.06);
     }
 
     .import-header { text-align: center; margin-bottom: 24px; }
-    .import-icon { font-size: 4rem; margin-bottom: 16px; }
-    .import-header h2 { margin: 0 0 10px; color: #333; }
-    .import-header p  { color: #666; margin: 0; }
+    .import-icon { font-size: 2rem; margin-bottom: 12px; }
+    .import-header h2 { margin: 0 0 10px; color: #0f172a; font-size: 1.2rem; }
+    .import-header p  { color: #64748b; margin: 0; }
 
     .alert {
         padding: 12px 16px;
-        border-radius: 6px;
+        border-radius: 10px;
         margin-bottom: 16px;
-        font-size: 0.9em;
+        font-size: 0.9rem;
     }
-    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-    .alert-danger  { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-    .alert-warning { background: #fff3cd; color: #856404; border: 1px solid #ffeeba; }
-    .alert-info    { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    .alert-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .alert-danger  { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .alert-warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    .alert-info    { background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; }
     .merge-result-table { width: 100%; font-size: 0.85em; margin-top: 12px; border-collapse: collapse; }
-    .merge-result-table th, .merge-result-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #c3e6cb; }
+    .merge-result-table th, .merge-result-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #bbf7d0; }
 
     .upload-area {
         border: 2px dashed #dee2e6;
-        border-radius: 8px;
-        padding: 40px;
+        border-radius: 12px;
+        padding: 32px;
         margin: 20px 0;
-        background: #f8f9fa;
+        background: #f8fafc;
         cursor: pointer;
-        transition: all 0.3s;
+        transition: all 160ms ease;
         text-align: center;
     }
-    .upload-area:hover { border-color: #198754; background: #e7f5ec; }
-    .upload-area.dragover { border-color: #198754; background: #d1f0dc; }
+    .upload-area:hover { border-color: #4f46e5; background: #eef2ff; }
+    .upload-area.dragover { border-color: #4f46e5; background: #e0e7ff; }
 
-    .upload-icon { font-size: 3rem; color: #6c757d; margin-bottom: 12px; }
-    .upload-area p { margin: 0; color: #555; }
-    .upload-area small { color: #999; }
+    .upload-icon { font-size: 2rem; color: #64748b; margin-bottom: 8px; }
+    .upload-area p { margin: 0; color: #334155; }
+    .upload-area small { color: #94a3b8; }
 
     .file-info { display: none; margin-top: 15px; }
     .file-info .alert { margin: 0; }
@@ -63,23 +63,39 @@
         display: block;
         width: 100%;
         margin-top: 20px;
-        padding: 14px;
-        background: #198754;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        font-size: 1.1rem;
+        padding: 11px 16px;
+        background: #4f46e5;
+        color: #fff;
+        border: 1px solid #4338ca;
+        border-radius: 10px;
+        font-size: 0.95rem;
         font-weight: 600;
         cursor: pointer;
-        transition: background 0.2s;
+        transition: background-color 130ms ease, transform 130ms ease, box-shadow 130ms ease;
     }
-    .btn-upload:hover { background: #157347; }
-    .btn-upload:disabled { background: #6c757d; cursor: not-allowed; }
+
+    .btn-upload:hover {
+        background: #4338ca;
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(79,70,229,0.24);
+    }
+
+    .btn-upload:disabled { background: #a5b4fc; border-color: #a5b4fc; cursor: not-allowed; }
 
     hr { margin: 28px 0; border: none; border-top: 1px solid #eee; }
 
-    .instructions h5 { margin-bottom: 10px; color: #333; }
-    .instructions ol { padding-left: 20px; color: #555; line-height: 1.8; }
+    .instructions h5 { margin-bottom: 10px; color: #0f172a; }
+    .instructions ol { padding-left: 20px; color: #64748b; line-height: 1.8; }
+
+    .merge-table-head-inserted { color: #166534; }
+    .merge-table-head-skipped { color: #64748b; }
+    .merge-cell-inserted { color: #166534; }
+    .merge-cell-skipped { color: #64748b; }
+    .merge-options { margin-bottom: 16px; }
+    .merge-label { display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600; color: #1e293b; }
+    .merge-checkbox { width:16px; height:16px; }
+    .merge-helper { font-weight:400; color:#64748b; }
+    .hidden { display:none; }
 </style>
 {% endblock %}
 
@@ -87,7 +103,7 @@
 <div class="import-wrapper">
     <div class="import-card">
         <div class="import-header">
-            <div class="import-icon">⬆️</div>
+            <div class="import-icon">Import</div>
             <h2>Import Database</h2>
             <p>Upload a <strong>sensibull.db</strong> file to import data.</p>
         </div>
@@ -103,16 +119,16 @@
 
         {% if success and merge_result %}
         <div class="alert alert-success">
-            ✅ <strong>Merge complete!</strong>
+            <strong>Merge complete.</strong>
             <table class="merge-result-table">
-                <thead><tr><th>Table</th><th style="color:green;">Inserted</th><th style="color:#888;">Skipped</th></tr></thead>
+                <thead><tr><th>Table</th><th class="merge-table-head-inserted">Inserted</th><th class="merge-table-head-skipped">Skipped</th></tr></thead>
                 <tbody>
                 {% for table, counts in merge_result.items() %}
                     {% if counts.inserted > 0 or counts.skipped > 0 %}
                     <tr>
                         <td>{{ table }}</td>
-                        <td style="color:green;">+{{ counts.inserted }}</td>
-                        <td style="color:#888;">{{ counts.skipped }}</td>
+                        <td class="merge-cell-inserted">+{{ counts.inserted }}</td>
+                        <td class="merge-cell-skipped">{{ counts.skipped }}</td>
                     </tr>
                     {% endif %}
                 {% endfor %}
@@ -121,54 +137,54 @@
         </div>
         {% elif success %}
         <div class="alert alert-success">
-            ✅ <strong>Success!</strong> Database imported successfully.
+            <strong>Success.</strong> Database imported successfully.
             You can now <a href="{{ url_for('login') }}">login</a>.
         </div>
         {% endif %}
 
         {% if error %}
         <div class="alert alert-danger">
-            ❌ <strong>Error!</strong> {{ error }}
+            <strong>Error.</strong> {{ error }}
         </div>
         {% endif %}
 
         <!-- Mode warning — toggled by merge checkbox -->
-        <div id="modeWarning" class="alert alert-warning" style="display:none;">
-            ⚠️ <strong>Replace mode:</strong> This will completely replace your current database.
+        <div id="modeWarning" class="alert alert-warning hidden">
+            <strong>Replace mode:</strong> This will completely replace your current database.
             All existing data will be lost!
         </div>
         <div id="mergeModeInfo" class="alert alert-info">
-            ℹ️ <strong>Merge mode:</strong> New rows from the imported file will be added.
+            <strong>Merge mode:</strong> New rows from the imported file will be added.
             Rows that already exist (by primary key) will be skipped. Your existing data is safe.
         </div>
 
         <form id="uploadForm" method="POST" action="{{ url_for('import_upload') }}" enctype="multipart/form-data">
             <!-- Merge checkbox (default: checked) -->
-            <div style="margin-bottom: 16px;">
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600;">
+            <div class="merge-options">
+                <label class="merge-label">
                     <input type="checkbox" name="merge" value="1" id="mergeCheckbox" checked
-                           style="width:16px; height:16px;">
+                           class="merge-checkbox">
                     Merge data
-                    <span style="font-weight:400; color:#555;">(recommended — keeps existing data)</span>
+                    <span class="merge-helper">(recommended — keeps existing data)</span>
                 </label>
             </div>
 
             <div class="upload-area" id="uploadArea">
-                <div class="upload-icon">☁️</div>
+                <div class="upload-icon">Upload</div>
                 <p><strong>Click to select file or drag and drop</strong></p>
                 <small>sensibull.db file only</small>
-                <input type="file" id="fileInput" name="database_file" accept=".db" style="display:none;" required>
+                <input type="file" id="fileInput" name="database_file" accept=".db" class="hidden" required>
             </div>
 
             <div class="file-info" id="fileInfo">
                 <div class="alert alert-success">
-                    📄 <strong>Selected file:</strong> <span id="fileName"></span> &nbsp;|&nbsp;
+                    <strong>Selected file:</strong> <span id="fileName"></span> &nbsp;|&nbsp;
                     <strong>Size:</strong> <span id="fileSize"></span>
                 </div>
             </div>
 
             <button type="submit" class="btn-upload" id="uploadBtn" disabled>
-                ⬆ Import Database
+                Import Database
             </button>
         </form>
 

@@ -8,16 +8,17 @@
 
 {% block head %}
 <style>
-    .container { max-width: 1080px; margin: 0 auto; padding: 20px; }
+    .container { max-width: 1080px; margin: 0 auto; }
 
     .section {
         background: #fff;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        padding: 20px;
-        margin-bottom: 20px;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 1px 2px rgba(15,23,42,0.06);
+        padding: 24px;
+        margin-bottom: 16px;
     }
-    .section h2 { margin-top: 0; margin-bottom: 16px; color: #222; }
+    .section h2 { margin-top: 0; margin-bottom: 16px; color: #0f172a; font-size: 1.15rem; letter-spacing: -0.01em; }
 
     .grid {
         display: grid;
@@ -26,38 +27,38 @@
         align-items: end;
     }
 
-    .form-group label { display: block; font-size: 13px; color: #555; margin-bottom: 6px; }
+    .form-group label { display: block; font-size: 13px; color: #475569; margin-bottom: 6px; font-weight: 600; }
     .form-group input {
-        width: 100%; border: 1px solid #d7d7d7; border-radius: 6px;
+        width: 100%; border: 1px solid #cbd5e1; border-radius: 10px;
         padding: 8px 10px; font-size: 14px; box-sizing: border-box;
     }
-    .form-group input:focus { outline: none; border-color: #007bff; box-shadow: 0 0 0 2px rgba(0,123,255,0.15); }
+    .form-group input:focus { outline: none; border-color: #818cf8; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
 
-    .btn { border: none; border-radius: 5px; padding: 7px 13px; cursor: pointer; font-size: 13px; }
-    .btn-primary { background: #007bff; color: #fff; }
-    .btn-primary:hover { background: #0069d9; }
+    .btn { border: 1px solid transparent; border-radius: 10px; padding: 8px 13px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 130ms ease; }
+    .btn-primary { background: #4f46e5; color: #fff; border-color: #4338ca; }
+    .btn-primary:hover { background: #4338ca; box-shadow: 0 8px 18px rgba(79,70,229,0.24); transform: translateY(-1px); }
     .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
-    .btn-success { background: #28a745; color: #fff; }
-    .btn-success:hover { background: #218838; }
-    .btn-danger  { background: #dc3545; color: #fff; }
-    .btn-danger:hover  { background: #c82333; }
+    .btn-success { background: #15803d; color: #fff; border-color: #166534; }
+    .btn-success:hover { background: #166534; box-shadow: 0 8px 18px rgba(21,128,61,0.2); }
+    .btn-danger  { background: #dc2626; color: #fff; border-color: #b91c1c; }
+    .btn-danger:hover  { background: #b91c1c; box-shadow: 0 8px 18px rgba(220,38,38,0.2); }
     .btn-secondary { background: #6c757d; color: #fff; }
     .btn-secondary:hover { background: #5a6268; }
-    .btn-outline { background: #fff; border: 1px solid #0056b3; color: #0056b3; }
-    .btn-outline:hover { background: #e8f0fe; }
-    .btn-outline.active { background: #0056b3; color: #fff; }
+    .btn-outline { background: #fff; border: 1px solid #4f46e5; color: #4f46e5; }
+    .btn-outline:hover { background: #eef2ff; }
+    .btn-outline.active { background: #4f46e5; color: #fff; }
     .btn-sm { padding: 4px 9px; font-size: 12px; }
 
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #ececec; padding: 9px 10px; text-align: left; font-size: 13px; }
-    th { background: #f8f9fa; font-weight: 600; font-size: 13px; }
-    tr:hover td { background: #fafafa; }
-    tr.editing td { background: #fffde7; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 9px 10px; text-align: left; font-size: 13px; }
+    th { background: #f8fafc; font-weight: 600; font-size: 13px; color: #334155; }
+    tr:hover td { background: #f8fafc; }
+    tr.editing td { background: #eef2ff; }
 
-    .status { margin-top: 12px; font-size: 13px; padding: 10px; border-radius: 6px; display: none; }
-    .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; display: block; }
-    .status.error   { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; display: block; }
+    .status { margin-top: 12px; font-size: 13px; padding: 10px; border-radius: 10px; display: none; }
+    .status.success { background: #dcfce7; color: #166534; border: 1px solid #86efac; display: block; }
+    .status.error   { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; display: block; }
 
     .empty { color: #777; text-align: center; padding: 14px; }
 
@@ -74,6 +75,17 @@
     .edit-input:focus { outline: none; border-color: #007bff; }
 
     .action-btns { display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; }
+    .muted-inline { color:#64748b; font-weight:400; }
+    .form-group.flex-end { display:flex; align-items:flex-end; }
+    .save-btn-wide { width:100%; padding:9px 14px; font-size:14px; }
+    .help-text { font-size:13px; color:#64748b; margin-top:0; margin-bottom:14px; }
+    .text-center { text-align:center; }
+    .text-nowrap { white-space:nowrap; }
+    .status-gap { margin-top:10px; }
+    .code-xs { font-size:11px; }
+    .text-muted { color:#94a3b8; }
+    .host-cell { font-size:12px; }
+    .cell-dash { text-align:center; color:#94a3b8; font-size:12px; }
 </style>
 {% endblock %}
 
@@ -82,7 +94,7 @@
 
     <!-- Create Form -->
     <div class="section">
-        <h2>⚡ Add OpenAlgo Profile</h2>
+        <h2>Add OpenAlgo Profile</h2>
         <div class="grid">
             <div class="form-group">
                 <label for="profileName">Profile Name</label>
@@ -97,11 +109,11 @@
                 <input id="apiKey" type="text" placeholder="OpenAlgo API key" />
             </div>
             <div class="form-group">
-                <label for="wsUrl">WebSocket URL <span style="color:#888;font-weight:normal;">(for live LTP)</span></label>
+                <label for="wsUrl">WebSocket URL <span class="muted-inline">(for live LTP)</span></label>
                 <input id="wsUrl" type="text" placeholder="e.g., ws://127.0.0.1:8765" />
             </div>
-            <div class="form-group" style="display:flex;align-items:flex-end;">
-                <button class="btn btn-primary" id="saveBtn" onclick="createProfile()" style="width:100%;padding:9px 14px;font-size:14px;">Save Profile</button>
+            <div class="form-group flex-end">
+                <button class="btn btn-primary save-btn-wide" id="saveBtn" onclick="createProfile()">Save Profile</button>
             </div>
         </div>
         <div id="formStatus" class="status"></div>
@@ -110,7 +122,7 @@
     <!-- Profiles Table -->
     <div class="section">
         <h2>Saved OpenAlgo Profiles</h2>
-        <p style="font-size:13px;color:#666;margin-top:0;margin-bottom:14px;">
+        <p class="help-text">
             Click <strong>Edit</strong> to modify a profile. Use <strong>Set as WS Default</strong> to choose which profile
             drives Live LTP in trade views — other profiles are used as fallback automatically.
         </p>
@@ -122,8 +134,8 @@
                         <th>Host</th>
                         <th>WS URL</th>
                         <th>API Key</th>
-                        <th style="text-align:center;">Live LTP</th>
-                        <th style="text-align:center;white-space:nowrap;">Actions</th>
+                        <th class="text-center">Live LTP</th>
+                        <th class="text-center text-nowrap">Actions</th>
                     </tr>
                 </thead>
                 <tbody id="profilesBody">
@@ -131,7 +143,7 @@
                 </tbody>
             </table>
         </div>
-        <div id="tableStatus" class="status" style="margin-top:10px;"></div>
+        <div id="tableStatus" class="status status-gap"></div>
     </div>
 
 </div>
@@ -183,16 +195,16 @@
             ? `<button class="btn btn-sm btn-outline ${p.is_ws_default ? 'active' : ''}" onclick="setWsDefault(${p.id})">${p.is_ws_default ? '✓ WS Default' : 'Set WS Default'}</button>`
             : `<button class="btn btn-sm btn-outline" disabled title="Set a WS URL first">Set WS Default</button>`;
         const wsDisplay = p.ws_url
-            ? `<code style="font-size:11px;">${p.ws_url}</code>`
-            : '<span style="color:#aaa;">—</span>';
+            ? `<code class="code-xs">${escHtml(p.ws_url)}</code>`
+            : '<span class="text-muted">—</span>';
         return `
         <tr id="row-${p.id}">
             <td>${escHtml(p.profile_name)}${wsBadge}</td>
-            <td style="font-size:12px;">${escHtml(p.host)}</td>
+            <td class="host-cell">${escHtml(p.host)}</td>
             <td>${wsDisplay}</td>
-            <td><code style="font-size:12px;">${escHtml(p.api_key_masked)}</code></td>
-            <td style="text-align:center;">${wsBtn}</td>
-            <td style="text-align:center;">
+            <td><code class="host-cell">${escHtml(p.api_key_masked)}</code></td>
+            <td class="text-center">${wsBtn}</td>
+            <td class="text-center">
                 <div class="action-btns">
                     <button class="btn btn-sm btn-secondary" onclick="startEdit(${p.id})">Edit</button>
                     <button class="btn btn-sm btn-danger"    onclick="deleteProfile(${p.id})">Delete</button>
@@ -208,8 +220,8 @@
             <td><input class="edit-input" id="edit-host-${p.id}"   value="${escAttr(p.host)}"         placeholder="http://..." /></td>
             <td><input class="edit-input" id="edit-wsurl-${p.id}"  value="${escAttr(p.ws_url || '')}"  placeholder="ws://..." /></td>
             <td><input class="edit-input" id="edit-apikey-${p.id}" value="${escAttr(p.api_key_masked)}" placeholder="Enter new key (leave masked to keep current)" /></td>
-            <td style="text-align:center; color:#888; font-size:12px;">—</td>
-            <td style="text-align:center;">
+            <td class="cell-dash">—</td>
+            <td class="text-center">
                 <div class="action-btns">
                     <button class="btn btn-sm btn-success"   onclick="saveEdit(${p.id})">Save</button>
                     <button class="btn btn-sm btn-secondary" onclick="cancelEdit(${p.id})">Cancel</button>

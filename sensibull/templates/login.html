@@ -12,20 +12,21 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: radial-gradient(circle at top, #eef2ff 0%, #f8fafc 42%, #f1f5f9 100%);
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 20px;
+            padding: 16px;
         }
 
         .login-container {
-            background: white;
+            background: #fff;
             border-radius: 12px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-            padding: 40px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 20px 48px rgba(15, 23, 42, 0.12);
+            padding: 30px;
             width: 100%;
             max-width: 420px;
         }
@@ -36,21 +37,23 @@
         }
 
         .login-header h1 {
-            color: #333;
-            font-size: 28px;
+            color: #0f172a;
+            font-size: 26px;
             margin-bottom: 8px;
+            letter-spacing: -0.02em;
         }
 
         .login-header p {
-            color: #666;
+            color: #64748b;
             font-size: 14px;
         }
 
         .mode-toggle {
             display: flex;
-            background: #f5f5f5;
-            border-radius: 8px;
-            padding: 4px;
+            background: #f8fafc;
+            border-radius: 10px;
+            border: 1px solid #e2e8f0;
+            padding: 3px;
             margin-bottom: 24px;
         }
 
@@ -59,18 +62,18 @@
             padding: 10px;
             border: none;
             background: transparent;
-            color: #666;
+            color: #64748b;
             font-size: 14px;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
-            border-radius: 6px;
-            transition: all 0.3s ease;
+            border-radius: 8px;
+            transition: all 160ms ease;
         }
 
         .mode-toggle button.active {
             background: white;
-            color: #667eea;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            color: #4338ca;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.08);
         }
 
         .form-group {
@@ -79,8 +82,8 @@
 
         .form-group label {
             display: block;
-            color: #333;
-            font-weight: 500;
+            color: #334155;
+            font-weight: 600;
             margin-bottom: 8px;
             font-size: 14px;
         }
@@ -88,16 +91,16 @@
         .form-group input {
             width: 100%;
             padding: 12px 16px;
-            border: 2px solid #e1e8ed;
-            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
             font-size: 15px;
-            transition: all 0.3s ease;
+            transition: all 160ms ease;
             outline: none;
         }
 
         .form-group input:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: #818cf8;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
         }
 
         .remember-me {
@@ -114,7 +117,7 @@
         }
 
         .remember-me label {
-            color: #666;
+            color: #64748b;
             font-size: 14px;
             cursor: pointer;
             user-select: none;
@@ -123,19 +126,20 @@
         .btn-login {
             width: 100%;
             padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
+            background: #4f46e5;
+            color: #fff;
+            border: 1px solid #4338ca;
+            border-radius: 10px;
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            transition: transform 130ms ease, box-shadow 130ms ease, background-color 130ms ease;
         }
 
         .btn-login:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+            transform: translateY(-1px);
+            background: #4338ca;
+            box-shadow: 0 8px 18px rgba(79, 70, 229, 0.24);
         }
 
         .btn-login:active {
@@ -144,42 +148,43 @@
 
         .alert {
             padding: 12px 16px;
-            border-radius: 8px;
+            border-radius: 10px;
             margin-bottom: 24px;
             font-size: 14px;
+            border: 1px solid transparent;
         }
 
         .alert-error {
-            background: #fee;
-            color: #c33;
-            border-left: 4px solid #c33;
+            background: #fee2e2;
+            color: #991b1b;
+            border-color: #fecaca;
         }
 
         .alert-info {
-            background: #e7f3ff;
-            color: #0066cc;
-            border-left: 4px solid #0066cc;
+            background: #eef2ff;
+            color: #3730a3;
+            border-color: #c7d2fe;
         }
 
         .alert-success {
-            background: #e8f5e9;
-            color: #2e7d32;
-            border-left: 4px solid #2e7d32;
+            background: #dcfce7;
+            color: #166534;
+            border-color: #86efac;
         }
 
         .login-footer {
             text-align: center;
             margin-top: 24px;
             padding-top: 24px;
-            border-top: 1px solid #e1e8ed;
-            color: #666;
+            border-top: 1px solid #e2e8f0;
+            color: #64748b;
             font-size: 13px;
         }
 
         .lock-icon {
             width: 60px;
             height: 60px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #eef2ff;
             border-radius: 50%;
             display: flex;
             align-items: center;

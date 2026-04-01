@@ -8,23 +8,26 @@
 
 {% block head %}
 <style>
-    body { background: #f5f5f5; }
-
     .container {
         max-width: 1200px;
         margin: 0 auto;
-        padding: 20px;
     }
 
     .section {
-        background: white;
-        padding: 25px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 16px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
     }
 
-    .section h2 { color: #333; font-size: 20px; margin: 0 0 15px; }
+    .section h2 {
+        color: #0f172a;
+        font-size: 1.15rem;
+        margin: 0 0 16px;
+        letter-spacing: -0.01em;
+    }
 
     .add-form {
         display: flex;
@@ -34,201 +37,305 @@
     }
 
     .form-group { flex: 1; min-width: 300px; }
-    .form-group label { display: block; margin-bottom: 5px; color: #666; font-size: 14px; }
-    .form-group input {
-        width: 100%;
-        padding: 10px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-size: 14px;
+    .form-group label {
+        display: block;
+        margin-bottom: 6px;
+        color: #475569;
+        font-size: 13px;
+        font-weight: 600;
     }
-    .form-group input:focus { outline: none; border-color: #007bff; }
 
     .btn {
-        padding: 10px 20px;
-        border: none;
-        border-radius: 4px;
+        padding: 10px 16px;
+        border: 1px solid transparent;
+        border-radius: 10px;
         cursor: pointer;
         font-size: 14px;
-        font-weight: 500;
-        transition: all 0.2s;
+        font-weight: 600;
+        transition: transform 130ms ease, box-shadow 130ms ease, background-color 130ms ease;
     }
-    .btn-primary  { background: #007bff; color: white; }
-    .btn-primary:hover  { background: #0056b3; }
-    .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
-    .btn-success  { background: #28a745; color: white; }
-    .btn-success:hover  { background: #218838; }
-    .btn-danger   { background: #dc3545; color: white; }
-    .btn-danger:hover   { background: #c82333; }
 
-    .validation-message { margin-top: 10px; padding: 10px; border-radius: 4px; font-size: 14px; }
-    .validation-message.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-    .validation-message.error   { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
 
-    .stats { display: flex; gap: 20px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; flex-wrap: wrap; }
-    .stat-item { flex: 1; min-width: 80px; }
-    .stat-label { color: #666; font-size: 12px; margin-bottom: 5px; }
-    .stat-value { color: #333; font-size: 24px; font-weight: bold; }
+    .btn-primary  { background: #4f46e5; color: #fff; border-color: #4338ca; }
+    .btn-primary:hover  { background: #4338ca; box-shadow: 0 8px 18px rgba(79, 70, 229, 0.24); }
+    .btn-primary:disabled { background: #a5b4fc; border-color: #a5b4fc; }
+    .btn-success  { background: #15803d; color: #fff; border-color: #166534; }
+    .btn-success:hover  { background: #166534; box-shadow: 0 8px 18px rgba(21, 128, 61, 0.2); }
+    .btn-danger   { background: #dc2626; color: #fff; border-color: #b91c1c; }
+    .btn-danger:hover   { background: #b91c1c; box-shadow: 0 8px 18px rgba(220, 38, 38, 0.2); }
+
+    .validation-message { margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 14px; border: 1px solid transparent; }
+    .validation-message.success { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .validation-message.error   { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+
+    .stats {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+    }
+
+    .stat-item {
+        flex: 1;
+        min-width: 120px;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: #f8fafc;
+        padding: 12px;
+    }
+
+    .stat-label { color: #64748b; font-size: 12px; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .stat-value { color: #0f172a; font-size: 22px; font-weight: 700; }
 
     .profiles-table { width: 100%; border-collapse: collapse; }
-    .profiles-table th { background: #f8f9fa; padding: 12px; text-align: left; font-weight: 600; color: #333; border-bottom: 2px solid #dee2e6; }
-    .profiles-table td { padding: 12px; border-bottom: 1px solid #dee2e6; }
-    .profiles-table tr:hover { background: #f8f9fa; }
-
-    .status-badge { display: inline-block; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; }
-    .status-badge.active   { background: #d4edda; color: #155724; }
-    .status-badge.inactive { background: #f8d7da; color: #721c24; }
-
-    .action-buttons { display: flex; gap: 8px; }
-    .icon-btn {
-        background: none; border: none; cursor: pointer; font-size: 18px;
-        padding: 5px; border-radius: 4px; transition: all 0.2s;
+    .profiles-table th {
+        background: #f8fafc;
+        padding: 12px;
+        text-align: left;
+        font-weight: 600;
+        color: #334155;
+        border-bottom: 1px solid #e2e8f0;
     }
-    .icon-btn:hover { background: #f8f9fa; }
-    .icon-btn[title*="Delete"] { color: #dc3545; }
 
-    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+    .profiles-table td { padding: 12px; border-bottom: 1px solid #e2e8f0; color: #1e293b; }
+    .profiles-table tr:hover { background: #f8fafc; }
+    .profile-link { color: inherit; text-decoration: none; }
+    .profile-link:hover { color: #1e40af; }
+    .profile-slug { color: #94a3b8; font-size: 12px; }
+
+    .status-badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
+    .status-badge.active   { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .status-badge.inactive { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+
+    .action-buttons { display: flex; gap: 6px; }
+    .icon-btn {
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        cursor: pointer;
+        font-size: 15px;
+        padding: 5px 8px;
+        border-radius: 8px;
+        transition: background-color 130ms ease, border-color 130ms ease;
+    }
+
+    .icon-btn:hover { background: #f8fafc; border-color: #94a3b8; }
+    .icon-btn[title*="Delete"] { color: #dc2626; }
+
+    .modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.42);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+    }
+
     .modal.show { display: flex; }
-    .modal-content { background: white; padding: 30px; border-radius: 8px; max-width: 500px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .modal-header { margin-bottom: 20px; }
-    .modal-header h3 { color: #333; font-size: 20px; margin: 0; }
-    .modal-body { margin-bottom: 20px; }
-    .modal-body p { color: #666; line-height: 1.6; margin-bottom: 15px; }
+    .modal-content {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        padding: 24px;
+        border-radius: 12px;
+        max-width: 520px;
+        width: 100%;
+        box-shadow: 0 24px 56px rgba(15, 23, 42, 0.2);
+    }
+
+    .modal-header { margin-bottom: 14px; }
+    .modal-header h3 { color: #0f172a; font-size: 20px; margin: 0; }
+    .modal-body { margin-bottom: 16px; }
+    .modal-body p { color: #64748b; line-height: 1.6; margin-bottom: 14px; }
     .modal-footer { display: flex; gap: 10px; justify-content: flex-end; }
 
-    .delete-option { padding: 15px; border: 2px solid #ddd; border-radius: 4px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s; }
-    .delete-option:hover { border-color: #007bff; background: #f8f9fa; }
+    .delete-option {
+        padding: 14px;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        transition: border-color 130ms ease, background-color 130ms ease;
+    }
+
+    .delete-option:hover { border-color: #818cf8; background: #f8fafc; }
     .delete-option input { margin-right: 10px; }
-    .delete-option-title { font-weight: 600; color: #333; margin-bottom: 5px; }
-    .delete-option-desc  { color: #666; font-size: 13px; }
+    .delete-option-title { font-weight: 600; color: #0f172a; margin-bottom: 5px; }
+    .delete-option-desc  { color: #64748b; font-size: 13px; }
 
     .toast {
-        position: fixed; bottom: 20px; right: 20px; background: #333; color: white;
-        padding: 15px 20px; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        display: none; z-index: 2000;
+        position: fixed;
+        bottom: 16px;
+        right: 16px;
+        background: #0f172a;
+        color: #fff;
+        padding: 12px 16px;
+        border-radius: 10px;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.15);
+        display: none;
+        z-index: 2000;
     }
-    .toast.show    { display: block; animation: slideIn 0.3s ease-out; }
-    .toast.success { background: #28a745; }
-    .toast.error   { background: #dc3545; }
+
+    .toast.show    { display: block; animation: slideIn 0.24s ease-out; }
+    .toast.success { background: #166534; }
+    .toast.error   { background: #b91c1c; }
 
     @keyframes slideIn {
-        from { transform: translateX(400px); opacity: 0; }
-        to   { transform: translateX(0);     opacity: 1; }
+        from { transform: translateX(120%); opacity: 0; }
+        to   { transform: translateX(0); opacity: 1; }
     }
 
-    .loading     { text-align: center; padding: 40px; color: #666; }
-    .empty-state { text-align: center; padding: 60px 20px; color: #999; font-size: 1.1em; }
+    .loading { text-align: center; padding: 32px; color: #64748b; }
+    .empty-state { text-align: center; padding: 48px 20px; color: #94a3b8; font-size: 1rem; }
 
-    /* Tabs */
     .tab-bar {
         display: flex;
-        gap: 4px;
-        margin-bottom: 20px;
-        border-bottom: 2px solid #dee2e6;
+        gap: 6px;
+        margin-bottom: 16px;
+        border-bottom: 1px solid #e2e8f0;
     }
+
     .tab-btn {
-        padding: 10px 24px;
+        padding: 10px 16px;
         border: none;
         background: none;
         cursor: pointer;
-        font-size: 15px;
-        font-weight: 500;
-        color: #666;
-        border-bottom: 3px solid transparent;
-        margin-bottom: -2px;
-        transition: all 0.2s;
+        font-size: 14px;
+        font-weight: 600;
+        color: #64748b;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        transition: color 140ms ease, border-color 140ms ease;
     }
-    .tab-btn:hover { color: #007bff; }
-    .tab-btn.active { color: #007bff; border-bottom-color: #007bff; }
+
+    .tab-btn:hover { color: #4338ca; }
+    .tab-btn.active { color: #4338ca; border-bottom-color: #4338ca; }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
 
-    /* View Profiles tab */
     .vp-input-label {
         display: flex;
         align-items: center;
         gap: 8px;
         margin-bottom: 8px;
-        color: #666;
+        color: #475569;
         font-size: 14px;
         font-weight: 500;
     }
+
+    .muted-hint { color: #64748b; }
+    .ml-12 { margin-left: 12px; }
+    .cursor-default { cursor: default; }
+    .vp-row-count { margin-top: 10px; font-size: 13px; color: #64748b; }
+    .is-hidden { display: none; }
+    .vp-no-results { text-align:center; color:#94a3b8; padding:30px; }
+
     .tooltip-wrap { position: relative; display: inline-flex; }
     .tooltip-icon {
-        width: 18px; height: 18px; border-radius: 50%;
-        background: #007bff; color: white;
-        font-size: 11px; font-weight: bold;
-        display: inline-flex; align-items: center; justify-content: center;
-        cursor: pointer; flex-shrink: 0; user-select: none;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #4f46e5;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        user-select: none;
     }
+
     .tooltip-box {
         display: none;
         position: absolute;
-        left: 26px; top: -8px;
+        left: 26px;
+        top: -8px;
         background: #fff;
-        border: 1px solid #dee2e6;
-        border-radius: 8px;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 24px 56px rgba(15, 23, 42, 0.14);
         padding: 16px 18px;
-        width: 460px;
+        width: min(460px, calc(100vw - 32px));
         z-index: 500;
         font-size: 13px;
-        color: #333;
+        color: #334155;
         line-height: 1.6;
     }
+
     .tooltip-box.visible { display: block; }
-    .tooltip-box h4 { margin: 0 0 10px; font-size: 14px; color: #007bff; }
+    .tooltip-box h4 { margin: 0 0 10px; font-size: 14px; color: #312e81; }
     .tooltip-box ol { margin: 0 0 12px; padding-left: 18px; }
     .tooltip-box li { margin-bottom: 4px; }
     .tooltip-box pre {
-        background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px;
-        padding: 10px; font-size: 11px; overflow-x: auto; white-space: pre-wrap;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 11px;
+        overflow-x: auto;
+        white-space: pre-wrap;
         margin: 0;
     }
+
     #vpIdsInput {
-        width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;
-        font-size: 13px; font-family: monospace; resize: vertical;
+        width: 100%;
+        font-size: 13px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        resize: vertical;
         box-sizing: border-box;
     }
-    #vpIdsInput:focus { outline: none; border-color: #007bff; }
+
     .vp-controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-    .vp-filter-bar {
-        display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-        margin-bottom: 14px;
-    }
-    .vp-filter-bar input {
-        padding: 7px 10px; border: 1px solid #ddd; border-radius: 4px;
-        font-size: 13px; width: 220px;
-    }
-    .vp-filter-bar input:focus { outline: none; border-color: #007bff; }
-    .vp-filter-bar label { font-size: 13px; color: #666; }
+    .vp-filter-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+    .vp-filter-bar input { font-size: 13px; width: 220px; }
+    .vp-filter-bar label { font-size: 13px; color: #64748b; }
     .vp-table-wrap { overflow-x: auto; }
     .vp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .vp-table th {
-        background: #f8f9fa; padding: 10px 12px; text-align: left;
-        font-weight: 600; color: #333; border-bottom: 2px solid #dee2e6;
-        cursor: pointer; white-space: nowrap; user-select: none;
+        background: #f8fafc;
+        padding: 10px 12px;
+        text-align: left;
+        font-weight: 600;
+        color: #334155;
+        border-bottom: 1px solid #e2e8f0;
+        cursor: pointer;
+        white-space: nowrap;
+        user-select: none;
     }
+
     .vp-table th:last-child { cursor: default; }
-    .vp-table th:hover:not(:last-child) { background: #e9ecef; }
+    .vp-table th:hover:not(:last-child) { background: #eef2ff; }
     .vp-table th .sort-icon { margin-left: 4px; font-size: 11px; opacity: 0.4; }
     .vp-table th.sort-asc .sort-icon,
     .vp-table th.sort-desc .sort-icon { opacity: 1; }
-    .vp-table td { padding: 10px 12px; border-bottom: 1px solid #dee2e6; }
-    .vp-table tr:hover { background: #f8f9fa; }
-    .vp-table .err-row td { color: #dc3545; background: #fff5f5; }
-    .profit-pos { color: #28a745; font-weight: 600; }
-    .profit-neg { color: #dc3545; font-weight: 600; }
-    #vpStatus { font-size: 13px; color: #666; }
-    .vp-id-link { color: #007bff; text-decoration: none; font-weight: 500; }
+    .vp-table td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
+    .vp-table tr:hover { background: #f8fafc; }
+    .vp-table .err-row td { color: #b91c1c; background: #fef2f2; }
+    .profit-pos { color: #166534; font-weight: 600; }
+    .profit-neg { color: #b91c1c; font-weight: 600; }
+    #vpStatus { font-size: 13px; color: #64748b; }
+    .vp-id-link { color: #4338ca; text-decoration: none; font-weight: 500; }
     .vp-id-link:hover { text-decoration: underline; }
     .vp-add-btn {
-        background: #28a745; color: white; border: none; border-radius: 4px;
-        width: 28px; height: 28px; font-size: 18px; line-height: 1;
-        cursor: pointer; transition: background 0.2s;
+        background: #15803d;
+        color: #fff;
+        border: 1px solid #166534;
+        border-radius: 8px;
+        width: 28px;
+        height: 28px;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
+        transition: background-color 120ms ease;
     }
-    .vp-add-btn:hover { background: #218838; }
-    .vp-add-btn:disabled { background: #aaa; cursor: not-allowed; }
+
+    .vp-add-btn:hover { background: #166534; }
+    .vp-add-btn:disabled { background: #94a3b8; border-color: #94a3b8; cursor: not-allowed; }
+    .vp-add-btn.done { background: #64748b; border-color: #64748b; }
 </style>
 {% endblock %}
 
@@ -237,8 +344,8 @@
 
     <!-- Tab bar -->
     <div class="tab-bar">
-        <button class="tab-btn active" onclick="switchTab('manage')">⚙️ Manage Profiles</button>
-        <button class="tab-btn"        onclick="switchTab('view')">👁️ View Profiles</button>
+        <button class="tab-btn active" onclick="switchTab('manage')">Manage Profiles</button>
+        <button class="tab-btn"        onclick="switchTab('view')">View Profiles</button>
     </div>
 
     <!-- ── Tab: Manage Profiles ── -->
@@ -246,7 +353,7 @@
 
         <!-- Add Profile Section -->
         <div class="section">
-            <h2>➕ Add New Profile</h2>
+            <h2>Add New Profile</h2>
             <div class="add-form">
                 <div class="form-group">
                     <label for="username">Username (slug)</label>
@@ -260,7 +367,7 @@
 
         <!-- Profiles List Section -->
         <div class="section">
-            <h2>📋 Existing Profiles</h2>
+            <h2>Existing Profiles</h2>
             <div class="stats">
                 <div class="stat-item"><div class="stat-label">Total Profiles</div><div class="stat-value" id="totalProfiles">-</div></div>
                 <div class="stat-item"><div class="stat-label">Active</div><div class="stat-value" id="activeProfiles">-</div></div>
@@ -275,7 +382,7 @@
     <div id="tab-view" class="tab-panel">
 
         <div class="section">
-            <h2>👁️ View Live Profiles</h2>
+            <h2>View Live Profiles</h2>
 
             <div class="vp-input-label">
                 <span>Sensibull IDs (comma-separated or JSON array)</span>
@@ -285,7 +392,7 @@
                         <h4>How to get the IDs</h4>
                         <ol>
                             <li>Go to the Hall of Fame page on Sensibull<br>
-                                <small style="color:#666;">(live positions, sorted by P&amp;L desc)</small></li>
+                                <small class="muted-hint">(live positions, sorted by P&amp;L desc)</small></li>
                             <li>Wait for the table to fully load</li>
                             <li>Open DevTools → <strong>Console</strong> tab (F12)</li>
                             <li>Paste and run the script below</li>
@@ -323,12 +430,12 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
         </div>
 
         <!-- Results -->
-        <div class="section" id="vpResultsSection" style="display:none;">
-            <h2>📊 Results</h2>
+        <div class="section is-hidden" id="vpResultsSection">
+            <h2>Results</h2>
             <div class="vp-filter-bar">
                 <label>Filter by underlying:</label>
                 <input type="text" id="vpUnderlyingFilter" placeholder="e.g. NIFTY, BANKNIFTY" oninput="vpApplyFilter()" />
-                <label style="margin-left:12px;">Search ID:</label>
+                <label class="ml-12">Search ID:</label>
                 <input type="text" id="vpIdFilter" placeholder="profile id" oninput="vpApplyFilter()" />
             </div>
             <div class="vp-table-wrap">
@@ -341,13 +448,13 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
                             <th onclick="vpSort('capital')"      data-col="capital">Capital <span class="sort-icon"></span></th>
                             <th onclick="vpSort('live_since')"   data-col="live_since">Live Since <span class="sort-icon"></span></th>
                             <th data-col="underlyings">Underlyings</th>
-                            <th data-col="actions" style="cursor:default;">Actions</th>
+                            <th data-col="actions" class="cursor-default">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="vpTableBody"></tbody>
                 </table>
             </div>
-            <div id="vpRowCount" style="margin-top:10px; font-size:13px; color:#666;"></div>
+            <div id="vpRowCount" class="vp-row-count"></div>
         </div>
 
     </div>
@@ -359,7 +466,7 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
     <div class="modal-content">
         <div class="modal-header"><h3>Delete "<span id="deleteProfileName"></span>"?</h3></div>
         <div class="modal-body">
-            <p>⚠️ Choose deletion type:</p>
+            <p>Choose deletion type:</p>
             <div class="delete-option" onclick="selectDeleteOption('soft')">
                 <input type="radio" name="deleteType" value="soft" id="deleteSoft">
                 <label for="deleteSoft">
@@ -439,7 +546,7 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
         const btn = document.getElementById('vpSubmitBtn');
         btn.disabled = true;
         document.getElementById('vpStatus').textContent = `Fetching ${ids.length} profile(s)…`;
-        document.getElementById('vpResultsSection').style.display = 'none';
+        document.getElementById('vpResultsSection').classList.add('is-hidden');
 
         const fetches = ids.map(id =>
             fetch(VP_BASE + id)
@@ -473,7 +580,7 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
         vpUpdateSortHeaders();
         vpApplyFilter();
 
-        document.getElementById('vpResultsSection').style.display = 'block';
+        document.getElementById('vpResultsSection').classList.remove('is-hidden');
         document.getElementById('vpStatus').textContent = `Done — ${ids.length} profile(s) loaded.`;
         btn.disabled = false;
     }
@@ -534,18 +641,28 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
         });
     }
 
+    function escHtml(s) {
+        return String(s || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function vpRenderTable(rows) {
         const tbody = document.getElementById('vpTableBody');
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#999;padding:30px;">No results match the filter.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="vp-no-results">No results match the filter.</td></tr>';
             document.getElementById('vpRowCount').textContent = '';
             return;
         }
-        tbody.innerHTML = rows.map(r => {
-            const profileUrl = `https://web.sensibull.com/verified-pnl/${r.id}/live-positions`;
+        tbody.innerHTML = rows.map((r, idx) => {
+            const safeId = escHtml(r.id);
+            const profileUrl = `https://web.sensibull.com/verified-pnl/${encodeURIComponent(r.id)}/live-positions`;
             if (r.error) {
                 return `<tr class="err-row">
-                    <td><a href="${profileUrl}" target="_blank" rel="noopener" class="vp-id-link">${r.id}</a></td>
+                    <td><a href="${profileUrl}" target="_blank" rel="noopener" class="vp-id-link">${safeId}</a></td>
                     <td colspan="5">⚠️ Failed to fetch</td>
                     <td></td>
                 </tr>`;
@@ -554,16 +671,26 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
             const profitStr   = r.total_profit !== null ? r.total_profit.toLocaleString('en-IN', {minimumFractionDigits:2}) : '—';
             const roiStr      = r.roi !== null ? r.roi.toFixed(2) + '%' : '—';
             const capitalStr  = r.capital !== null ? r.capital.toLocaleString('en-IN') : '—';
+            const safeLiveSince = escHtml(r.live_since || '—');
+            const safeUnderlyings = escHtml(r.underlyings || '—');
             return `<tr>
-                <td><a href="${profileUrl}" target="_blank" rel="noopener" class="vp-id-link">${r.id}</a></td>
+                <td><a href="${profileUrl}" target="_blank" rel="noopener" class="vp-id-link">${safeId}</a></td>
                 <td class="${profitClass}">${profitStr}</td>
                 <td class="${r.roi >= 0 ? 'profit-pos' : 'profit-neg'}">${roiStr}</td>
                 <td>${capitalStr}</td>
-                <td>${r.live_since || '—'}</td>
-                <td>${r.underlyings || '—'}</td>
-                <td><button class="vp-add-btn" onclick="vpAddProfile('${r.id}', this)" title="Add to scraping">+</button></td>
+                <td>${safeLiveSince}</td>
+                <td>${safeUnderlyings}</td>
+                <td><button class="vp-add-btn" data-vp-idx="${idx}" title="Add to scraping">+</button></td>
             </tr>`;
         }).join('');
+        tbody.querySelectorAll('.vp-add-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.getAttribute('data-vp-idx'));
+                const row = rows[idx];
+                if (!row || row.error) return;
+                vpAddProfile(row.id, btn);
+            });
+        });
         document.getElementById('vpRowCount').textContent = `Showing ${rows.length} of ${vpAllRows.length} profile(s)`;
     }
 
@@ -579,7 +706,7 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
             const data = await r.json();
             if (data.success) {
                 btn.textContent = '✓';
-                btn.style.background = '#6c757d';
+                btn.classList.add('done');
                 showToast(`Added "${slug}" for scraping!`, 'success');
             } else {
                 btn.disabled = false;
@@ -628,25 +755,48 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
                     </tr>
                 </thead>
                 <tbody>
-                    ${profiles.map(p => `
+                    ${profiles.map((p, idx) => {
+                        const safeSlug = escHtml(p.slug || '');
+                        const safeName = escHtml(p.name || p.slug || '');
+                        const safeLast = escHtml(formatTimestamp(p.last_scraped));
+                        const safeSnapshots = escHtml(String(p.snapshot_count || 0));
+                        const safeUnread = escHtml(String(p.unread_notifications || 0));
+                        return `
                     <tr>
-                        <td><a href="/profile/${p.slug}" style="color:inherit;text-decoration:none;"><strong>${p.name || p.slug}</strong></a><br><small style="color:#999;">${p.slug}</small></td>
+                        <td><a href="/profile/${encodeURIComponent(p.slug || '')}" class="profile-link"><strong>${safeName}</strong></a><br><small class="profile-slug">${safeSlug}</small></td>
                         <td><span class="status-badge ${p.is_active ? 'active' : 'inactive'}">${p.is_active ? '✓ Active' : '❌ Disabled'}</span></td>
-                        <td>${formatTimestamp(p.last_scraped)}</td>
-                        <td>${p.snapshot_count || 0}</td>
-                        <td>${p.unread_notifications || 0}</td>
+                        <td>${safeLast}</td>
+                        <td>${safeSnapshots}</td>
+                        <td>${safeUnread}</td>
                         <td>
                             <div class="action-buttons">
-                                <button class="icon-btn" onclick="toggleProfile(${p.id}, ${p.is_active})"
+                                <button class="icon-btn toggle-profile-btn" data-profile-idx="${idx}"
                                     title="${p.is_active ? 'Disable' : 'Enable'} scraping">
                                     ${p.is_active ? '⏸️' : '▶️'}
                                 </button>
-                                <button class="icon-btn" onclick="openDeleteModal(${p.id}, '${p.slug}')" title="Delete profile">🗑️</button>
+                                <button class="icon-btn delete-profile-btn" data-profile-idx="${idx}" title="Delete profile">🗑️</button>
                             </div>
                         </td>
-                    </tr>`).join('')}
+                    </tr>`;
+                    }).join('')}
                 </tbody>
             </table>`;
+        container.querySelectorAll('.toggle-profile-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.getAttribute('data-profile-idx'));
+                const p = profiles[idx];
+                if (!p) return;
+                toggleProfile(p.id, p.is_active);
+            });
+        });
+        container.querySelectorAll('.delete-profile-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.getAttribute('data-profile-idx'));
+                const p = profiles[idx];
+                if (!p) return;
+                openDeleteModal(p.id, p.slug);
+            });
+        });
     }
 
     function formatTimestamp(ts) {
@@ -669,9 +819,15 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
         const validateBtn = document.getElementById('validateBtn');
         const addBtn = document.getElementById('addBtn');
         const msgContainer = document.getElementById('validationMessage');
-        if (!username) { msgContainer.innerHTML = '<div class="validation-message error">Please enter a username</div>'; return; }
+        const setValidationMessage = (text, type) => {
+            const div = document.createElement('div');
+            div.className = `validation-message ${type}`;
+            div.textContent = text;
+            msgContainer.replaceChildren(div);
+        };
+        if (!username) { setValidationMessage('Please enter a username', 'error'); return; }
         validateBtn.disabled = true; validateBtn.textContent = 'Validating...';
-        msgContainer.innerHTML = ''; validatedSlug = null; addBtn.disabled = true;
+        msgContainer.replaceChildren(); validatedSlug = null; addBtn.disabled = true;
         try {
             const r = await fetch('/api/profiles/validate', {
                 method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({slug: username})
@@ -679,12 +835,12 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
             const data = await r.json();
             if (data.success) {
                 validatedSlug = username; addBtn.disabled = false;
-                msgContainer.innerHTML = '<div class="validation-message success">✓ Profile exists on Sensibull! Click "Add Profile" to add it.</div>';
+                setValidationMessage('✓ Profile exists on Sensibull! Click "Add Profile" to add it.', 'success');
             } else {
-                msgContainer.innerHTML = `<div class="validation-message error">❌ ${data.error || 'Validation failed'}</div>`;
+                setValidationMessage(`❌ ${data.error || 'Validation failed'}`, 'error');
             }
         } catch (e) {
-            msgContainer.innerHTML = `<div class="validation-message error">❌ Error: ${e.message}</div>`;
+            setValidationMessage(`❌ Error: ${e.message}`, 'error');
         } finally { validateBtn.disabled = false; validateBtn.textContent = 'Validate'; }
     }
 
@@ -700,7 +856,7 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
             if (data.success) {
                 showToast('Profile added successfully!', 'success');
                 document.getElementById('username').value = '';
-                document.getElementById('validationMessage').innerHTML = '';
+                document.getElementById('validationMessage').replaceChildren();
                 validatedSlug = null; loadProfiles();
             } else { showToast(data.error || 'Failed to add profile', 'error'); }
         } catch (e) { showToast('Error adding profile', 'error'); }
