@@ -73,6 +73,57 @@ The "Recent Changes" view filters out the noise of mark-to-market P&L swings and
 
 ---
 
+## Standalone LTP/Greeks Comparator
+
+Use `compare_ltp_greeks.py` to compare:
+- OpenAlgo HTTP `multiquotes` LTP and `multioptiongreeks`
+- Sensibull option LTP/Greeks
+- OpenAlgo WebSocket LTP as truth baseline
+
+### Install extra dependency (for WebSocket truth feed)
+```bash
+pip install websocket-client
+```
+
+### Example
+```bash
+cd sensibull
+python3 compare_ltp_greeks.py \
+  --openalgo-host http://127.0.0.1:3300 \
+  --openalgo-api-key <your_api_key> \
+  --openalgo-ws-url ws://127.0.0.1:8765 \
+  --samples 10 \
+  --interval 1 \
+  --output table
+```
+
+### Symbol input (inside script)
+Edit `BROKER_SYMBOLS` in `compare_ltp_greeks.py`:
+```python
+BROKER_SYMBOLS = [
+    "NIFTY26APR23000CE",
+    "NIFTY26APR23000PE",
+]
+```
+
+### Using saved OpenAlgo profile from DB
+If `openalgo_profiles` is configured, you can use:
+```bash
+python3 compare_ltp_greeks.py --openalgo-profile-id 1
+```
+or omit `--openalgo-profile-id` to auto-pick active profile with WS default priority.
+
+### Output
+The script prints:
+- latency summary (`avg`, `p50`, `p95`, `min`, `max`)
+- LTP absolute error vs OpenAlgo WS truth
+- Greeks cross-provider absolute differences
+- missing-data counts
+
+Use `--output json --output-file report.json` for full machine-readable details.
+
+---
+
 ## Verification Logic
 
 We have implemented a strict verification mechanism to ensure the data integrity of the "Recent Changes" view.

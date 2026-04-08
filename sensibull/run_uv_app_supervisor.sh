@@ -23,7 +23,7 @@ is_weekday() {
 is_market_window() {
   local hhmm
   hhmm="$(TZ="$MARKET_TZ" date +%H%M)"
-  is_weekday && [[ $((10#$hhmm)) -ge 915 && $((10#$hhmm)) -le 1530 ]]
+  is_weekday && [[ $((10#$hhmm)) -ge 910 && $((10#$hhmm)) -le 1530 ]]
 }
 
 stop_app_process() {
@@ -58,7 +58,7 @@ main() {
   fi
 
   if ! is_market_window; then
-    log "Outside weekday market window (09:15-15:30). Exiting."
+    log "Outside weekday market window (09:10-15:30). Exiting."
     exit 0
   fi
 

@@ -113,6 +113,19 @@ OPENALGO_HOLIDAYS_PATH = os.environ.get('OPENALGO_HOLIDAYS_PATH', '/api/v1/holid
 MARKET_HOLIDAY_CACHE = {}
 MARKET_HOLIDAY_CACHE_LOCK = threading.Lock()
 
+SENSIBULL_GREEKS_CACHE_TTL_SEC = int(os.environ.get('SENSIBULL_GREEKS_CACHE_TTL_SEC', '30'))
+SENSIBULL_GREEKS_CACHE = {}
+SENSIBULL_GREEKS_URL_TEMPLATE = "https://oxide.sensibull.com/v1/compute/cache/live_derivative_prices/{underlying_token}"
+
+INDEX_UNDERLYING_NAME_MAP = {
+    'NIFTY': 'NIFTY 50',
+    'BANKNIFTY': 'NIFTY BANK',
+    'FINNIFTY': 'NIFTY FIN SERVICE',
+    'MIDCPNIFTY': 'NIFTY MID SELECT',
+    'SENSEX': 'SENSEX',
+    'BANKEX': 'BANKEX',
+}
+
 @app.template_filter('to_datetime')
 def to_datetime_filter(value):
     # Timestamps in DB are stored in ISO format with IST timezone (e.g., "2026-02-16T10:30:00+05:30")
@@ -1115,6 +1128,92 @@ def _compute_implied_fill(prev_trade, curr_trade, original_avg_price=None):
     return side, fill_qty, price
 
 
+def _resolve_underlying_token(c, underlying):
+    underlying = (underlying or '').strip().upper()
+    if not underlying:
+        return None
+    index_name = INDEX_UNDERLYING_NAME_MAP.get(underlying, underlying)
+    row = c.execute("""
+        SELECT instrument_token
+        FROM master_contract
+        WHERE (UPPER(name) = ? OR UPPER(trading_symbol) = ?)
+          AND exchange IN ('NSE', 'BSE', 'INDICES')
+        ORDER BY
+            CASE
+                WHEN instrument_type = 'INDEX' THEN 1
+                WHEN exchange = 'NSE' AND instrument_type = 'EQ' THEN 2
+                WHEN exchange = 'BSE' THEN 3
+                ELSE 4
+            END
+        LIMIT 1
+    """, (index_name, underlying)).fetchone()
+    if row and row['instrument_token']:
+        return int(row['instrument_token'])
+
+    row = c.execute("""
+        SELECT instrument_token
+        FROM master_contract
+        WHERE (UPPER(trading_symbol) = ? OR UPPER(name) = ?)
+          AND instrument_type IN ('EQ', 'INDEX')
+        ORDER BY CASE WHEN exchange = 'NSE' THEN 1 WHEN exchange = 'BSE' THEN 2 ELSE 3 END
+        LIMIT 1
+    """, (underlying, underlying)).fetchone()
+    if row and row['instrument_token']:
+        return int(row['instrument_token'])
+    return None
+
+
+def _fetch_sensibull_greeks_by_token(underlying_token):
+    now_ts = time.time()
+    cached = SENSIBULL_GREEKS_CACHE.get(underlying_token)
+    if cached and (now_ts - cached.get('ts', 0) < SENSIBULL_GREEKS_CACHE_TTL_SEC):
+        return cached
+
+    url = SENSIBULL_GREEKS_URL_TEMPLATE.format(underlying_token=underlying_token)
+    try:
+        resp = http_requests.get(
+            url,
+            params={'get_nse_feed': 'true'},
+            timeout=10,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json,text/plain,*/*",
+                "Referer": "https://web.sensibull.com/",
+                "Origin": "https://web.sensibull.com",
+            },
+        )
+        payload = resp.json() if resp.content else {}
+    except Exception as e:
+        result = {'ts': now_ts, 'ok': False, 'error': str(e), 'token_map': {}, 'status_code': None}
+        SENSIBULL_GREEKS_CACHE[underlying_token] = result
+        return result
+
+    token_map = {}
+    if payload.get('status') is True:
+        per_expiry = ((payload.get('data') or {}).get('per_expiry_data') or {})
+        for expiry_data in per_expiry.values():
+            for opt in (expiry_data.get('options') or []):
+                tok = opt.get('token')
+                greeks = opt.get('greeks_with_iv')
+                if tok is None or not isinstance(greeks, dict):
+                    continue
+                try:
+                    token_map[int(tok)] = greeks
+                except Exception:
+                    continue
+        result = {'ts': now_ts, 'ok': True, 'error': None, 'token_map': token_map, 'status_code': resp.status_code}
+    else:
+        result = {
+            'ts': now_ts,
+            'ok': False,
+            'error': payload.get('errors') or payload.get('error') or 'unknown_error',
+            'token_map': {},
+            'status_code': resp.status_code,
+        }
+    SENSIBULL_GREEKS_CACHE[underlying_token] = result
+    return result
+
+
 def _calculate_event_brokerage(evt, underlying):
     """Calculate brokerage for a single trade event (ENTERED/MODIFIED/EXITED)."""
     event_type = evt.get('type', '')
@@ -1283,16 +1382,27 @@ def api_profile_all_underlyings(slug):
             continue
 
         # Track latest underlying_price and actual instrument_info expiry per symbol
+        snapshot_spot_by_symbol = {}
         for item in raw.get('data', []):
             sym = (item.get('trading_symbol') or '').upper()
             price = item.get('underlying_price')
             if sym and price is not None:
                 latest_underlying_price[sym] = price
+            spot_float = None
+            if price is not None:
+                try:
+                    spot_float = float(price)
+                    if sym:
+                        snapshot_spot_by_symbol[sym] = spot_float
+                except (TypeError, ValueError):
+                    pass
             for trade in item.get('trades', []):
                 tsym = trade.get('trading_symbol', '')
                 actual_expiry = (trade.get('instrument_info') or {}).get('expiry', '')
                 if tsym and actual_expiry:
                     actual_expiry_map[tsym] = actual_expiry
+                if spot_float is not None and tsym:
+                    snapshot_spot_by_symbol[tsym.upper()] = spot_float
 
         trades_map = normalize_trades_for_diff(raw.get('data', []))
 
@@ -1305,6 +1415,7 @@ def api_profile_all_underlyings(slug):
                 'present': False,
                 'last_trade': None,
                 'last_good_trade': None,
+                'last_spot_price': None,
             }
 
             # Get symbol and underlying
@@ -1411,6 +1522,9 @@ def api_profile_all_underlyings(slug):
                             exit_price_override=implied_fill_price if implied_fill_price else None,
                         )
 
+                event_spot = snapshot_spot_by_symbol.get(symbol.upper())
+                if event_spot is None:
+                    event_spot = st.get('last_spot_price')
                 underlying_events[underlying].append({
                     'timestamp': timestamp,
                     'snapshot_id': snap_id,
@@ -1418,6 +1532,7 @@ def api_profile_all_underlyings(slug):
                     'type': event_type,
                     'symbol': symbol,
                     'product': product,
+                    'spot_price': event_spot,
                     'expiry_date': actual_expiry_map.get(symbol) or _parse_expiry_from_symbol(symbol),
                     'before_quantity': before_qty,
                     'after_quantity': after_qty,
@@ -1437,6 +1552,9 @@ def api_profile_all_underlyings(slug):
             # Persist updated state
             st['present'] = curr_present
             st['last_trade'] = curr_trade if curr_trade is not None else None
+            snap_spot = snapshot_spot_by_symbol.get(symbol.upper())
+            if snap_spot is not None:
+                st['last_spot_price'] = snap_spot
             state[key] = st
 
     # Sort events by timestamp (latest first) for each underlying
@@ -1446,21 +1564,26 @@ def api_profile_all_underlyings(slug):
     # Sort underlyings alphabetically
     sorted_underlyings = sorted(underlyings_seen)
 
-    # Bulk-lookup lot sizes from master_contract and inject into each event
+    # Bulk-lookup lot sizes and tokens from master_contract and inject into each event
     all_symbols = set(
         evt['symbol']
         for evts in underlying_events.values()
         for evt in evts
     )
     lot_size_map = {}
+    symbol_token_map = {}
     if all_symbols:
         placeholders = ','.join('?' * len(all_symbols))
         rows = c.execute(
-            f"SELECT trading_symbol, lot_size FROM master_contract WHERE trading_symbol IN ({placeholders})",
+            f"SELECT trading_symbol, lot_size, instrument_token FROM master_contract WHERE trading_symbol IN ({placeholders})",
             list(all_symbols),
         ).fetchall()
         for row in rows:
             lot_size_map[row['trading_symbol']] = row['lot_size']
+            try:
+                symbol_token_map[row['trading_symbol']] = int(row['instrument_token'])
+            except Exception:
+                pass
 
     # Fallback: for old symbols not found in master_contract, look up any current
     # contract for the same underlying to get its lot size.
@@ -1479,10 +1602,101 @@ def api_profile_all_underlyings(slug):
         if row:
             fallback_lot_size_map[underlying] = row['lot_size']
 
+    # Build symbol-level greek/delta lookup from Sensibull greeks endpoint
+    underlying_to_token = {}
+    for underlying in underlyings_seen:
+        tok = _resolve_underlying_token(c, underlying)
+        if tok:
+            underlying_to_token[underlying] = tok
+
+    underlying_greeks = {}
+    greeks_source_status = {}
+    for underlying in underlyings_seen:
+        tok = underlying_to_token.get(underlying)
+        if not tok:
+            greeks_source_status[underlying] = {
+                'status': 'unavailable',
+                'underlying_token': None,
+                'reason': 'underlying_token_not_found',
+                'symbols_with_greeks': 0,
+                'status_code': None,
+            }
+            continue
+        result = _fetch_sensibull_greeks_by_token(tok)
+        underlying_greeks[underlying] = result.get('token_map') or {}
+        greeks_source_status[underlying] = {
+            'status': 'ok' if result.get('ok') else 'unavailable',
+            'underlying_token': tok,
+            'reason': result.get('error'),
+            'symbols_with_greeks': len(underlying_greeks[underlying]),
+            'status_code': result.get('status_code'),
+        }
+
+    symbol_greeks = {}
+    symbol_delta_status = {}
+    for symbol in all_symbols:
+        m = re.match(r'^[A-Z&-]+', (symbol or '').upper())
+        underlying = m.group(0) if m else None
+        tok = symbol_token_map.get(symbol)
+        if not underlying or tok is None:
+            symbol_delta_status[symbol] = 'unavailable'
+            continue
+        greeks = (underlying_greeks.get(underlying) or {}).get(tok)
+        if isinstance(greeks, dict):
+            symbol_greeks[symbol] = {
+                'delta': greeks.get('delta'),
+                'gamma': greeks.get('gamma'),
+                'theta': greeks.get('theta'),
+                'vega': greeks.get('vega'),
+                'iv': greeks.get('iv'),
+            }
+            symbol_delta_status[symbol] = 'ok' if greeks.get('delta') is not None else 'partial'
+        else:
+            symbol_delta_status[symbol] = 'unavailable'
+
     for underlying, evts in underlying_events.items():
         for evt in evts:
             evt['lot_size'] = lot_size_map.get(evt['symbol']) or fallback_lot_size_map.get(underlying, 0)
             evt['brokerage'] = _calculate_event_brokerage(evt, underlying)
+            g = symbol_greeks.get(evt['symbol']) or {}
+            evt['delta'] = g.get('delta')
+            evt['gamma'] = g.get('gamma')
+            evt['theta'] = g.get('theta')
+            evt['vega'] = g.get('vega')
+            evt['iv'] = g.get('iv')
+            evt['delta_status'] = symbol_delta_status.get(evt['symbol'], 'unavailable')
+
+    expiry_delta_summary = {}
+    for underlying, evts in underlying_events.items():
+        latest_by_symbol = {}
+        for evt in evts:
+            key = f"{evt.get('symbol', '')}|{evt.get('product', '')}"
+            if key not in latest_by_symbol:
+                latest_by_symbol[key] = evt
+        groups = {}
+        for evt in latest_by_symbol.values():
+            expiry = evt.get('expiry_date')
+            symbol = evt.get('symbol')
+            qty = evt.get('after_quantity') or 0
+            if not expiry or not symbol or qty == 0:
+                continue
+            if expiry not in groups:
+                groups[expiry] = {
+                    'expiry_date': expiry,
+                    'symbol_count': 0,
+                    'symbols_with_delta': 0,
+                    'symbols_missing_delta': 0,
+                    'net_position_delta': 0.0,
+                }
+            g = groups[expiry]
+            g['symbol_count'] += 1
+            delta = evt.get('delta')
+            if delta is None:
+                g['symbols_missing_delta'] += 1
+            else:
+                g['symbols_with_delta'] += 1
+                g['net_position_delta'] += float(delta) * float(qty)
+        expiry_delta_summary[underlying] = sorted(groups.values(), key=lambda item: item.get('expiry_date') or '')
 
     # Compute snapshot-accurate Net P&L from the final state (last_trade from latest snapshot).
     # This matches the Daily Timeline's Current P&L calculation which sums unbooked_pnl +
@@ -1544,6 +1758,8 @@ def api_profile_all_underlyings(slug):
         'profile': {'id': profile['id'], 'slug': profile['slug'], 'name': profile['name']},
         'underlyings': sorted_underlyings,
         'events': underlying_events,
+        'expiry_delta_summary': expiry_delta_summary,
+        'greeks_source_status': greeks_source_status,
         'filter': underlying_filter or None,
         'snapshot_booked_pnl': snapshot_booked,
         'snapshot_unbooked_pnl': snapshot_unbooked,
@@ -3769,12 +3985,12 @@ def api_openalgo_convert_symbols():
     return jsonify({'success': True, 'symbols': results})
 
 _UNDERLYING_TO_SPOT_SYMBOL = {
-    'NIFTY':       {'exchange': 'NSE', 'symbol': 'Nifty 50'},
-    'BANKNIFTY':   {'exchange': 'NSE', 'symbol': 'Nifty Bank'},
-    'FINNIFTY':    {'exchange': 'NSE', 'symbol': 'Nifty Fin Service'},
-    'MIDCPNIFTY':  {'exchange': 'NSE', 'symbol': 'NIFTY MID SELECT'},
-    'SENSEX':      {'exchange': 'BSE', 'symbol': 'SENSEX'},
-    'BANKEX':      {'exchange': 'BSE', 'symbol': 'BANKEX'},
+    'NIFTY':       {'exchange': 'NSE_INDEX', 'symbol': 'NIFTY'},
+    'BANKNIFTY':   {'exchange': 'NSE_INDEX', 'symbol': 'BANKNIFTY'},
+    'FINNIFTY':    {'exchange': 'NSE_INDEX', 'symbol': 'FINNIFTY'},
+    'MIDCPNIFTY':  {'exchange': 'NSE_INDEX', 'symbol': 'MIDCPNIFTY'},
+    'SENSEX':      {'exchange': 'BSE_INDEX', 'symbol': 'SENSEX'},
+    'BANKEX':      {'exchange': 'BSE_INDEX', 'symbol': 'BANKEX'},
 }
 
 @app.route('/api/openalgo/spot_symbols')
@@ -3791,6 +4007,13 @@ def api_openalgo_spot_symbols():
                 'underlying': u,
                 'openalgo_symbol': info['symbol'],
                 'exchange': info['exchange'],
+            })
+        else:
+            # Stock underlyings: subscribe via NSE equity segment
+            results.append({
+                'underlying': u,
+                'openalgo_symbol': u,
+                'exchange': 'NSE',
             })
     return jsonify({'success': True, 'symbols': results})
 

@@ -320,6 +320,7 @@
                 display: inline-block; font-size: 0.7em; padding: 1px 6px; border-radius: 10px;
                 background: #e9ecef; color: #555; margin-left: 6px; vertical-align: middle;
             }
+            .delta-hidden .delta-col { display: none !important; }
         </style>
         <div class="tabs">
             <button class="tab-btn active" id="tab-btn-daily" onclick="switchTab('daily')">Daily Timeline</button>
@@ -518,12 +519,19 @@
                     Consolidate Trades (1 row per symbol)
                 </label>
             </div>
+            <div style="margin-top: 6px; margin-bottom: 10px;">
+                <label style="cursor:pointer; user-select:none;">
+                    <input type="checkbox" id="show-greek-delta" checked style="margin-right:6px;" />
+                    Show option greek delta information
+                </label>
+            </div>
             <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                 <label style="cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; padding:5px 12px; background:#e8f4fd; border:1px solid #b8d8f0; border-radius:4px; font-size:0.88em; color:#0056b3;" title="Subscribe live LTP for all open positions across all expiries">
                     <input type="checkbox" id="ltp-subscribe-all" onchange="toggleAllLtp(this.checked)" style="margin:0;" />
                     Live LTP (All Open Positions)
                 </label>
                 <span id="ltp-all-count" style="font-size:0.82em; color:#888;"></span>
+                <button id="pnl-dist-chart-toggle-btn" onclick="togglePnlDistChart()" title="Show PnL distribution chart" style="font-size:0.82em; padding:3px 10px; background:#e8f4fd; border:1px solid #b8d8f0; border-radius:4px; cursor:pointer; color:#0056b3; display:inline-flex; align-items:center; gap:4px;">&#9685; PnL Chart</button>
             </div>
             <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                 <label style="cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; padding:5px 12px; background:#fff4e8; border:1px solid #ffd8a8; border-radius:4px; font-size:0.88em; color:#8a4b08;" title="Fetch margin for all open positions across all underlyings">
@@ -531,6 +539,7 @@
                     Margin (All Open Positions)
                 </label>
                 <span id="margin-all-count" style="font-size:0.82em; color:#888;"></span>
+                <button id="margin-dist-chart-toggle-btn" onclick="toggleMarginDistChart()" title="Show margin distribution chart" style="font-size:0.82em; padding:3px 10px; background:#fff4e8; border:1px solid #ffd8a8; border-radius:4px; cursor:pointer; color:#8a4b08; display:none; align-items:center; gap:4px;">&#9685; Margin Chart</button>
             </div>
             <div style="margin-top: 6px; margin-bottom: 10px; display:flex; align-items:center; gap:18px;">
                 <span style="font-weight:bold; font-size:0.9em; color:#555;">Show:</span>
@@ -550,6 +559,26 @@
             <div id="underlying-status" class="search-help"></div>
             <div id="underlying-summary-cards" class="metrics-container" style="margin-top: 20px; display: none;"></div>
             <div id="margin-all-open-info" style="display:none; margin-top:10px; margin-bottom:10px; padding:10px 12px; background:#fffaf3; border:1px solid #ffe3bf; border-radius:6px; font-size:0.83em;"></div>
+            <div id="margin-dist-chart-wrap" style="display:none; margin-top:12px; margin-bottom:10px; padding:12px 14px; background:#fffaf3; border:1px solid #ffe3bf; border-radius:6px;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+                    <span id="margin-dist-chart-title" style="font-weight:700; font-size:0.85em; color:#8a4b08; flex:1;">Margin Distribution by Underlying</span>
+                    <button id="margin-dist-back-btn" onclick="marginChartDrillBack()" style="display:none; font-size:0.8em; padding:3px 10px; background:#fff; border:1px solid #ffd8a8; border-radius:4px; cursor:pointer; color:#8a4b08;">← Back to Underlyings</button>
+                </div>
+                <div id="margin-dist-chart-loading" style="display:none; font-size:0.82em; color:#888; padding:6px 0;">⏳ Building chart…</div>
+                <div style="position:relative; max-height:300px; display:flex; justify-content:center;">
+                    <canvas id="margin-dist-chart" style="max-height:300px;"></canvas>
+                </div>
+            </div>
+            <div id="pnl-dist-chart-wrap" style="display:none; margin-top:12px; margin-bottom:10px; padding:12px 14px; background:#f0f8ff; border:1px solid #b8d8f0; border-radius:6px;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+                    <span id="pnl-dist-chart-title" style="font-weight:700; font-size:0.85em; color:#0056b3; flex:1;">PnL Distribution by Underlying</span>
+                    <button id="pnl-dist-back-btn" onclick="pnlChartDrillBack()" style="display:none; font-size:0.8em; padding:3px 10px; background:#fff; border:1px solid #b8d8f0; border-radius:4px; cursor:pointer; color:#0056b3;">← Back to Underlyings</button>
+                </div>
+                <div id="pnl-dist-chart-loading" style="display:none; font-size:0.82em; color:#888; padding:6px 0;">⏳ Building chart…</div>
+                <div style="position:relative; max-height:300px; display:flex; justify-content:center;">
+                    <canvas id="pnl-dist-chart" style="max-height:300px;"></canvas>
+                </div>
+            </div>
             <div id="underlying-groups-container" style="margin-top: 10px;">
                 <!-- Collapsible groups will be inserted here -->
             </div>
@@ -1164,6 +1193,48 @@
             return `${day} ${month} ${year}`;
         }
 
+        function fmtDelta(v, digits = 3) {
+            if (v === null || v === undefined || Number.isNaN(Number(v))) return '<span style="color:#aaa;">—</span>';
+            const n = Number(v);
+            const color = n > 0 ? '#28a745' : (n < 0 ? '#dc3545' : '#666');
+            const sign = n > 0 ? '+' : '';
+            return `<span style="color:${color}; font-weight:bold;">${sign}${n.toFixed(digits)}</span>`;
+        }
+
+        function buildDeltaTooltip(delta, qty, symbol, deltaStatus = 'ok', isOpen = true) {
+            if (!isOpen || Number(qty || 0) === 0) return 'Delta shown for open positions only.';
+            if (delta === null || delta === undefined || Number.isNaN(Number(delta))) {
+                return deltaStatus === 'ok'
+                    ? 'Delta currently unavailable.'
+                    : 'Delta unavailable for this symbol/underlying.';
+            }
+
+            const d = Number(delta);
+            const netQty = Number(qty || 0);
+            const absQty = Math.abs(netQty);
+            const side = netQty > 0 ? 'BUY (Long)' : 'SELL (Short)';
+            const optType = getOptionType(symbol) || 'Option';
+            const premiumPerPoint = d; // Option premium sensitivity per +1 underlying point
+            const pnlPerPoint = d * netQty; // Position P&L sensitivity per +1 underlying point
+            const premiumDir = premiumPerPoint > 0 ? 'up' : (premiumPerPoint < 0 ? 'down' : 'flat');
+            const pnlDir = pnlPerPoint > 0 ? 'up' : (pnlPerPoint < 0 ? 'down' : 'flat');
+
+            return `${optType} | ${side} | Qty ${absQty}` +
+                ` | If underlying moves +1: option premium ${premiumDir} by ${premiumPerPoint.toFixed(3)}` +
+                `, position P&L ${pnlDir} by ${Math.abs(pnlPerPoint).toFixed(2)}` +
+                ` | For -1 move, direction reverses.`;
+        }
+
+        function buildNetDeltaSummaryTooltip(netDelta, withDelta, missingDelta, scopeLabel = 'underlying') {
+            const nd = Number(netDelta || 0);
+            const coverage = `${Number(withDelta || 0)} with delta, ${Number(missingDelta || 0)} without`;
+            const dir = nd > 0 ? 'gain' : (nd < 0 ? 'loss' : 'flat');
+            return `${scopeLabel} net delta (open positions only). ` +
+                `BUY qty is treated positive, SELL qty negative. ` +
+                `If underlying moves +1, estimated combined position P&L is ${dir} by ${Math.abs(nd).toFixed(2)}. ` +
+                `For -1 move, direction reverses. Coverage: ${coverage}.`;
+        }
+
         function getOptionType(symbol) {
             if (!symbol) return null;
             if (symbol.toUpperCase().endsWith('PE')) return 'PE';
@@ -1598,6 +1669,20 @@
             if (_underlyingTradesLoaded && !forceReload) return;
             _underlyingTradesLoaded = true;
 
+            // Snapshot expanded state before DOM is cleared (forceReload only)
+            const expandedUnderlyings = new Set();
+            const expandedExpiries = new Set();
+            if (forceReload) {
+                document.querySelectorAll('.underlying-content.expanded').forEach(el => {
+                    expandedUnderlyings.add(el.id.replace('underlying-content-', ''));
+                });
+                document.querySelectorAll('[id^="expiry-content-"]').forEach(el => {
+                    if (el.style.display !== 'none') {
+                        expandedExpiries.add(el.id.replace('expiry-content-', ''));
+                    }
+                });
+            }
+
             const status = document.getElementById('underlying-status');
             const container = document.getElementById('underlying-groups-container');
             const filterSelect = document.getElementById('underlying-filter');
@@ -1670,13 +1755,57 @@
                     net: data.snapshot_net_pnl ?? null,
                 };
                 const underlyingPrices = data.underlying_prices || {};
-                _cachedUnderlyingsData = { underlyings, events, snapshotPnl, underlyingPrices };
+                const expiryDeltaSummary = data.expiry_delta_summary || {};
+                const greeksSourceStatus = data.greeks_source_status || {};
+                _cachedUnderlyingsData = {
+                    underlyings,
+                    events,
+                    snapshotPnl,
+                    underlyingPrices,
+                    expiryDeltaSummary,
+                    greeksSourceStatus,
+                };
 
-                renderUnderlyingGroups(underlyings, events, snapshotPnl, underlyingPrices);
-                
+                renderUnderlyingGroups(underlyings, events, snapshotPnl, underlyingPrices, expiryDeltaSummary, greeksSourceStatus);
+
+                // Subscribe spot prices for underlying headers (if WS is already connected)
+                _subscribeSpotSymbols();
+
+                // Restore expanded state and sort after forceReload re-render
+                if (forceReload) {
+                    expandedUnderlyings.forEach(u => {
+                        const content = document.getElementById(`underlying-content-${u}`);
+                        if (!content) return;
+                        const toggle = document.getElementById(`underlying-toggle-${u}`);
+                        const group = document.getElementById(`underlying-group-${u}`);
+                        const header = group?.querySelector('.underlying-header');
+                        content.classList.add('expanded');
+                        if (toggle) toggle.classList.add('expanded');
+                        if (header) header.classList.add('active');
+                    });
+                    expandedExpiries.forEach(id => {
+                        const content = document.getElementById(`expiry-content-${id}`);
+                        const toggle = document.getElementById(`expiry-toggle-${id}`);
+                        if (content) content.style.display = 'block';
+                        if (toggle) toggle.textContent = '▼';
+                    });
+                    Object.entries(expiryTableSortState).forEach(([id, state]) => {
+                        if (state.column) {
+                            filterExpiryTableWithSort(id, state.column, state.direction);
+                            updateSortIndicators(id, state.column, state.direction);
+                        }
+                    });
+                }
+
                 // Update subscription indicators after rendering buttons
                 updateSubscriptionIndicators();
                 refreshAllOpenMarginIfEnabled();
+                refreshPnlChartIfVisible();
+
+                // Re-subscribe live LTP for all open positions if master checkbox is checked
+                if (forceReload && document.getElementById('ltp-subscribe-all')?.checked) {
+                    await window.toggleAllLtp(true);
+                }
             } catch (e) {
                 if (status) status.textContent = 'Failed to load: ' + e;
             }
@@ -1684,10 +1813,20 @@
 
         function reRenderUnderlyingGroups() {
             if (_cachedUnderlyingsData) {
-                renderUnderlyingGroups(_cachedUnderlyingsData.underlyings, _cachedUnderlyingsData.events, _cachedUnderlyingsData.snapshotPnl, _cachedUnderlyingsData.underlyingPrices || {});
+                renderUnderlyingGroups(
+                    _cachedUnderlyingsData.underlyings,
+                    _cachedUnderlyingsData.events,
+                    _cachedUnderlyingsData.snapshotPnl,
+                    _cachedUnderlyingsData.underlyingPrices || {},
+                    _cachedUnderlyingsData.expiryDeltaSummary || {},
+                    _cachedUnderlyingsData.greeksSourceStatus || {}
+                );
+                // Re-subscribe spot prices for newly rendered underlying headers
+                _subscribeSpotSymbols();
                 // Update subscription indicators after re-rendering
                 updateSubscriptionIndicators();
                 refreshAllOpenMarginIfEnabled();
+                refreshPnlChartIfVisible();
             }
         }
 
@@ -2036,8 +2175,8 @@
             // Find the active column header and set indicator
             const columnMap = {
                 'timestamp': 0,
-                'booked_pnl': 8,
-                'unbooked_pnl': 9
+                'booked_pnl': 9,
+                'unbooked_pnl': 10
             };
             const thIndex = columnMap[activeColumn];
             if (thIndex !== undefined) {
@@ -2160,6 +2299,7 @@
                 if (!latestBySymbol[key]) latestBySymbol[key] = e;
             });
             let bookedPnl = 0, unbookedPnl = 0, exitPnl = 0, active = 0, closed = 0, brokerage = 0;
+            let netDelta = 0, symbolsWithDelta = 0, symbolsMissingDelta = 0;
             let peSellQty = 0, peBuyQty = 0, ceSellQty = 0, ceBuyQty = 0;
             Object.values(latestBySymbol).forEach(e => {
                 bookedPnl += Number(e.after_booked_pnl || 0);
@@ -2177,6 +2317,13 @@
                         if (qty < 0) ceSellQty += Math.abs(qty);
                         else ceBuyQty += qty;
                     }
+                    const d = e.delta;
+                    if (d === null || d === undefined || Number.isNaN(Number(d))) {
+                        symbolsMissingDelta += 1;
+                    } else {
+                        symbolsWithDelta += 1;
+                        netDelta += Number(d) * qty;
+                    }
                 }
             });
             // Sum exit_pnl and brokerage from all events (each event is a distinct transaction)
@@ -2184,7 +2331,22 @@
                 if (e.exit_pnl) exitPnl += Number(e.exit_pnl || 0);
                 brokerage += Number(e.brokerage || 0);
             });
-            return { bookedPnl, unbookedPnl, exitPnl, active, closed, brokerage, symbols: Object.keys(latestBySymbol).length, peSellQty, peBuyQty, ceSellQty, ceBuyQty };
+            return {
+                bookedPnl,
+                unbookedPnl,
+                exitPnl,
+                active,
+                closed,
+                brokerage,
+                symbols: Object.keys(latestBySymbol).length,
+                peSellQty,
+                peBuyQty,
+                ceSellQty,
+                ceBuyQty,
+                netDelta,
+                symbolsWithDelta,
+                symbolsMissingDelta,
+            };
         }
 
         function renderStatsBadge(stats, compact, expiryId, underlyingId) {
@@ -2214,6 +2376,12 @@
             // data-value stores the raw number so JS can read it without locale-sensitive parsing
             const bkdDataVal = expiryId ? ` data-value="${stats.bookedPnl}"` : '';
             const undBkdDataVal = (!compact && underlyingKey) ? ` data-value="${stats.bookedPnl}"` : '';
+            const netDeltaTitle = buildNetDeltaSummaryTooltip(
+                stats.netDelta,
+                stats.symbolsWithDelta,
+                stats.symbolsMissingDelta,
+                compact ? 'Expiry' : 'Underlying'
+            );
             if (compact) {
                 return `<span style="display:inline-flex;gap:10px;align-items:center;font-size:0.8em;font-weight:normal;margin-left:8px;">` +
                     `<span title="Latest booked P&amp;L across positions in this expiry">Bkd: <b${bkdId}${bkdDataVal} style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
@@ -2222,6 +2390,7 @@
                     `<span title="Total brokerage charges" style="color:#dc3545;">Brok: <b>₹${fmtNum(stats.brokerage||0,0)}</b></span>` +
                     `<span title="Open positions" style="color:#555;">● ${stats.active}</span>` +
                     `<span title="Closed positions" style="color:#999;">✕ ${stats.closed}</span>` +
+                    `<span class="delta-col" title="Symbols with/without delta">${stats.symbolsWithDelta}/${stats.symbolsMissingDelta}</span>` +
                     (qtyHtml ? qtyHtml : '') +
                     `</span>`;
             }
@@ -2229,9 +2398,11 @@
                 `<span title="Latest booked P&amp;L across all positions">Booked: <b${undBkdId}${undBkdDataVal} style="color:${c(stats.bookedPnl)}">₹${fmtNum(stats.bookedPnl,0)}</b></span>` +
                 `<span title="Latest unbooked P&amp;L across open positions">Unbooked: <b${undUnbkdId} style="color:${c(stats.unbookedPnl)}">₹${fmtNum(stats.unbookedPnl,0)}</b></span>` +
                 `<span title="Total P&amp;L (Booked + Unbooked)" style="color:${c(total)}; font-weight:bold;">Total: <b${undTotalId} style="color:${c(total)}">₹${fmtNum(total,0)}</b></span>` +
+                `<span class="delta-col" title="${escapeHtml(netDeltaTitle)}">Δ: ${fmtDelta(stats.netDelta, 3)}</span>` +
                 `<span title="Total brokerage charges" style="color:#dc3545;">Brokerage: <b>₹${fmtNum(stats.brokerage||0,0)}</b></span>` +
                 `<span title="Open positions" style="color:#555;">● ${stats.active} open</span>` +
                 `<span title="Closed positions" style="color:#aaa;">✕ ${stats.closed} closed</span>` +
+                `<span class="delta-col" title="Symbols with/without delta">${stats.symbolsWithDelta}/${stats.symbolsMissingDelta}</span>` +
                 (qtyHtml ? qtyHtml : '') +
                 `</span>`;
         }
@@ -2325,21 +2496,41 @@
             const unbookedPnl = Number(e.after_unbooked_pnl || 0);
             const unbookedPnlColor = unbookedPnl > 0 ? '#28a745' : (unbookedPnl < 0 ? '#dc3545' : '#666');
             const unbookedPnlHtml = `<span style="color:${unbookedPnlColor}; font-weight:bold;">₹${fmtNum(unbookedPnl, 2)}</span>`;
+            const isOpenPosition = Number(e.after_quantity || 0) !== 0;
+            const deltaStatus = e.delta_status || 'unavailable';
+            const deltaHtml = isOpenPosition
+                ? fmtDelta(e.delta, 3)
+                : '<span style="color:#aaa;">—</span>';
+            const deltaTitle = buildDeltaTooltip(
+                e.delta,
+                e.after_quantity,
+                e.symbol,
+                deltaStatus,
+                isOpenPosition
+            );
 
             const brokerageVal = Number(e.brokerage || 0);
             const brokerageHtml = brokerageVal > 0
                 ? `<span style="color:#dc3545;">₹${fmtNum(brokerageVal, 2)}</span>`
                 : `<span style="color:#aaa;">-</span>`;
 
+            const evtLotSize = Number(e.lot_size || 0);
+            const dqLotsStr = evtLotSize > 0 ? ` / ${dqSign}${parseFloat((dq / evtLotSize).toFixed(2))}L` : '';
+            const parsedSpot = Number(e.spot_price);
+            const hasSpot = e.spot_price !== null && e.spot_price !== undefined && e.spot_price !== '' && Number.isFinite(parsedSpot);
+            const spotPriceHtml = hasSpot ? `₹${fmtNum(parsedSpot, 2)}` : '<span style="color:#aaa;">-</span>';
+
             return `<tr>
                 <td>${fmtTimestamp(e.timestamp)}</td>
                 <td><span class="pill ${pillClass}">${e.type || ''}</span></td>
                 <td>${e.symbol || ''}</td>
+                <td class="num">${spotPriceHtml}</td>
                 <td>${e.product || ''}</td>
-                <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq})</td>
+                <td class="num">${qtyBefore} &rarr; ${qtyAfter} (${dqSign}${dq}${dqLotsStr})</td>
                 <td class="num">₹${fmtNum(e.before_average_price || 0, 2)}</td>
                 <td class="num">₹${fmtNum(e.after_average_price || 0, 2)}</td>
                 <td class="num" ${!isSubRow && Number(e.after_quantity || 0) !== 0 ? `data-ltp-cell="${e.symbol}" data-avg-entry="${e.after_average_price || 0}" data-net-qty="${e.after_quantity || 0}"` : ''}>₹${fmtNum(e.after_last_price || 0, 2)}</td>
+                <td class="num delta-col" title="${escapeHtml(deltaTitle)}">${deltaHtml}</td>
                 <td class="num">${bookedPnlHtml}</td>
                 <td class="num">${unbookedPnlHtml}</td>
                 <td class="num">${brokerageHtml}</td>
@@ -2370,13 +2561,10 @@
                 const netQty = Number(latest.after_quantity || 0);
                 const isOpen = netQty !== 0;
 
-                // Avg entry: broker-computed weighted average at the time of the last ENTERED event
-                let avgEntryPrice = 0;
-                if (enteredEvts.length > 0) {
-                    avgEntryPrice = Number(enteredEvts[enteredEvts.length - 1].after_average_price || 0);
-                } else {
-                    avgEntryPrice = Number(first.after_average_price || 0);
-                }
+                // Avg entry: use latest broker-reported weighted average (updated by scale-ins via MODIFIED events).
+                // For closed positions, latest (EXITED) has after_average_price=0, so walk back to last non-zero value.
+                const avgEntryPrice = Number(latest.after_average_price || 0) ||
+                    Number([...sorted].reverse().find(e => Number(e.after_average_price) > 0)?.after_average_price || 0);
 
                 // Avg exit: weighted average using exit_price × exited qty across all exit events
                 let totalExitPnl = 0;
@@ -2406,7 +2594,9 @@
                     bookedPnl: Number(latest.after_booked_pnl || 0),
                     unbookedPnl: Number(latest.after_unbooked_pnl || 0),
                     ltp: Number(latest.after_last_price || 0),
+                    delta: isOpen && latest.delta !== undefined ? latest.delta : null,
                     lot_size: first.lot_size || 0,
+                    lastModified: latest.timestamp,
                     events: evts,
                 };
             });
@@ -2495,11 +2685,13 @@
             const status = row.cells[3]?.textContent?.trim() || '';
             const entryDate = row.cells[4]?.textContent?.trim() || '';
             const exitDate = row.cells[5]?.textContent?.trim() || '';
-            const netQty = row.cells[6]?.textContent?.trim() || '0';
-            const avgEntryPrice = row.cells[7]?.textContent?.replace('₹', '').trim() || '0';
-            const avgExitPriceOrLtp = row.cells[8]?.textContent?.trim() || '';
-            const totalExitPnl = row.cells[9]?.textContent?.replace('₹', '').trim() || '0';
-            const unbookedPnl = row.cells[10]?.textContent?.replace('₹', '').trim() || '0';
+            const lastModified = row.cells[6]?.textContent?.trim() || '';
+            const netQty = row.cells[7]?.textContent?.trim() || '0';
+            const avgEntryPrice = row.cells[8]?.textContent?.replace('₹', '').trim() || '0';
+            const avgExitPriceOrLtp = row.cells[9]?.textContent?.trim() || '';
+            const totalExitPnl = row.cells[10]?.textContent?.replace('₹', '').trim() || '0';
+            const unbookedPnl = row.cells[11]?.textContent?.replace('₹', '').trim() || '0';
+            const deltaText = row.cells[12]?.textContent?.trim() || '';
 
             // Parse numeric values
             const avgEntry = parseFloat(avgEntryPrice.replace(/,/g, '')) || 0;
@@ -2514,6 +2706,8 @@
             } else {
                 avgExit = parseFloat(avgExitPriceOrLtp.replace(/₹/g, '').replace(/,/g, '')) || 0;
             }
+            const deltaVal = parseFloat(deltaText.replace(/,/g, ''));
+            const delta = Number.isFinite(deltaVal) ? deltaVal : null;
 
             return {
                 symbol,
@@ -2527,6 +2721,7 @@
                 ltp,
                 totalExitPnl: totalPnl,
                 unbookedPnl: unbooked,
+                delta,
             };
         }
 
@@ -2587,6 +2782,11 @@
                 const subEvents = row.events.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                 const subRowsHtml = subEvents.map(e => renderEventRow(e, underlying, true)).join('');
 
+                const rowLotSize = row.lot_size || 0;
+                const netQtyHtml = row.netQty !== 0
+                    ? row.netQty + (rowLotSize > 0 ? ` <span style="color:#888; font-size:0.85em;">(${parseFloat((row.netQty / rowLotSize).toFixed(2))}L)</span>` : '')
+                    : '<span style="color:#aaa;">0</span>';
+
                 return `
                     <tr class="consolidated-row" onclick="toggleConsolidatedRow('${rowId}')" style="cursor:pointer;">
                         <td style="text-align:center; color:#888;" id="consolidated-toggle-${rowId}">▶</td>
@@ -2595,7 +2795,8 @@
                         <td><span class="pill ${statusClass}">${statusText}</span></td>
                         <td style="font-size:0.9em;">${fmtTimestamp(row.entryDate)}</td>
                         <td style="font-size:0.9em;">${row.exitDate ? fmtTimestamp(row.exitDate) : '<span style="color:#aaa;">—</span>'}</td>
-                        <td class="num">${row.netQty !== 0 ? row.netQty : '<span style="color:#aaa;">0</span>'}</td>
+                        <td style="font-size:0.9em;">${(row.lastModified && row.lastModified !== row.entryDate && row.lastModified !== row.exitDate) ? fmtTimestamp(row.lastModified) : '<span style="color:#aaa;">—</span>'}</td>
+                        <td class="num">${netQtyHtml}</td>
                         <td class="num">₹${fmtNum(row.avgEntryPrice, 2)}</td>
                         <td class="num" ${row.isOpen ? `data-ltp-cell="${row.symbol}" data-avg-entry="${row.avgEntryPrice}" data-net-qty="${row.netQty}"` : ''}>${row.isOpen
                             ? `<span style="color:#555;" title="Last Traded Price">LTP: ₹${fmtNum(row.ltp, 2)}</span>`
@@ -2604,21 +2805,24 @@
                         <td class="num" ${row.isOpen ? `data-upnl-cell="${row.symbol}"` : ''}>${row.isOpen
                             ? `<span style="color:${unbookedColor}; font-weight:bold;">₹${fmtNum(row.unbookedPnl, 2)}</span>`
                             : '<span style="color:#aaa;">—</span>'}</td>
+                        <td class="num delta-col" title="${escapeHtml(buildDeltaTooltip(row.delta, row.netQty, row.symbol, row.delta !== null ? 'ok' : 'unavailable', row.isOpen))}">${row.isOpen ? fmtDelta(row.delta, 3) : '<span style="color:#aaa;">—</span>'}</td>
                         <td style="text-align:center;">${actionHtml}</td>
                     </tr>
                     <tr id="consolidated-subrows-${rowId}" style="display:none;">
-                        <td colspan="12" style="padding:0; background:#f0f4f8; border-top:none;">
+                        <td colspan="15" style="padding:0; background:#f0f4f8; border-top:none;">
                             <table class="lifecycle-table" style="margin:0; border-radius:0; font-size:0.9em; border:none;">
                                 <thead>
                                     <tr>
                                         <th style="min-width:150px;">Time</th>
                                         <th style="min-width:110px;">Type</th>
                                         <th>Symbol</th>
+                                        <th style="min-width:120px;" class="num">Spot Price</th>
                                         <th style="min-width:70px;">Product</th>
                                         <th style="min-width:160px;" class="num">Qty (Before → After)</th>
                                         <th style="min-width:140px;" class="num">Avg (Before)</th>
                                         <th style="min-width:140px;" class="num">Avg (After)</th>
                                         <th style="min-width:140px;" class="num">LTP (After)</th>
+                                        <th style="min-width:110px;" class="num delta-col">Delta</th>
                                         <th style="min-width:170px;" class="num">Booked P&L (After)</th>
                                         <th style="min-width:170px;" class="num">Unbooked P&L (After)</th>
                                         <th style="min-width:240px;">Exit / Fill</th>
@@ -2685,11 +2889,13 @@
                                 <th style="min-width:90px;">Status</th>
                                 <th class="sortable num" style="min-width:150px;" onclick="handleConsolidatedSort('${expiryId}', 'entryDate')">Entry Date <span class="sort-indicator">⇅</span></th>
                                 <th style="min-width:150px;">Exit Date</th>
+                                <th class="sortable num" style="min-width:150px;" onclick="handleConsolidatedSort('${expiryId}', 'lastModified')">Last Modified <span class="sort-indicator">⇅</span></th>
                                 <th style="min-width:110px;" class="num">Net Qty</th>
                                 <th style="min-width:140px;" class="num">Avg Entry</th>
                                 <th style="min-width:150px;" class="num">Avg Exit / LTP</th>
                                 <th class="sortable num" style="min-width:160px;" onclick="handleConsolidatedSort('${expiryId}', 'realized_pnl')">Realized P&L <span class="sort-indicator">⇅</span></th>
                                 <th class="sortable num" style="min-width:160px;" onclick="handleConsolidatedSort('${expiryId}', 'unrealized_pnl')">Unrealized P&L <span class="sort-indicator">⇅</span></th>
+                                <th class="sortable num delta-col" style="min-width:110px;" onclick="handleConsolidatedSort('${expiryId}', 'delta')">Delta <span class="sort-indicator">⇅</span></th>
                                 <th style="width:70px; text-align:center;">Action</th>
                             </tr>
                         </thead>
@@ -2837,12 +3043,18 @@
                     } else if (sortColumn === 'entryDate') {
                         valA = new Date(a.entryDate || 0).getTime();
                         valB = new Date(b.entryDate || 0).getTime();
+                    } else if (sortColumn === 'lastModified') {
+                        valA = new Date(a.lastModified || 0).getTime();
+                        valB = new Date(b.lastModified || 0).getTime();
                     } else if (sortColumn === 'realized_pnl') {
                         valA = a.totalExitPnl || 0;
                         valB = b.totalExitPnl || 0;
                     } else if (sortColumn === 'unrealized_pnl') {
                         valA = a.unbookedPnl || 0;
                         valB = b.unbookedPnl || 0;
+                    } else if (sortColumn === 'delta') {
+                        valA = (a.delta === null || a.delta === undefined) ? -999999 : Number(a.delta);
+                        valB = (b.delta === null || b.delta === undefined) ? -999999 : Number(b.delta);
                     }
 
                     if (sortDirection === 'asc') {
@@ -2924,6 +3136,7 @@
                         <td><span class="pill ${statusClass}">${statusText}</span></td>
                         <td style="font-size:0.9em;">${fmtTimestamp(row.entryDate)}</td>
                         <td style="font-size:0.9em;">${row.exitDate ? fmtTimestamp(row.exitDate) : '<span style="color:#aaa;">—</span>'}</td>
+                        <td style="font-size:0.9em;">${(row.lastModified && row.lastModified !== row.entryDate && row.lastModified !== row.exitDate) ? fmtTimestamp(row.lastModified) : '<span style="color:#aaa;">—</span>'}</td>
                         <td class="num">${row.netQty !== 0 ? row.netQty : '<span style="color:#aaa;">0</span>'}</td>
                         <td class="num">₹${fmtNum(row.avgEntryPrice, 2)}</td>
                         <td class="num" ${row.isOpen ? `data-ltp-cell="${row.symbol}" data-avg-entry="${row.avgEntryPrice}" data-net-qty="${row.netQty}"` : ''}>${row.isOpen
@@ -2933,21 +3146,24 @@
                         <td class="num" ${row.isOpen ? `data-upnl-cell="${row.symbol}"` : ''}>${row.isOpen
                             ? `<span style="color:${unbookedColor}; font-weight:bold;">₹${fmtNum(row.unbookedPnl, 2)}</span>`
                             : '<span style="color:#aaa;">—</span>'}</td>
+                        <td class="num delta-col" title="${escapeHtml(buildDeltaTooltip(row.delta, row.netQty, row.symbol, row.delta !== null ? 'ok' : 'unavailable', row.isOpen))}">${row.isOpen ? fmtDelta(row.delta, 3) : '<span style="color:#aaa;">—</span>'}</td>
                         <td style="text-align:center;">${actionHtml}</td>
                     </tr>
                     <tr id="consolidated-subrows-${rowId}" style="display:none;">
-                        <td colspan="12" style="padding:0; background:#f0f4f8; border-top:none;">
+                        <td colspan="15" style="padding:0; background:#f0f4f8; border-top:none;">
                             <table class="lifecycle-table" style="margin:0; border-radius:0; font-size:0.9em; border:none;">
                                 <thead>
                                     <tr>
                                         <th style="min-width:150px;">Time</th>
                                         <th style="min-width:110px;">Type</th>
                                         <th>Symbol</th>
+                                        <th style="min-width:120px;" class="num">Spot Price</th>
                                         <th style="min-width:70px;">Product</th>
                                         <th style="min-width:160px;" class="num">Qty (Before → After)</th>
                                         <th style="min-width:140px;" class="num">Avg (Before)</th>
                                         <th style="min-width:140px;" class="num">Avg (After)</th>
                                         <th style="min-width:140px;" class="num">LTP (After)</th>
+                                        <th style="min-width:110px;" class="num delta-col">Delta</th>
                                         <th style="min-width:170px;" class="num">Booked P&L (After)</th>
                                         <th style="min-width:170px;" class="num">Unbooked P&L (After)</th>
                                         <th style="min-width:240px;">Exit / Fill</th>
@@ -2979,8 +3195,10 @@
             const columnMap = {
                 'symbol': 1,
                 'entryDate': 4,
-                'realized_pnl': 9,
-                'unrealized_pnl': 10
+                'lastModified': 6,
+                'realized_pnl': 10,
+                'unrealized_pnl': 11,
+                'delta': 12
             };
             const thIndex = columnMap[activeColumn];
             if (thIndex !== undefined) {
@@ -3086,8 +3304,10 @@
             cardsEl.style.display = 'flex';
         }
 
-        function renderUnderlyingGroups(underlyings, events, snapshotPnl, underlyingPrices) {
+        function renderUnderlyingGroups(underlyings, events, snapshotPnl, underlyingPrices, expiryDeltaSummary, greeksSourceStatus) {
             underlyingPrices = underlyingPrices || {};
+            expiryDeltaSummary = expiryDeltaSummary || {};
+            greeksSourceStatus = greeksSourceStatus || {};
             const container = document.getElementById('underlying-groups-container');
             if (!container) return;
 
@@ -3161,6 +3381,11 @@
                     priceHtml = `<span data-spot-underlying="${underlying}" data-spot-prev-close="${_prevClose}" style="display:inline-flex;align-items:center;gap:4px;"><span class="underlying-ltp" style="font-size:0.88em;color:#555;font-weight:500;">₹${ltpStr}</span>${pctHtml}</span>`;
                 }
                 titleSpan.innerHTML = `<span class="underlying-title">${underlying}</span>${priceHtml}<span class="underlying-count">(${visibleEventList.length} events)</span>${renderStatsBadge(underlyingStats, false, null, underlying)}`;
+                const sourceMeta = greeksSourceStatus[underlying] || {};
+                const sourceStatusText = sourceMeta.status === 'ok'
+                    ? `Δ source: token ${sourceMeta.underlying_token}, ${sourceMeta.symbols_with_greeks || 0} greeks`
+                    : `Δ source unavailable (${sourceMeta.reason || 'unknown'})`;
+                titleSpan.innerHTML += `<span class="delta-col" style="font-size:0.75em; color:${sourceMeta.status === 'ok' ? '#2a6f2a' : '#a06a00'};">${sourceStatusText}</span>`;
 
                 const buttonsDiv = document.createElement('div');
                 buttonsDiv.style.display = 'flex';
@@ -3305,6 +3530,10 @@
                     const expiryIso = expiryData.date
                         ? `${expiryData.date.getFullYear()}-${String(expiryData.date.getMonth()+1).padStart(2,'0')}-${String(expiryData.date.getDate()).padStart(2,'0')}`
                         : '';
+                    const expiryDeltaMeta = (expiryDeltaSummary[underlying] || []).find(x => x.expiry_date === expiryIso) || null;
+                    const expiryDeltaMetaHtml = expiryDeltaMeta
+                        ? `<span class="delta-col" style="font-size:0.76em; color:#555; margin-left:6px;" title="${escapeHtml(buildNetDeltaSummaryTooltip(expiryDeltaMeta.net_position_delta, expiryDeltaMeta.symbols_with_delta, expiryDeltaMeta.symbols_missing_delta, 'Expiry'))}">Net Δ ${fmtDelta(expiryDeltaMeta.net_position_delta, 3)} · ${expiryDeltaMeta.symbols_with_delta}/${expiryDeltaMeta.symbol_count} symbols</span>`
+                        : '';
 
                     // Cache events for per-table filtering
                     _expiryEventsCache[expiryId] = { underlying, events: expiryEvents };
@@ -3326,7 +3555,7 @@
                     expiryHtml += `
                         <div class="expiry-section" style="margin-top: 15px; border-left: 3px solid #ddd; padding-left: 15px;">
                             <div class="expiry-header" style="padding: 8px; background: #f8f9fa; margin-bottom: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-                                <span onclick="toggleExpiryGroup('${safeExpiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true, safeExpiryId)}</span>
+                                <span onclick="toggleExpiryGroup('${safeExpiryId}')" style="cursor: pointer; flex: 1; font-weight: bold; color: #555; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">${expiryDateStr} <span style="color: #999; font-weight: normal;">(${expiryEvents.length} events)</span>${renderStatsBadge(expiryStats, true, safeExpiryId)}${expiryDeltaMetaHtml}</span>
                                 <div style="display:flex; gap:6px; align-items:center; flex-shrink:0;">
                                     <button
                                         data-subscribe-btn="true"
@@ -3420,11 +3649,13 @@
                                                     <th class="sortable" style="min-width: 150px;" onclick="handleExpiryTableSort('${expiryId}', 'timestamp')">Time <span class="sort-indicator">⇅</span></th>
                                                     <th style="min-width: 110px;">Type</th>
                                                     <th>Symbol</th>
+                                                    <th style="min-width: 120px;" class="num">Spot Price</th>
                                                     <th style="min-width: 70px;">Product</th>
                                                     <th style="min-width: 160px;" class="num">Qty (Before → After)</th>
                                                     <th style="min-width: 140px;" class="num">Avg (Before)</th>
                                                     <th style="min-width: 140px;" class="num">Avg (After)</th>
                                                     <th style="min-width: 140px;" class="num">LTP (After)</th>
+                                                    <th style="min-width: 110px;" class="num delta-col">Delta</th>
                                                     <th class="sortable num" style="min-width: 170px;" onclick="handleExpiryTableSort('${expiryId}', 'booked_pnl')">Booked P&L (After) <span class="sort-indicator">⇅</span></th>
                                                     <th class="sortable num" style="min-width: 170px;" onclick="handleExpiryTableSort('${expiryId}', 'unbooked_pnl')">Unbooked P&L (After) <span class="sort-indicator">⇅</span></th>
                                                     <th style="min-width: 110px;" class="num">Brokerage</th>
@@ -3535,19 +3766,35 @@
         // Add button dynamically to header
         document.addEventListener("DOMContentLoaded", function () {
             const HIDE_MODIFIED_ZERO_KEY = 'sensibull.hide_modified_zero';
+            const SHOW_GREEK_DELTA_KEY = 'sensibull.show_option_greek_delta';
 
             const hideModifiedZeroCheckbox = document.getElementById('hide-modified-zero');
+            const showGreekDeltaCheckbox = document.getElementById('show-greek-delta');
+            const underlyingsPanel = document.getElementById('tab-panel-underlyings');
             const getHideModifiedZeroPref = () => {
                 const v = localStorage.getItem(HIDE_MODIFIED_ZERO_KEY);
                 // Default: enabled
                 if (v === null) return true;
                 return v === 'true';
             };
+            const getShowGreekDeltaPref = () => {
+                const v = localStorage.getItem(SHOW_GREEK_DELTA_KEY);
+                if (v === null) return true;
+                return v === 'true';
+            };
             const setHideModifiedZeroPref = (val) => {
                 localStorage.setItem(HIDE_MODIFIED_ZERO_KEY, val ? 'true' : 'false');
             };
+            const setShowGreekDeltaPref = (val) => {
+                localStorage.setItem(SHOW_GREEK_DELTA_KEY, val ? 'true' : 'false');
+            };
 
             const shouldHideModifiedZero = () => !!(hideModifiedZeroCheckbox && hideModifiedZeroCheckbox.checked);
+            const applyDeltaInfoVisibility = () => {
+                if (!underlyingsPanel) return;
+                const showDelta = !showGreekDeltaCheckbox || showGreekDeltaCheckbox.checked;
+                underlyingsPanel.classList.toggle('delta-hidden', !showDelta);
+            };
 
             // Add event listener for exclude-expired checkbox
             const excludeExpiredCheckbox = document.getElementById('exclude-expired');
@@ -3575,6 +3822,12 @@
             if (consolidateTradesCheckbox) {
                 consolidateTradesCheckbox.addEventListener('change', function() {
                     reRenderUnderlyingGroups();
+                });
+            }
+            if (showGreekDeltaCheckbox) {
+                showGreekDeltaCheckbox.addEventListener('change', function() {
+                    setShowGreekDeltaPref(showGreekDeltaCheckbox.checked);
+                    applyDeltaInfoVisibility();
                 });
             }
 
@@ -3666,6 +3919,10 @@
             // Set default checkbox state for "Consolidate Trades"
             if (consolidateTradesCheckbox) {
                 consolidateTradesCheckbox.checked = true;
+            }
+            if (showGreekDeltaCheckbox) {
+                showGreekDeltaCheckbox.checked = getShowGreekDeltaPref();
+                applyDeltaInfoVisibility();
             }
 
             // Backfill counts for older records that stored just "Positions Modified" without (n)
@@ -7899,7 +8156,189 @@
                 <span style="font-weight:700; color:#8a4b08;">All Open Position Returns</span>
                 ${buildMarginInfoHtml(cached, stats.bookedPnl, stats.unbookedPnl, stats.brokerage)}
             </div>`;
+            const toggleBtn = document.getElementById('margin-dist-chart-toggle-btn');
+            if (toggleBtn) toggleBtn.style.display = 'inline-flex';
         }
+
+        // ── Margin Distribution Pie Chart ────────────────────────────────────
+        let _marginDistChart = null;
+        let _marginDistCurrentUnderlying = null;
+
+        function _destroyMarginDistChart() {
+            if (_marginDistChart) { _marginDistChart.destroy(); _marginDistChart = null; }
+            const wrap = document.getElementById('margin-dist-chart-wrap');
+            if (wrap) wrap.style.display = 'none';
+        }
+
+        async function _getOrFetchMarginForChart(cacheKey, positions) {
+            const cached = _getMarginCache(cacheKey);
+            if (cached) return cached;
+            return new Promise(resolve => {
+                fetchMarginAndCache(cacheKey, positions, (result) => resolve(result));
+            });
+        }
+
+        function _getExpiriesForUnderlying(underlying) {
+            return Object.keys(_expiryEventsCache).filter(id =>
+                (_expiryEventsCache[id] || {}).underlying === underlying
+            );
+        }
+
+        function _renderMarginPieChart(labels, values, mode) {
+            const canvas = document.getElementById('margin-dist-chart');
+            if (!canvas) return;
+            if (_marginDistChart) { _marginDistChart.destroy(); _marginDistChart = null; }
+
+            const COLORS = [
+                '#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f',
+                '#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac',
+                '#6baed6','#fd8d3c','#74c476','#9ecae1','#fdae6b'
+            ];
+
+            _marginDistChart = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: labels.map((_, i) => COLORS[i % COLORS.length]),
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                font: { size: 12 },
+                                padding: 12,
+                                color: '#fff',
+                                generateLabels(chart) {
+                                    const data = chart.data.datasets[0].data;
+                                    const total = data.reduce((a, b) => a + b, 0);
+                                    return chart.data.labels.map((label, i) => ({
+                                        text: `${label}: ${_fmtMarginInr(data[i])} (${total > 0 ? (data[i] / total * 100).toFixed(1) : 0}%)`,
+                                        fillStyle: chart.data.datasets[0].backgroundColor[i],
+                                        strokeStyle: '#fff',
+                                        lineWidth: 2,
+                                        fontColor: '#fff',
+                                        index: i
+                                    }));
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(ctx) {
+                                    const val = ctx.parsed;
+                                    const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                                    const pct = total > 0 ? (val / total * 100).toFixed(1) : 0;
+                                    return ` ${_fmtMarginInr(val)} (${pct}%)`;
+                                }
+                            }
+                        }
+                    },
+                    onClick(event, elements) {
+                        if (!elements.length || mode !== 'underlying') return;
+                        const label = labels[elements[0].index];
+                        marginChartDrillDown(label);
+                    },
+                    onHover(event, elements) {
+                        canvas.style.cursor = (mode === 'underlying' && elements.length) ? 'pointer' : 'default';
+                    }
+                }
+            });
+        }
+
+        async function buildMarginDistributionChart() {
+            if (!_cachedUnderlyingsData) return;
+            const wrap = document.getElementById('margin-dist-chart-wrap');
+            const loadingEl = document.getElementById('margin-dist-chart-loading');
+            if (!wrap) return;
+
+            wrap.style.display = 'block';
+            loadingEl.style.display = 'block';
+            document.getElementById('margin-dist-back-btn').style.display = 'none';
+            document.getElementById('margin-dist-chart-title').textContent = 'Margin Distribution by Underlying';
+            _marginDistCurrentUnderlying = null;
+
+            const underlyings = _cachedUnderlyingsData.underlyings || [];
+            const eventsByUnderlying = _cachedUnderlyingsData.events || {};
+
+            const results = await Promise.all(underlyings.map(async u => {
+                const events = getScopedUnderlyingEvents(eventsByUnderlying[u] || []);
+                const positions = getOpenPositionsForMargin(events, u);
+                if (!positions.length) return null;
+                const cacheKey = getUnderlyingMarginCacheKey(u);
+                const cached = await _getOrFetchMarginForChart(cacheKey, positions);
+                const margin = _pickTotalMargin(cached);
+                return margin > 0 ? { label: u, margin } : null;
+            }));
+
+            loadingEl.style.display = 'none';
+            const filtered = results.filter(Boolean);
+            if (!filtered.length) { wrap.style.display = 'none'; return; }
+
+            _renderMarginPieChart(filtered.map(r => r.label), filtered.map(r => r.margin), 'underlying');
+        }
+
+        window.marginChartDrillDown = async function(underlying) {
+            const expiries = _getExpiriesForUnderlying(underlying);
+            if (expiries.length <= 1) {
+                showToast(`${underlying} has only 1 expiry — no drill-down available.`, 'info');
+                return;
+            }
+
+            const loadingEl = document.getElementById('margin-dist-chart-loading');
+            loadingEl.style.display = 'block';
+            _marginDistCurrentUnderlying = underlying;
+            document.getElementById('margin-dist-chart-title').textContent = `${underlying} — Margin by Expiry`;
+            document.getElementById('margin-dist-back-btn').style.display = 'inline-block';
+
+            const results = await Promise.all(expiries.map(async expiryId => {
+                const cached_ = _expiryEventsCache[expiryId];
+                if (!cached_) return null;
+                const positions = getOpenPositionsForMargin(cached_.events || [], underlying);
+                if (!positions.length) return null;
+                const cached = await _getOrFetchMarginForChart(`exp_${expiryId}`, positions);
+                const margin = _pickTotalMargin(cached);
+                const rawSuffix = String(expiryId).replace(new RegExp('^' + underlying + '[_\\-]?', 'i'), '') || expiryId;
+                const epochMs = Number(rawSuffix);
+                const label = (!isNaN(epochMs) && epochMs > 1e12)
+                    ? new Date(epochMs).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : rawSuffix;
+                return margin > 0 ? { label, margin } : null;
+            }));
+
+            loadingEl.style.display = 'none';
+            const filtered = results.filter(Boolean);
+            if (!filtered.length) return;
+
+            _renderMarginPieChart(filtered.map(r => r.label), filtered.map(r => r.margin), 'expiry');
+        };
+
+        window.marginChartDrillBack = function() {
+            _marginDistCurrentUnderlying = null;
+            buildMarginDistributionChart();
+        };
+
+        let _marginChartVisible = false;
+
+        window.toggleMarginDistChart = function() {
+            const toggleBtn = document.getElementById('margin-dist-chart-toggle-btn');
+            if (_marginChartVisible) {
+                _destroyMarginDistChart();
+                _marginChartVisible = false;
+                if (toggleBtn) toggleBtn.style.background = '#fff4e8';
+            } else {
+                _marginChartVisible = true;
+                if (toggleBtn) toggleBtn.style.background = '#ffd8a8';
+                buildMarginDistributionChart();
+            }
+        };
 
         window.toggleAllOpenMargin = async function(checked) {
             const infoEl = document.getElementById('margin-all-open-info');
@@ -7911,6 +8350,10 @@
                     infoEl.innerHTML = '';
                 }
                 if (countEl) countEl.textContent = '';
+                _destroyMarginDistChart();
+                _marginChartVisible = false;
+                const toggleBtn = document.getElementById('margin-dist-chart-toggle-btn');
+                if (toggleBtn) { toggleBtn.style.display = 'none'; toggleBtn.style.background = '#fff4e8'; }
                 return;
             }
 
@@ -7929,11 +8372,191 @@
             });
         };
 
-        function refreshAllOpenMarginIfEnabled() {
+        window.refreshAllOpenMarginIfEnabled = function() {
             const chk = document.getElementById('margin-subscribe-all');
             if (!chk || !chk.checked) return;
             window.toggleAllOpenMargin(true);
+        };
+
+        // ── PnL Distribution Pie Chart ───────────────────────────────────────
+        let _pnlDistChart = null;
+        let _pnlDistCurrentUnderlying = null;
+        let _pnlChartVisible = false;
+
+        function _destroyPnlDistChart() {
+            if (_pnlDistChart) { _pnlDistChart.destroy(); _pnlDistChart = null; }
+            const wrap = document.getElementById('pnl-dist-chart-wrap');
+            if (wrap) wrap.style.display = 'none';
         }
+
+        function _renderPnlPieChart(labels, signedValues, mode) {
+            const canvas = document.getElementById('pnl-dist-chart');
+            if (!canvas) return;
+            if (_pnlDistChart) { _pnlDistChart.destroy(); _pnlDistChart = null; }
+
+            const GREEN_SHADES = ['#28a745','#20c963','#4cde7a','#74e89a','#9ef2ba','#b8f5cc','#d0f8de'];
+            const RED_SHADES   = ['#dc3545','#e8576a','#f07585','#f599a4','#f9b8c0','#fcd0d5','#fee0e3'];
+
+            let gIdx = 0, rIdx = 0;
+            const colors = signedValues.map(v => v >= 0 ? GREEN_SHADES[gIdx++ % GREEN_SHADES.length] : RED_SHADES[rIdx++ % RED_SHADES.length]);
+            const absValues = signedValues.map(v => Math.abs(v));
+
+            _pnlDistChart = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: absValues,
+                        backgroundColor: colors,
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                font: { size: 12 },
+                                padding: 12,
+                                color: '#fff',
+                                generateLabels(chart) {
+                                    const totalAbs = absValues.reduce((a, b) => a + b, 0);
+                                    return chart.data.labels.map((label, i) => ({
+                                        text: `${label}: ${signedValues[i] >= 0 ? '+' : ''}${fmtNum(signedValues[i])} (${totalAbs > 0 ? (absValues[i] / totalAbs * 100).toFixed(1) : 0}%)`,
+                                        fillStyle: colors[i],
+                                        strokeStyle: '#fff',
+                                        lineWidth: 2,
+                                        fontColor: '#fff',
+                                        index: i
+                                    }));
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(ctx) {
+                                    const signed = signedValues[ctx.dataIndex];
+                                    const total = absValues.reduce((a, b) => a + b, 0);
+                                    const pct = total > 0 ? (absValues[ctx.dataIndex] / total * 100).toFixed(1) : 0;
+                                    const sign = signed >= 0 ? '+' : '';
+                                    return ` ${sign}${fmtNum(signed)} (${pct}% of abs total)`;
+                                }
+                            }
+                        }
+                    },
+                    onClick(event, elements) {
+                        if (!elements.length || mode !== 'underlying') return;
+                        const label = labels[elements[0].index];
+                        pnlChartDrillDown(label);
+                    },
+                    onHover(event, elements) {
+                        canvas.style.cursor = (mode === 'underlying' && elements.length) ? 'pointer' : 'default';
+                    }
+                }
+            });
+        }
+
+        function buildPnlDistributionChart() {
+            if (!_cachedUnderlyingsData) return;
+            const wrap = document.getElementById('pnl-dist-chart-wrap');
+            const loadingEl = document.getElementById('pnl-dist-chart-loading');
+            if (!wrap) return;
+
+            wrap.style.display = 'block';
+            loadingEl.style.display = 'block';
+            document.getElementById('pnl-dist-back-btn').style.display = 'none';
+            document.getElementById('pnl-dist-chart-title').textContent = 'PnL Distribution by Underlying';
+            _pnlDistCurrentUnderlying = null;
+
+            const underlyings = _cachedUnderlyingsData.underlyings || [];
+            const eventsByUnderlying = _cachedUnderlyingsData.events || {};
+
+            const results = underlyings.map(u => {
+                const events = getScopedUnderlyingEvents(eventsByUnderlying[u] || []);
+                if (!events.length) return null;
+                const consolidated = consolidateEvents(events);
+                const totalPnl = consolidated.reduce((sum, row) => sum + row.bookedPnl + row.unbookedPnl, 0);
+                return Math.abs(totalPnl) > 0.01 ? { label: u, pnl: totalPnl } : null;
+            }).filter(Boolean);
+
+            loadingEl.style.display = 'none';
+            if (!results.length) { wrap.style.display = 'none'; return; }
+
+            _renderPnlPieChart(results.map(r => r.label), results.map(r => r.pnl), 'underlying');
+        }
+
+        window.pnlChartDrillDown = function(underlying) {
+            const expiries = _getExpiriesForUnderlying(underlying);
+            if (expiries.length <= 1) {
+                showToast(`${underlying} has only 1 expiry — no drill-down available.`, 'info');
+                return;
+            }
+
+            _pnlDistCurrentUnderlying = underlying;
+            document.getElementById('pnl-dist-chart-title').textContent = `${underlying} — PnL by Expiry`;
+            document.getElementById('pnl-dist-back-btn').style.display = 'inline-block';
+
+            const results = expiries.map(expiryId => {
+                const cached_ = _expiryEventsCache[expiryId];
+                if (!cached_) return null;
+                const consolidated = consolidateEvents(cached_.events || []);
+                const totalPnl = consolidated.reduce((sum, row) => sum + row.bookedPnl + row.unbookedPnl, 0);
+                if (Math.abs(totalPnl) < 0.01) return null;
+                const rawSuffix = String(expiryId).replace(new RegExp('^' + underlying + '[_\\-]?', 'i'), '') || expiryId;
+                const epochMs = Number(rawSuffix);
+                const label = (!isNaN(epochMs) && epochMs > 1e12)
+                    ? new Date(epochMs).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : rawSuffix;
+                return { label, pnl: totalPnl };
+            }).filter(Boolean);
+
+            if (!results.length) { showToast(`No PnL data for ${underlying} expiries.`, 'info'); return; }
+            _renderPnlPieChart(results.map(r => r.label), results.map(r => r.pnl), 'expiry');
+        };
+
+        window.pnlChartDrillBack = function() {
+            _pnlDistCurrentUnderlying = null;
+            buildPnlDistributionChart();
+        };
+
+        window.togglePnlDistChart = async function() {
+            const toggleBtn = document.getElementById('pnl-dist-chart-toggle-btn');
+            if (_pnlChartVisible) {
+                _destroyPnlDistChart();
+                _pnlChartVisible = false;
+                if (toggleBtn) toggleBtn.style.background = '#e8f4fd';
+                return;
+            }
+
+            _pnlChartVisible = true;
+            if (toggleBtn) toggleBtn.style.background = '#b8d8f0';
+
+            if (!_cachedUnderlyingsData) {
+                const wrap = document.getElementById('pnl-dist-chart-wrap');
+                const loadingEl = document.getElementById('pnl-dist-chart-loading');
+                if (wrap) wrap.style.display = 'block';
+                if (loadingEl) loadingEl.style.display = 'block';
+                await loadUnderlyingTrades();
+            }
+
+            if (!_cachedUnderlyingsData) {
+                showToast('Unable to load underlyings data.', 'error');
+                _pnlChartVisible = false;
+                if (toggleBtn) toggleBtn.style.background = '#e8f4fd';
+                _destroyPnlDistChart();
+                return;
+            }
+
+            buildPnlDistributionChart();
+        };
+
+        window.refreshPnlChartIfVisible = function() {
+            if (!_pnlChartVisible) return;
+            buildPnlDistributionChart();
+        };
 
         // ── Underlying-level margin ──────────────────────────────────────────
         window.fetchUnderlyingMargin = function(underlying) {
