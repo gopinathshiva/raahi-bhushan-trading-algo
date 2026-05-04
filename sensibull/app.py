@@ -5816,6 +5816,245 @@ _SYNC_TABLES = [
 # re-serialised to JSON strings when writing to SQLite.
 _JSONB_COLS = {'raw_data', 'notification_data'}
 
+# ─── Profile Sync (Local SQLite → Supabase, one-way, matched by slug) ────────
+# Full column list (insert order matters — id first so we can preserve it).
+_PROFILE_COLS = ('id', 'slug', 'name', 'url', 'source_url', 'is_active', 'added_at')
+# Columns compared to detect drift between local and Supabase (everything
+# except id, since matching is by slug and we never modify Supabase's id).
+_PROFILE_COMPARE_COLS = ('name', 'url', 'source_url', 'is_active', 'added_at')
+
+
+def _normalize_profile_value(col, value):
+    """Normalize a profile column value for comparison across SQLite/Supabase."""
+    if value is None:
+        return None
+    if col == 'is_active':
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return value
+    if isinstance(value, str) and value == '':
+        return None
+    return value
+
+
+def compute_profile_sync_diff() -> dict:
+    """
+    Read profiles from both SQLite and Supabase and compute a diff.
+
+    Direction is one-way: Local → Supabase. Matched by slug.
+
+    Returns:
+        {
+            'to_insert':        [ { ...local row... }, ... ],
+            'to_update':        [ { 'slug': str,
+                                    'supabase_id': int,
+                                    'local': {...},
+                                    'changes': [ {col, local, supabase}, ... ] }, ... ],
+            'id_conflicts':     [ { 'slug': str, 'local_id': int,
+                                    'supabase_id_owner_slug': str } ],
+            'in_sync_count':    int,
+            'extra_in_supabase':[ { 'slug': str, 'id': int, 'name': str } ],
+            'local_total':      int,
+            'supabase_total':   int,
+        }
+
+    Pure read — does NOT modify either database.
+    Requires DATABASE_URL to be set.
+    """
+    if not os.environ.get('DATABASE_URL'):
+        raise RuntimeError("DATABASE_URL is not set — cannot connect to Supabase.")
+
+    import psycopg2
+    import psycopg2.extras
+    from database import DB_PATH as _DB_PATH
+
+    sqlite_conn = sqlite3.connect(_DB_PATH)
+    sqlite_conn.row_factory = sqlite3.Row
+
+    pg_conn = psycopg2.connect(
+        os.environ['DATABASE_URL'],
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
+
+    try:
+        cols_sql = ', '.join(_PROFILE_COLS)
+
+        sq_c = sqlite_conn.cursor()
+        sq_c.execute(f"SELECT {cols_sql} FROM profiles")
+        local_by_slug = {}
+        for r in sq_c.fetchall():
+            row = {c: r[c] for c in _PROFILE_COLS}
+            local_by_slug[row['slug']] = row
+
+        pg_c = pg_conn.cursor()
+        pg_c.execute(f"SELECT {cols_sql} FROM profiles")
+        supabase_by_slug = {}
+        for r in pg_c.fetchall():
+            row = {c: r[c] for c in _PROFILE_COLS}
+            supabase_by_slug[row['slug']] = row
+
+        # Reverse map: supabase id → slug, for id-collision detection on insert.
+        supabase_id_to_slug = {row['id']: slug for slug, row in supabase_by_slug.items()}
+
+        to_insert = []
+        to_update = []
+        id_conflicts = []
+        in_sync_count = 0
+
+        for slug, local in local_by_slug.items():
+            sb = supabase_by_slug.get(slug)
+            if sb is None:
+                # Insert candidate. But check id collision: is local['id']
+                # already used by a different slug in Supabase?
+                owner_slug = supabase_id_to_slug.get(local['id'])
+                if owner_slug is not None and owner_slug != slug:
+                    id_conflicts.append({
+                        'slug': slug,
+                        'local_id': local['id'],
+                        'supabase_id_owner_slug': owner_slug,
+                        'local': local,
+                    })
+                else:
+                    to_insert.append(dict(local))
+                continue
+
+            changes = []
+            for col in _PROFILE_COMPARE_COLS:
+                lv = _normalize_profile_value(col, local.get(col))
+                sv = _normalize_profile_value(col, sb.get(col))
+                if lv != sv:
+                    changes.append({'col': col, 'local': lv, 'supabase': sv})
+
+            if changes:
+                to_update.append({
+                    'slug': slug,
+                    'supabase_id': sb['id'],
+                    'local': dict(local),
+                    'changes': changes,
+                })
+            else:
+                in_sync_count += 1
+
+        extra_in_supabase = [
+            {'slug': slug, 'id': row['id'], 'name': row.get('name')}
+            for slug, row in supabase_by_slug.items()
+            if slug not in local_by_slug
+        ]
+
+        return {
+            'to_insert': to_insert,
+            'to_update': to_update,
+            'id_conflicts': id_conflicts,
+            'in_sync_count': in_sync_count,
+            'extra_in_supabase': extra_in_supabase,
+            'local_total': len(local_by_slug),
+            'supabase_total': len(supabase_by_slug),
+        }
+    finally:
+        sqlite_conn.close()
+        pg_conn.close()
+
+
+def apply_profile_sync() -> dict:
+    """
+    Apply the local→Supabase profile sync.
+
+    Re-computes the diff internally (does not trust any client-passed state),
+    then performs:
+      - INSERT for slugs missing in Supabase, preserving local id
+        (skipping any id_conflicts surfaced by the diff).
+      - UPDATE by slug for changed compare columns.
+      - setval on profiles_id_seq so future SERIAL inserts don't collide.
+
+    Returns:
+        {
+            'inserted':        int,
+            'updated':         int,
+            'skipped_conflicts': int,
+            'errors':          [str, ...],
+            'sequence_value':  int | None,
+        }
+    """
+    if not os.environ.get('DATABASE_URL'):
+        raise RuntimeError("DATABASE_URL is not set — cannot connect to Supabase.")
+
+    import psycopg2
+    import psycopg2.extras
+
+    diff = compute_profile_sync_diff()
+
+    pg_conn = psycopg2.connect(
+        os.environ['DATABASE_URL'],
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
+    pg_conn.autocommit = False
+
+    inserted = 0
+    updated = 0
+    errors = []
+    sequence_value = None
+    skipped_conflicts = len(diff['id_conflicts'])
+
+    try:
+        pg_c = pg_conn.cursor()
+
+        # ── Inserts (preserve local id) ─────────────────────────────────────
+        if diff['to_insert']:
+            placeholders = ', '.join(['%s'] * len(_PROFILE_COLS))
+            col_names = ', '.join(_PROFILE_COLS)
+            insert_sql = (
+                f"INSERT INTO profiles ({col_names}) VALUES ({placeholders}) "
+                f"ON CONFLICT (slug) DO NOTHING"
+            )
+            for row in diff['to_insert']:
+                try:
+                    pg_c.execute(insert_sql, [row[c] for c in _PROFILE_COLS])
+                    inserted += pg_c.rowcount
+                    pg_conn.commit()
+                except Exception as e:
+                    pg_conn.rollback()
+                    errors.append(f"INSERT slug={row.get('slug')} id={row.get('id')}: {e}")
+
+        # ── Updates (match by slug, never touch id) ────────────────────────
+        if diff['to_update']:
+            set_clause = ', '.join([f"{c} = %s" for c in _PROFILE_COMPARE_COLS])
+            update_sql = f"UPDATE profiles SET {set_clause} WHERE slug = %s"
+            for upd in diff['to_update']:
+                local = upd['local']
+                params = [local.get(c) for c in _PROFILE_COMPARE_COLS] + [upd['slug']]
+                try:
+                    pg_c.execute(update_sql, params)
+                    updated += pg_c.rowcount
+                    pg_conn.commit()
+                except Exception as e:
+                    pg_conn.rollback()
+                    errors.append(f"UPDATE slug={upd['slug']}: {e}")
+
+        # ── Bump profiles_id_seq so future SERIAL inserts don't collide ────
+        try:
+            pg_c.execute(
+                "SELECT setval(pg_get_serial_sequence('profiles', 'id'), "
+                "COALESCE((SELECT MAX(id) FROM profiles), 1)) AS seqval"
+            )
+            row = pg_c.fetchone()
+            if row:
+                sequence_value = next(iter(row.values()))
+            pg_conn.commit()
+        except Exception as e:
+            pg_conn.rollback()
+            errors.append(f"setval profiles_id_seq: {e}")
+    finally:
+        pg_conn.close()
+
+    return {
+        'inserted': inserted,
+        'updated': updated,
+        'skipped_conflicts': skipped_conflicts,
+        'errors': errors,
+        'sequence_value': sequence_value,
+    }
+
 
 def sync_databases(from_date: str, to_date: str) -> dict:
     """
@@ -6030,6 +6269,42 @@ def sync_run():
         to_date=to_date,
         db_url_set=True,
     )
+
+
+@app.route('/sync/profiles/preview', methods=['POST'])
+@login_required
+def sync_profiles_preview():
+    """Compute and return the local→Supabase profile sync diff (no writes)."""
+    if not os.environ.get('DATABASE_URL'):
+        return jsonify({
+            'success': False,
+            'message': 'DATABASE_URL is not set. Add it to your .env to enable Supabase sync.',
+        }), 400
+    try:
+        diff = compute_profile_sync_diff()
+        return jsonify({'success': True, 'diff': diff})
+    except Exception as e:
+        import traceback as _tb
+        app.logger.error('sync_profiles_preview error: %s', _tb.format_exc())
+        return jsonify({'success': False, 'message': f'Preview failed: {e}'}), 500
+
+
+@app.route('/sync/profiles/apply', methods=['POST'])
+@login_required
+def sync_profiles_apply():
+    """Apply the local→Supabase profile sync (insert + update + setval)."""
+    if not os.environ.get('DATABASE_URL'):
+        return jsonify({
+            'success': False,
+            'message': 'DATABASE_URL is not set. Add it to your .env to enable Supabase sync.',
+        }), 400
+    try:
+        result = apply_profile_sync()
+        return jsonify({'success': True, 'result': result})
+    except Exception as e:
+        import traceback as _tb
+        app.logger.error('sync_profiles_apply error: %s', _tb.format_exc())
+        return jsonify({'success': False, 'message': f'Apply failed: {e}'}), 500
 
 
 @app.route('/export')

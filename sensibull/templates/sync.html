@@ -161,7 +161,8 @@
 
         <div class="alert alert-info">
             <strong>Tables synced:</strong> snapshots, position_changes, notifications, ai_chat_history.
-            Reference tables (master_contract, profiles, subscriptions, etc.) are not included.
+            Reference tables (master_contract, subscriptions, etc.) are not included.
+            Profiles have a dedicated sync card below.
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -201,6 +202,37 @@
                 </button>
             </div>
         </form>
+    </div>
+
+    <!-- ===== PROFILE SYNC SECTION ===== -->
+    <div class="sync-card mt-16" id="profileSyncCard">
+        <h2>Sync Profiles</h2>
+        <p class="subtitle">
+            One-way sync: <strong>Local SQLite → Supabase</strong>. Profiles are matched by <code>slug</code>.
+            Missing profiles are inserted (preserving local <code>id</code>); existing profiles with field differences are updated to match local.
+            <strong>Profiles are never deleted from Supabase</strong> — slugs present only in Supabase are listed as informational and left untouched.
+            To remove a profile from Supabase, use <a href="{{ url_for('manage_profiles') }}">Manage Profiles</a>.
+            After insert, the Supabase <code>profiles_id_seq</code> is bumped to prevent future id collisions.
+        </p>
+
+        {% if not db_url_set %}
+        <div class="alert alert-warning">
+            <strong>DATABASE_URL is not set.</strong> Profile sync requires a Supabase connection.
+        </div>
+        {% endif %}
+
+        <div class="date-row">
+            <button type="button" class="btn-sync" id="previewProfilesBtn"
+                    {% if not db_url_set %}disabled{% endif %}>
+                Preview
+            </button>
+            <button type="button" class="btn-sync" id="applyProfilesBtn" disabled
+                    style="background:#16a34a;border-color:#15803d;">
+                Apply Sync
+            </button>
+        </div>
+
+        <div id="profileSyncOutput"></div>
     </div>
 
     <!-- ===== STORAGE SECTION ===== -->
@@ -337,6 +369,221 @@ document.getElementById('syncForm').addEventListener('submit', function() {
             document.getElementById('storageContent').innerHTML =
                 '<span class="storage-error">⚠ Could not load storage stats.</span>';
         });
+}());
+
+// ── Profile Sync (Local → Supabase) ───────────────────────────────────────
+(function profileSync() {
+    var previewBtn = document.getElementById('previewProfilesBtn');
+    var applyBtn   = document.getElementById('applyProfilesBtn');
+    var output     = document.getElementById('profileSyncOutput');
+    if (!previewBtn || !applyBtn || !output) return;
+
+    function escapeHtml(s) {
+        if (s === null || s === undefined) return '<em style="color:#94a3b8">null</em>';
+        return String(s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function activeBadge(v) {
+        var n = (v === null || v === undefined) ? 0 : parseInt(v, 10) || 0;
+        return n === 1
+            ? '<span class="badge badge-green">active</span>'
+            : '<span class="badge badge-zero">inactive</span>';
+    }
+
+    function renderDiff(diff) {
+        var html = '';
+
+        html += '<div class="results-section" style="margin-top:20px;">';
+        html += '<h3>Preview <span class="range-badge">'
+             + 'Local: ' + diff.local_total + ' · Supabase: ' + diff.supabase_total
+             + '</span></h3>';
+
+        // Summary line
+        html += '<div class="alert alert-info">'
+             + '<strong>' + diff.to_insert.length + '</strong> to insert · '
+             + '<strong>' + diff.to_update.length + '</strong> to update · '
+             + '<strong>' + diff.in_sync_count + '</strong> already in sync · '
+             + '<strong>' + diff.id_conflicts.length + '</strong> id conflicts (will be skipped) · '
+             + '<strong>' + diff.extra_in_supabase.length + '</strong> only in Supabase (one-way: not removed)'
+             + '</div>';
+
+        // Inserts
+        if (diff.to_insert.length > 0) {
+            html += '<h3 style="margin-top:18px;">Inserts (' + diff.to_insert.length + ')</h3>';
+            html += '<table class="sync-table"><thead><tr>'
+                 + '<th>id</th><th>slug</th><th>name</th><th>is_active</th><th>added_at</th>'
+                 + '</tr></thead><tbody>';
+            diff.to_insert.forEach(function(r) {
+                html += '<tr>'
+                     + '<td><code>' + escapeHtml(r.id) + '</code></td>'
+                     + '<td><code>' + escapeHtml(r.slug) + '</code></td>'
+                     + '<td>' + escapeHtml(r.name) + '</td>'
+                     + '<td>' + activeBadge(r.is_active) + '</td>'
+                     + '<td>' + escapeHtml(r.added_at) + '</td>'
+                     + '</tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        // Updates
+        if (diff.to_update.length > 0) {
+            html += '<h3 style="margin-top:18px;">Updates (' + diff.to_update.length + ')</h3>';
+            html += '<table class="sync-table"><thead><tr>'
+                 + '<th>slug</th><th>supabase id</th><th>changes (Supabase → Local)</th>'
+                 + '</tr></thead><tbody>';
+            diff.to_update.forEach(function(u) {
+                var changeHtml = u.changes.map(function(ch) {
+                    return '<div style="margin:2px 0;"><code>' + escapeHtml(ch.col) + '</code>: '
+                         + '<span style="color:#b91c1c">' + escapeHtml(ch.supabase) + '</span>'
+                         + ' <span style="color:#64748b">→</span> '
+                         + '<span style="color:#166534">' + escapeHtml(ch.local) + '</span>'
+                         + '</div>';
+                }).join('');
+                html += '<tr>'
+                     + '<td><code>' + escapeHtml(u.slug) + '</code></td>'
+                     + '<td><code>' + escapeHtml(u.supabase_id) + '</code></td>'
+                     + '<td>' + changeHtml + '</td>'
+                     + '</tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        // ID conflicts
+        if (diff.id_conflicts.length > 0) {
+            html += '<h3 style="margin-top:18px;color:#b91c1c;">ID Conflicts (' + diff.id_conflicts.length + ')</h3>';
+            html += '<div class="alert alert-warning">These local profiles have an <code>id</code> that is already used by a different slug in Supabase. They will be <strong>skipped</strong>. Reconcile manually before retrying.</div>';
+            html += '<table class="sync-table"><thead><tr>'
+                 + '<th>local slug</th><th>local id</th><th>supabase id owner (different slug)</th>'
+                 + '</tr></thead><tbody>';
+            diff.id_conflicts.forEach(function(c) {
+                html += '<tr>'
+                     + '<td><code>' + escapeHtml(c.slug) + '</code></td>'
+                     + '<td><code>' + escapeHtml(c.local_id) + '</code></td>'
+                     + '<td><code>' + escapeHtml(c.supabase_id_owner_slug) + '</code></td>'
+                     + '</tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        // Extra in Supabase (informational)
+        if (diff.extra_in_supabase.length > 0) {
+            html += '<h3 style="margin-top:18px;">Only in Supabase (' + diff.extra_in_supabase.length + ')</h3>';
+            html += '<p class="storage-note">One-way sync — these are <strong>not</strong> deleted or modified.</p>';
+            html += '<table class="sync-table"><thead><tr><th>id</th><th>slug</th><th>name</th></tr></thead><tbody>';
+            diff.extra_in_supabase.forEach(function(r) {
+                html += '<tr>'
+                     + '<td><code>' + escapeHtml(r.id) + '</code></td>'
+                     + '<td><code>' + escapeHtml(r.slug) + '</code></td>'
+                     + '<td>' + escapeHtml(r.name) + '</td>'
+                     + '</tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        if (diff.to_insert.length === 0
+            && diff.to_update.length === 0
+            && diff.id_conflicts.length === 0) {
+            html += '<div class="alert alert-success mt-16">✅ Profiles are already in sync — nothing to apply.</div>';
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    function renderResult(result) {
+        var html = '<div class="results-section" style="margin-top:20px;">';
+        html += '<h3>Apply Result</h3>';
+
+        var hasErrors = result.errors && result.errors.length > 0;
+        var alertClass = hasErrors ? 'alert-warning' : 'alert-success';
+        var icon = hasErrors ? '⚠️' : '✅';
+
+        html += '<div class="alert ' + alertClass + '">'
+             + icon + ' Inserted <strong>' + result.inserted + '</strong>'
+             + ' · Updated <strong>' + result.updated + '</strong>'
+             + ' · Skipped (id conflicts) <strong>' + result.skipped_conflicts + '</strong>'
+             + ' · Sequence reset to <strong>' + (result.sequence_value === null ? 'n/a' : result.sequence_value) + '</strong>'
+             + ' · Errors <strong>' + (result.errors ? result.errors.length : 0) + '</strong>'
+             + '</div>';
+
+        if (hasErrors) {
+            html += '<ul class="errors-list">';
+            result.errors.slice(0, 20).forEach(function(e) {
+                html += '<li>' + escapeHtml(e) + '</li>';
+            });
+            if (result.errors.length > 20) {
+                html += '<li>…and ' + (result.errors.length - 20) + ' more</li>';
+            }
+            html += '</ul>';
+        }
+
+        html += '<p class="storage-note" style="margin-top:12px;">Re-run Preview to verify the current state.</p>';
+        html += '</div>';
+        return html;
+    }
+
+    previewBtn.addEventListener('click', function() {
+        previewBtn.disabled = true;
+        applyBtn.disabled = true;
+        previewBtn.textContent = '⏳ Loading…';
+        output.innerHTML = '';
+
+        fetch('/sync/profiles/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                previewBtn.disabled = false;
+                previewBtn.textContent = 'Preview';
+                if (!d.success) {
+                    output.innerHTML = '<div class="alert alert-danger mt-16">⚠ ' + escapeHtml(d.message) + '</div>';
+                    return;
+                }
+                output.innerHTML = renderDiff(d.diff);
+                var hasWork = d.diff.to_insert.length > 0 || d.diff.to_update.length > 0;
+                applyBtn.disabled = !hasWork;
+            })
+            .catch(function(e) {
+                previewBtn.disabled = false;
+                previewBtn.textContent = 'Preview';
+                output.innerHTML = '<div class="alert alert-danger mt-16">⚠ Preview request failed: ' + escapeHtml(e) + '</div>';
+            });
+    });
+
+    applyBtn.addEventListener('click', function() {
+        if (!confirm('Apply the previewed changes to Supabase? Inserts preserve local ids; updates match by slug.')) {
+            return;
+        }
+        applyBtn.disabled = true;
+        previewBtn.disabled = true;
+        applyBtn.textContent = '⏳ Applying…';
+
+        fetch('/sync/profiles/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                applyBtn.textContent = 'Apply Sync';
+                previewBtn.disabled = false;
+                if (!d.success) {
+                    output.innerHTML = '<div class="alert alert-danger mt-16">⚠ ' + escapeHtml(d.message) + '</div>';
+                    return;
+                }
+                output.innerHTML = renderResult(d.result);
+                // Force re-Preview before another Apply.
+                applyBtn.disabled = true;
+            })
+            .catch(function(e) {
+                applyBtn.textContent = 'Apply Sync';
+                previewBtn.disabled = false;
+                applyBtn.disabled = true;
+                output.innerHTML = '<div class="alert alert-danger mt-16">⚠ Apply request failed: ' + escapeHtml(e) + '</div>';
+            });
+    });
 }());
 </script>
 {% endblock %}
