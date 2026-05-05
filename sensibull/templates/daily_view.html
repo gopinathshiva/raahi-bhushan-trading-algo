@@ -2416,7 +2416,7 @@
             let openCount = 0, closedCount = 0;
 
             consolidatedRows.forEach(row => {
-                const booked = Number(row.totalExitPnl || 0);
+                const booked = Number(row.bookedPnl || 0);
                 const unbooked = Number(row.unbookedPnl || 0);
                 totalBooked += booked;
                 totalUnbooked += unbooked;
@@ -2759,7 +2759,7 @@
                 const statusClass = row.isOpen ? 'entered' : 'exited';
                 const statusText = row.isOpen ? 'OPEN' : 'CLOSED';
 
-                const pnlColor = row.totalExitPnl > 0 ? '#28a745' : (row.totalExitPnl < 0 ? '#dc3545' : '#888');
+                const pnlColor = row.bookedPnl > 0 ? '#28a745' : (row.bookedPnl < 0 ? '#dc3545' : '#888');
                 const unbookedColor = row.unbookedPnl > 0 ? '#28a745' : (row.unbookedPnl < 0 ? '#dc3545' : '#888');
 
                 const positionId = JSON.stringify({symbol: row.symbol, product: row.product}).replace(/"/g, '&quot;');
@@ -2801,7 +2801,7 @@
                         <td class="num" ${row.isOpen ? `data-ltp-cell="${row.symbol}" data-avg-entry="${row.avgEntryPrice}" data-net-qty="${row.netQty}"` : ''}>${row.isOpen
                             ? `<span style="color:#555;" title="Last Traded Price">LTP: ₹${fmtNum(row.ltp, 2)}</span>`
                             : `₹${fmtNum(row.avgExitPrice, 2)}`}</td>
-                        <td class="num"><span style="color:${pnlColor}; font-weight:bold;">₹${fmtNum(row.totalExitPnl, 2)}</span></td>
+                        <td class="num"><span style="color:${pnlColor}; font-weight:bold;">₹${fmtNum(row.bookedPnl, 2)}</span></td>
                         <td class="num" ${row.isOpen ? `data-upnl-cell="${row.symbol}"` : ''}>${row.isOpen
                             ? `<span style="color:${unbookedColor}; font-weight:bold;">₹${fmtNum(row.unbookedPnl, 2)}</span>`
                             : '<span style="color:#aaa;">—</span>'}</td>
@@ -3047,8 +3047,8 @@
                         valA = new Date(a.lastModified || 0).getTime();
                         valB = new Date(b.lastModified || 0).getTime();
                     } else if (sortColumn === 'realized_pnl') {
-                        valA = a.totalExitPnl || 0;
-                        valB = b.totalExitPnl || 0;
+                        valA = a.bookedPnl || 0;
+                        valB = b.bookedPnl || 0;
                     } else if (sortColumn === 'unrealized_pnl') {
                         valA = a.unbookedPnl || 0;
                         valB = b.unbookedPnl || 0;
@@ -3106,7 +3106,7 @@
                 const statusClass = row.isOpen ? 'entered' : 'exited';
                 const statusText = row.isOpen ? 'OPEN' : 'CLOSED';
 
-                const pnlColor = row.totalExitPnl > 0 ? '#28a745' : (row.totalExitPnl < 0 ? '#dc3545' : '#888');
+                const pnlColor = row.bookedPnl > 0 ? '#28a745' : (row.bookedPnl < 0 ? '#dc3545' : '#888');
                 const unbookedColor = row.unbookedPnl > 0 ? '#28a745' : (row.unbookedPnl < 0 ? '#dc3545' : '#888');
 
                 const positionId = JSON.stringify({symbol: row.symbol, product: row.product}).replace(/"/g, '&quot;');
@@ -3142,7 +3142,7 @@
                         <td class="num" ${row.isOpen ? `data-ltp-cell="${row.symbol}" data-avg-entry="${row.avgEntryPrice}" data-net-qty="${row.netQty}"` : ''}>${row.isOpen
                             ? `<span style="color:#555;" title="Last Traded Price">LTP: ₹${fmtNum(row.ltp, 2)}</span>`
                             : `₹${fmtNum(row.avgExitPrice, 2)}`}</td>
-                        <td class="num"><span style="color:${pnlColor}; font-weight:bold;">₹${fmtNum(row.totalExitPnl, 2)}</span></td>
+                        <td class="num"><span style="color:${pnlColor}; font-weight:bold;">₹${fmtNum(row.bookedPnl, 2)}</span></td>
                         <td class="num" ${row.isOpen ? `data-upnl-cell="${row.symbol}"` : ''}>${row.isOpen
                             ? `<span style="color:${unbookedColor}; font-weight:bold;">₹${fmtNum(row.unbookedPnl, 2)}</span>`
                             : '<span style="color:#aaa;">—</span>'}</td>
