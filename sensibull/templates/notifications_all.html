@@ -1,0 +1,523 @@
+{% extends 'base.html' %}
+
+{% block title %}All Notifications — Sensibull Tracker{% endblock %}
+
+{% block breadcrumb %}
+<li><span class="current">All Notifications</span></li>
+{% endblock %}
+
+{% block head %}
+<style>
+    .notif-page {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .notif-page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    .notif-page-header h1 {
+        font-size: 1.5rem;
+        margin: 0;
+    }
+    .notif-bulk-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .notif-btn {
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 8px 14px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #334155;
+        cursor: pointer;
+    }
+    .notif-btn:hover { background: var(--surface-soft); }
+    .notif-btn.primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+    }
+    .notif-btn.primary:hover { background: #3730a3; }
+    .notif-btn.danger {
+        background: #fff;
+        color: var(--danger);
+        border-color: #fecaca;
+    }
+    .notif-btn.danger:hover { background: #fee2e2; }
+    .notif-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .notif-filters {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 16px;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 14px;
+    }
+    @media (max-width: 820px) {
+        .notif-filters { grid-template-columns: 1fr; }
+    }
+    .filter-group label {
+        display: block;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 6px;
+    }
+    .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        max-height: 110px;
+        overflow-y: auto;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--surface-soft);
+    }
+    .chip {
+        background: #fff;
+        border: 1px solid var(--border);
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        color: #334155;
+        cursor: pointer;
+        user-select: none;
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    }
+    .chip:hover { border-color: #c7d2fe; }
+    .chip.selected {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+    }
+    .chips-empty {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        padding: 4px;
+    }
+    .radio-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .radio-row label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--surface-soft);
+        border: 1px solid var(--border);
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        cursor: pointer;
+        text-transform: none;
+        letter-spacing: normal;
+        font-weight: 500;
+        color: #334155;
+        margin: 0;
+    }
+    .radio-row input { margin: 0; }
+    .radio-row label.selected {
+        background: var(--accent-soft);
+        border-color: #c7d2fe;
+        color: #312e81;
+        font-weight: 600;
+    }
+
+    .notif-summary {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+
+    .notif-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .notif-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 14px 16px;
+        display: flex;
+        gap: 12px;
+        cursor: pointer;
+        transition: border-color 120ms ease, background-color 120ms ease;
+    }
+    .notif-card:hover {
+        border-color: #c7d2fe;
+        background: #fafbff;
+    }
+    .notif-card.unread { border-left: 3px solid var(--accent); }
+    .notif-card-body { flex: 1; min-width: 0; }
+    .notif-card-meta {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+    }
+    .notif-card-msg {
+        font-size: 0.95rem;
+        color: var(--text);
+        line-height: 1.4;
+        word-wrap: break-word;
+    }
+    .notif-card.unread .notif-card-msg { font-weight: 600; }
+    .notif-type-tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .notif-type-tag.new_position { background: #dcfce7; color: #166534; }
+    .notif-type-tag.exited_position { background: #fee2e2; color: #991b1b; }
+    .notif-type-tag.modified_position,
+    .notif-type-tag.quantity_change { background: #fef3c7; color: #92400e; }
+
+    .notif-empty-state {
+        background: var(--surface);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-lg);
+        padding: 40px 20px;
+        text-align: center;
+        color: var(--text-muted);
+    }
+
+    .notif-load-wrap {
+        text-align: center;
+        margin-top: 8px;
+    }
+
+    .notif-toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #0f172a;
+        color: #fff;
+        padding: 10px 14px;
+        border-radius: var(--radius-md);
+        font-size: 0.85rem;
+        box-shadow: var(--shadow-md);
+        opacity: 0;
+        transform: translateY(8px);
+        transition: opacity 200ms ease, transform 200ms ease;
+        z-index: 2000;
+        max-width: 320px;
+    }
+    .notif-toast.show { opacity: 1; transform: translateY(0); }
+    .notif-toast.error { background: var(--danger); }
+    .notif-toast.success { background: var(--success); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="notif-page">
+    <div class="notif-page-header">
+        <h1>All Notifications</h1>
+        <div class="notif-bulk-actions">
+            <button type="button" class="notif-btn primary" id="bulkMarkAllReadBtn">Mark all read</button>
+            <button type="button" class="notif-btn danger" id="bulkDeleteReadBtn">Delete all read</button>
+        </div>
+    </div>
+
+    <div class="notif-filters">
+        <div class="filter-group">
+            <label>Profiles</label>
+            <div class="chips" id="profileChips"><span class="chips-empty">Loading…</span></div>
+        </div>
+        <div class="filter-group">
+            <label>Symbols</label>
+            <div class="chips" id="symbolChips"><span class="chips-empty">Loading…</span></div>
+        </div>
+        <div class="filter-group">
+            <label>Status</label>
+            <div class="radio-row" id="readRadios">
+                <label class="selected"><input type="radio" name="readStatus" value="all" checked> All</label>
+                <label><input type="radio" name="readStatus" value="unread"> Unread</label>
+                <label><input type="radio" name="readStatus" value="read"> Read</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="notif-summary" id="notifSummary"></div>
+
+    <div class="notif-cards" id="notifCards">
+        <div class="notif-empty-state">Loading…</div>
+    </div>
+
+    <div class="notif-load-wrap">
+        <button type="button" class="notif-btn" id="loadMoreBtn" style="display:none;">Load more</button>
+    </div>
+</div>
+
+<div class="notif-toast" id="toast"></div>
+
+<script>
+(function() {
+    const state = {
+        profiles: [],
+        symbols: [],
+        selectedProfiles: new Set(),
+        selectedSymbols: new Set(),
+        readStatus: 'all',
+        offset: 0,
+        pageSize: 20,
+        hasMore: false,
+        loading: false,
+        totalRendered: 0,
+    };
+
+    const profileChips = document.getElementById('profileChips');
+    const symbolChips = document.getElementById('symbolChips');
+    const cards = document.getElementById('notifCards');
+    const summary = document.getElementById('notifSummary');
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    const markAllBtn = document.getElementById('bulkMarkAllReadBtn');
+    const deleteReadBtn = document.getElementById('bulkDeleteReadBtn');
+    const toast = document.getElementById('toast');
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function showToast(msg, kind) {
+        toast.textContent = msg;
+        toast.className = 'notif-toast show ' + (kind || '');
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => { toast.className = 'notif-toast'; }, 3000);
+    }
+
+    function formatTime(ts) {
+        if (!ts) return '';
+        const t = new Date(ts.replace(' ', 'T'));
+        if (isNaN(t.getTime())) return ts;
+        return t.toLocaleString();
+    }
+
+    function renderChips(container, items, selected, onToggle, labelOf, valueOf) {
+        container.innerHTML = '';
+        if (!items.length) {
+            container.innerHTML = '<span class="chips-empty">None available.</span>';
+            return;
+        }
+        items.forEach(item => {
+            const value = valueOf(item);
+            const span = document.createElement('span');
+            span.className = 'chip' + (selected.has(value) ? ' selected' : '');
+            span.textContent = labelOf(item);
+            span.addEventListener('click', () => {
+                if (selected.has(value)) selected.delete(value);
+                else selected.add(value);
+                span.classList.toggle('selected');
+                onToggle();
+            });
+            container.appendChild(span);
+        });
+    }
+
+    async function loadFilters() {
+        try {
+            const res = await fetch('/api/notifications/all/filters', { credentials: 'same-origin' });
+            const data = await res.json();
+            if (!data.success) throw new Error('failed');
+            state.profiles = data.profiles || [];
+            state.symbols = data.symbols || [];
+            renderChips(profileChips, state.profiles, state.selectedProfiles,
+                () => reload(), p => p.name || p.slug, p => p.slug);
+            renderChips(symbolChips, state.symbols, state.selectedSymbols,
+                () => reload(), s => s, s => s);
+        } catch (e) {
+            profileChips.innerHTML = '<span class="chips-empty">Failed to load.</span>';
+            symbolChips.innerHTML = '<span class="chips-empty">Failed to load.</span>';
+        }
+    }
+
+    function buildQuery() {
+        const params = new URLSearchParams();
+        params.set('limit', String(state.pageSize));
+        params.set('offset', String(state.offset));
+        if (state.selectedProfiles.size) params.set('profile_slugs', [...state.selectedProfiles].join(','));
+        if (state.selectedSymbols.size) params.set('symbols', [...state.selectedSymbols].join(','));
+        params.set('read_status', state.readStatus);
+        return params.toString();
+    }
+
+    function renderCard(n) {
+        const card = document.createElement('div');
+        card.className = 'notif-card' + (n.is_read ? '' : ' unread');
+        const profileName = n.profile_name || n.profile_slug || '';
+        const symbol = n.symbol ? `<span class="notif-chip">${escapeHtml(n.symbol)}</span>` : '';
+        const typeTag = n.notification_type
+            ? `<span class="notif-type-tag ${escapeHtml(n.notification_type)}">${escapeHtml(n.notification_type.replace(/_/g, ' '))}</span>`
+            : '';
+        card.innerHTML =
+            '<div class="notif-card-body">' +
+              '<div class="notif-card-meta">' +
+                typeTag +
+                `<span class="notif-chip">${escapeHtml(profileName)}</span>` +
+                symbol +
+                `<span>${escapeHtml(formatTime(n.created_at))}</span>` +
+              '</div>' +
+              `<div class="notif-card-msg">${escapeHtml(n.message || '')}</div>` +
+            '</div>';
+        card.addEventListener('click', () => handleCardClick(n));
+        return card;
+    }
+
+    async function handleCardClick(n) {
+        try {
+            await fetch('/api/notifications/mark_read', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notification_id: n.id })
+            });
+        } catch (_) {}
+        const slug = n.profile_slug || '';
+        if (slug) {
+            window.location.href = '/notifications/' + encodeURIComponent(slug) + '?notif_id=' + encodeURIComponent(n.id);
+        }
+    }
+
+    async function loadPage(reset) {
+        if (state.loading) return;
+        state.loading = true;
+        if (reset) {
+            state.offset = 0;
+            state.totalRendered = 0;
+            cards.innerHTML = '<div class="notif-empty-state">Loading…</div>';
+            loadMoreBtn.style.display = 'none';
+        } else {
+            loadMoreBtn.disabled = true;
+            loadMoreBtn.textContent = 'Loading…';
+        }
+        try {
+            const res = await fetch('/api/notifications/all?' + buildQuery(), { credentials: 'same-origin' });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                if (reset) cards.innerHTML = '<div class="notif-empty-state">Failed to load notifications.</div>';
+                return;
+            }
+            const rows = data.notifications || [];
+            if (reset) cards.innerHTML = '';
+            if (reset && rows.length === 0) {
+                cards.innerHTML = '<div class="notif-empty-state">No notifications match the current filters.</div>';
+            } else {
+                rows.forEach(n => cards.appendChild(renderCard(n)));
+            }
+            state.offset += rows.length;
+            state.totalRendered += rows.length;
+            state.hasMore = !!data.has_more;
+            loadMoreBtn.style.display = state.hasMore ? 'inline-block' : 'none';
+            loadMoreBtn.disabled = false;
+            loadMoreBtn.textContent = 'Load more';
+            updateSummary();
+        } catch (e) {
+            if (reset) cards.innerHTML = '<div class="notif-empty-state">Failed to load notifications.</div>';
+        } finally {
+            state.loading = false;
+        }
+    }
+
+    function updateSummary() {
+        const filters = [];
+        if (state.selectedProfiles.size) filters.push(`${state.selectedProfiles.size} profile(s)`);
+        if (state.selectedSymbols.size) filters.push(`${state.selectedSymbols.size} symbol(s)`);
+        if (state.readStatus !== 'all') filters.push(state.readStatus);
+        const filterText = filters.length ? ` · filtered by ${filters.join(', ')}` : '';
+        const moreText = state.hasMore ? ' (more available)' : '';
+        summary.textContent = `Showing ${state.totalRendered} notification${state.totalRendered === 1 ? '' : 's'}${moreText}${filterText}.`;
+    }
+
+    function reload() { loadPage(true); }
+
+    document.querySelectorAll('input[name="readStatus"]').forEach(input => {
+        input.addEventListener('change', () => {
+            state.readStatus = input.value;
+            document.querySelectorAll('#readRadios label').forEach(l => l.classList.remove('selected'));
+            input.parentElement.classList.add('selected');
+            reload();
+        });
+    });
+
+    loadMoreBtn.addEventListener('click', () => loadPage(false));
+
+    markAllBtn.addEventListener('click', async () => {
+        if (!confirm('Mark all unread notifications across all active profiles as read?')) return;
+        markAllBtn.disabled = true;
+        try {
+            const res = await fetch('/api/notifications/mark_all_read', {
+                method: 'POST', credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: '{}'
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Marked ${data.updated} notification(s) as read.`, 'success');
+                reload();
+            } else {
+                showToast('Failed to mark all read.', 'error');
+            }
+        } catch (e) {
+            showToast('Failed to mark all read.', 'error');
+        } finally {
+            markAllBtn.disabled = false;
+        }
+    });
+
+    deleteReadBtn.addEventListener('click', async () => {
+        if (!confirm('Delete all READ notifications across all active profiles? This cannot be undone.')) return;
+        deleteReadBtn.disabled = true;
+        try {
+            const res = await fetch('/api/notifications/delete_read', {
+                method: 'POST', credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: '{}'
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Deleted ${data.deleted} read notification(s).`, 'success');
+                reload();
+            } else {
+                showToast('Failed to delete read notifications.', 'error');
+            }
+        } catch (e) {
+            showToast('Failed to delete read notifications.', 'error');
+        } finally {
+            deleteReadBtn.disabled = false;
+        }
+    });
+
+    loadFilters();
+    loadPage(true);
+})();
+</script>
+{% endblock %}

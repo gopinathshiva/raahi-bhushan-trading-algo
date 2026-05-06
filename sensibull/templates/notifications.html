@@ -103,6 +103,16 @@
             opacity: 0.7;
         }
 
+        @keyframes notif-flash {
+            0%   { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.55); background-color: #fff7c2; }
+            70%  { box-shadow: 0 0 0 12px rgba(79, 70, 229, 0); background-color: #fff7c2; }
+            100% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0); }
+        }
+        .notification-item.flash {
+            animation: notif-flash 2.2s ease-out;
+            outline: 2px solid #4f46e5;
+        }
+
         .notification-content {
             flex: 1;
         }
@@ -762,6 +772,7 @@
 {% block scripts %}
     <script>
         const PROFILE_SLUG = '{{ slug }}';
+        const FOCUS_NOTIF_ID = {{ (focus_notif_id or '') | tojson }};
         let currentSound = 'default';
         let notificationsData = [];
         let subscriptionsData = [];
@@ -1426,7 +1437,7 @@
                 });
                 
                 return `
-                    <div class="notification-item ${notif.is_read ? 'read' : 'unread'}" style="cursor: pointer; margin-bottom: 15px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative;" onclick="window.location.href='${profileLink}'">
+                    <div class="notification-item ${notif.is_read ? 'read' : 'unread'}" data-notif-id="${notif.id}" style="cursor: pointer; margin-bottom: 15px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: relative;" onclick="window.location.href='${profileLink}'">
                         <div class="notification-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
                             <h4 style="margin: 0; color: #333;">${headerText}</h4>
                             <div class="notification-actions" style="display: flex; gap: 8px;" onclick="event.stopPropagation();">
@@ -1454,6 +1465,17 @@
                     </div>
                 `;
             }).join('');
+
+            if (FOCUS_NOTIF_ID) {
+                requestAnimationFrame(() => {
+                    const target = document.querySelector(`.notification-item[data-notif-id="${CSS.escape(String(FOCUS_NOTIF_ID))}"]`);
+                    if (target) {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        target.classList.add('flash');
+                        setTimeout(() => target.classList.remove('flash'), 2400);
+                    }
+                });
+            }
         }
 
         async function markAsRead(notificationId) {

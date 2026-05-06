@@ -576,7 +576,21 @@ def notifications(slug):
     last_date = last_snapshot['snapshot_date'] if last_snapshot else now_ist().strftime('%Y-%m-%d')
 
     conn.close()
-    return render_template('notifications.html', slug=slug, profile=profile, last_date=last_date)
+    focus_notif_id = request.args.get('notif_id', '').strip()
+    return render_template(
+        'notifications.html',
+        slug=slug,
+        profile=profile,
+        last_date=last_date,
+        focus_notif_id=focus_notif_id,
+    )
+
+
+@app.route('/notifications')
+@login_required
+def notifications_all():
+    """Cross-profile notifications page."""
+    return render_template('notifications_all.html')
 
 @app.route('/')
 @login_required
@@ -4766,6 +4780,343 @@ def delete_notification():
     except Exception as e:
         print(f"Error deleting notification: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+# ==================== CROSS-PROFILE NOTIFICATIONS API ====================
+
+# Defensive caps for query-string filter inputs.
+_NOTIF_MAX_FILTER_RAW_LEN = 4096       # max length of a single comma-separated filter string
+_NOTIF_MAX_FILTER_ITEMS = 200          # max number of items inside a filter
+_NOTIF_MAX_PAGE_SIZE = 100
+_NOTIF_DEFAULT_PAGE_SIZE = 10
+# When a symbol filter is set we must filter on JSON in Python. We scan the
+# notifications table in bounded batches until we have filled the requested
+# page or hit a hard scan ceiling.
+_NOTIF_SYMBOL_BATCH = 500
+_NOTIF_SYMBOL_SCAN_CEILING = 20000
+
+
+def _active_profile_ids(c):
+    rows = c.execute("SELECT id FROM profiles WHERE is_active = 1").fetchall()
+    return [r['id'] for r in rows]
+
+
+def _parse_list_filter(raw, *, upper=False):
+    """Parse a comma-separated query-string filter with size caps.
+
+    Returns (values, error_response_or_none). If the input violates a cap, the
+    caller should return the error_response immediately.
+    """
+    if not raw:
+        return [], None
+    if len(raw) > _NOTIF_MAX_FILTER_RAW_LEN:
+        return None, (jsonify({'error': 'Filter value too long'}), 400)
+    parts = [p.strip() for p in raw.split(',') if p.strip()]
+    if len(parts) > _NOTIF_MAX_FILTER_ITEMS:
+        return None, (jsonify({'error': 'Too many filter values'}), 400)
+    if upper:
+        parts = [p.upper() for p in parts]
+    return parts, None
+
+
+def _serialize_notification_row(row, profile_info, ndata=None, symbol=None):
+    """Build the response shape for a single notification row."""
+    if ndata is None:
+        ndata = _json_loads(row['notification_data']) if row['notification_data'] else {}
+    if symbol is None:
+        symbol = extract_notification_symbol(ndata, row['message'])
+    return {
+        'id': row['id'],
+        'profile_id': row['profile_id'],
+        'profile_slug': profile_info.get('slug') if profile_info else None,
+        'profile_name': profile_info.get('name') if profile_info else None,
+        'subscription_id': row['subscription_id'],
+        'message': row['message'],
+        'notification_type': row['notification_type'],
+        'notification_data': ndata,
+        'symbol': symbol,
+        'openalgo_hint': build_openalgo_order_hint(row['notification_type'], ndata, row['message']),
+        'created_at': row['created_at'],
+        'is_read': row['is_read'] == 1,
+    }
+
+
+def _require_json_mutation():
+    """Lightweight CSRF mitigation for POST mutation endpoints.
+
+    Requires the request to be JSON (Content-Type application/json) AND carry
+    the X-Requested-With: XMLHttpRequest header. Both conditions force a CORS
+    preflight on cross-origin requests and cannot be produced by a plain
+    cross-site HTML form submission, which blocks classic CSRF without
+    requiring a project-wide token system.
+
+    Returns an error response tuple when the request should be rejected, or
+    None when it may proceed.
+    """
+    ctype = (request.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+    if ctype != 'application/json':
+        return jsonify({'error': 'application/json required'}), 415
+    if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+        return jsonify({'error': 'X-Requested-With header required'}), 400
+    return None
+
+
+def _err(label, exc):
+    """Log full exception server-side, return a generic client message."""
+    import traceback
+    print(f"[notifications-api] {label}: {traceback.format_exc()}")
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+@app.route('/api/notifications/all/unread_count', methods=['GET'])
+@login_required
+def get_all_unread_count():
+    """Total unread notifications across all active profiles."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        ids = _active_profile_ids(c)
+        if not ids:
+            conn.close()
+            return jsonify({'success': True, 'unread_count': 0})
+
+        placeholders = ','.join('?' * len(ids))
+        row = c.execute(
+            f"SELECT COUNT(*) AS cnt FROM notifications "
+            f"WHERE is_read = 0 AND profile_id IN ({placeholders})",
+            ids,
+        ).fetchone()
+        conn.close()
+        return jsonify({'success': True, 'unread_count': row['cnt']})
+    except Exception as e:
+        return _err("get_all_unread_count", e)
+
+
+def _symbol_filtered_page(c, target_ids, read_status, symbols_filter, profile_by_id, limit, offset):
+    """Stream notifications in bounded batches, post-filtering by symbol, until
+    the requested page (offset, limit) is filled or scanning is exhausted."""
+    where = [f"profile_id IN ({','.join('?' * len(target_ids))})"]
+    params = list(target_ids)
+    if read_status == 'read':
+        where.append("is_read = 1")
+    elif read_status == 'unread':
+        where.append("is_read = 0")
+    where_sql = " AND ".join(where)
+
+    matched = []           # serialized rows that matched the symbol filter
+    skipped = 0            # how many matches we've already skipped to honor offset
+    inner_offset = 0       # SQL-level cursor over all candidate rows
+    has_more = False
+    needed = offset + limit + 1   # +1 to detect has_more
+
+    while len(matched) < (limit + 1) and inner_offset < _NOTIF_SYMBOL_SCAN_CEILING:
+        rows = c.execute(
+            f"SELECT id, profile_id, subscription_id, message, notification_type, "
+            f"notification_data, created_at, is_read "
+            f"FROM notifications WHERE {where_sql} "
+            f"ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            params + [_NOTIF_SYMBOL_BATCH, inner_offset],
+        ).fetchall()
+        if not rows:
+            break
+        inner_offset += len(rows)
+        for r in rows:
+            ndata = _json_loads(r['notification_data']) if r['notification_data'] else {}
+            sym = extract_notification_symbol(ndata, r['message'])
+            if not sym or sym.upper() not in symbols_filter:
+                continue
+            if skipped < offset:
+                skipped += 1
+                continue
+            if len(matched) >= limit:
+                has_more = True
+                break
+            pinfo = profile_by_id.get(r['profile_id'], {})
+            matched.append(_serialize_notification_row(r, pinfo, ndata=ndata, symbol=sym))
+        if has_more or len(rows) < _NOTIF_SYMBOL_BATCH:
+            break
+
+    return matched, has_more
+
+
+@app.route('/api/notifications/all', methods=['GET'])
+@login_required
+def get_all_notifications():
+    """Paginated cross-profile notification feed with optional filters."""
+    try:
+        profile_slugs, err = _parse_list_filter(request.args.get('profile_slugs', '').strip())
+        if err:
+            return err
+        symbols_list, err = _parse_list_filter(request.args.get('symbols', '').strip(), upper=True)
+        if err:
+            return err
+        symbols_filter = set(symbols_list)
+
+        read_status = (request.args.get('read_status') or 'all').strip().lower()
+        if read_status not in ('all', 'read', 'unread'):
+            read_status = 'all'
+
+        try:
+            limit = max(1, min(_NOTIF_MAX_PAGE_SIZE, int(request.args.get('limit', _NOTIF_DEFAULT_PAGE_SIZE))))
+        except ValueError:
+            limit = _NOTIF_DEFAULT_PAGE_SIZE
+        try:
+            offset = max(0, int(request.args.get('offset', 0)))
+        except ValueError:
+            offset = 0
+
+        conn = get_db()
+        c = conn.cursor()
+
+        active_ids = _active_profile_ids(c)
+        if not active_ids:
+            conn.close()
+            return jsonify({'success': True, 'notifications': [], 'has_more': False})
+
+        profiles_rows = c.execute(
+            f"SELECT id, slug, name FROM profiles WHERE id IN ({','.join('?' * len(active_ids))})",
+            active_ids,
+        ).fetchall()
+        profile_by_id = {p['id']: {'slug': p['slug'], 'name': p['name']} for p in profiles_rows}
+
+        if profile_slugs:
+            slug_set = set(profile_slugs)
+            target_ids = [pid for pid, info in profile_by_id.items() if info['slug'] in slug_set]
+        else:
+            target_ids = list(profile_by_id.keys())
+
+        if not target_ids:
+            conn.close()
+            return jsonify({'success': True, 'notifications': [], 'has_more': False})
+
+        if symbols_filter:
+            result, has_more = _symbol_filtered_page(
+                c, target_ids, read_status, symbols_filter, profile_by_id, limit, offset
+            )
+            conn.close()
+            return jsonify({'success': True, 'notifications': result, 'has_more': has_more})
+
+        # Fast path: no symbol filter — paginate at SQL level (limit+1 to detect more).
+        where = [f"profile_id IN ({','.join('?' * len(target_ids))})"]
+        params = list(target_ids)
+        if read_status == 'read':
+            where.append("is_read = 1")
+        elif read_status == 'unread':
+            where.append("is_read = 0")
+        where_sql = " AND ".join(where)
+
+        rows = c.execute(
+            f"SELECT id, profile_id, subscription_id, message, notification_type, "
+            f"notification_data, created_at, is_read "
+            f"FROM notifications WHERE {where_sql} "
+            f"ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            params + [limit + 1, offset],
+        ).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        conn.close()
+
+        result = [_serialize_notification_row(r, profile_by_id.get(r['profile_id'], {})) for r in rows]
+        return jsonify({'success': True, 'notifications': result, 'has_more': has_more})
+
+    except Exception as e:
+        return _err("get_all_notifications", e)
+
+
+@app.route('/api/notifications/all/filters', methods=['GET'])
+@login_required
+def get_all_notification_filters():
+    """Return profiles + distinct symbols available for filtering."""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+
+        profiles_rows = c.execute(
+            "SELECT slug, name FROM profiles WHERE is_active = 1 ORDER BY slug"
+        ).fetchall()
+        profiles = [{'slug': p['slug'], 'name': p['name']} for p in profiles_rows]
+
+        active_ids = _active_profile_ids(c)
+        symbols = set()
+        if active_ids:
+            placeholders = ','.join('?' * len(active_ids))
+            recent = c.execute(
+                f"SELECT message, notification_data FROM notifications "
+                f"WHERE profile_id IN ({placeholders}) "
+                f"ORDER BY created_at DESC, id DESC LIMIT 1000",
+                active_ids,
+            ).fetchall()
+            for r in recent:
+                ndata = _json_loads(r['notification_data']) if r['notification_data'] else {}
+                sym = extract_notification_symbol(ndata, r['message'])
+                if sym:
+                    symbols.add(sym.upper())
+
+        conn.close()
+        return jsonify({
+            'success': True,
+            'profiles': profiles,
+            'symbols': sorted(symbols),
+        })
+    except Exception as e:
+        return _err("get_all_notification_filters", e)
+
+
+@app.route('/api/notifications/mark_all_read', methods=['POST'])
+@login_required
+def mark_all_notifications_read():
+    """Mark all unread notifications across active profiles as read."""
+    rejection = _require_json_mutation()
+    if rejection:
+        return rejection
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        ids = _active_profile_ids(c)
+        if not ids:
+            conn.close()
+            return jsonify({'success': True, 'updated': 0})
+        placeholders = ','.join('?' * len(ids))
+        c.execute(
+            f"UPDATE notifications SET is_read = 1 "
+            f"WHERE is_read = 0 AND profile_id IN ({placeholders})",
+            ids,
+        )
+        updated = c.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'updated': updated})
+    except Exception as e:
+        return _err("mark_all_notifications_read", e)
+
+
+@app.route('/api/notifications/delete_read', methods=['POST'])
+@login_required
+def delete_read_notifications():
+    """Delete all read notifications across active profiles."""
+    rejection = _require_json_mutation()
+    if rejection:
+        return rejection
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        ids = _active_profile_ids(c)
+        if not ids:
+            conn.close()
+            return jsonify({'success': True, 'deleted': 0})
+        placeholders = ','.join('?' * len(ids))
+        c.execute(
+            f"DELETE FROM notifications "
+            f"WHERE is_read = 1 AND profile_id IN ({placeholders})",
+            ids,
+        )
+        deleted = c.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        return _err("delete_read_notifications", e)
+
 
 # ==================== USER PREFERENCES API ROUTES ====================
 
