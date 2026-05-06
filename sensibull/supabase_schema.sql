@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     url          TEXT,
     source_url   TEXT,
     is_active    INTEGER DEFAULT 1,
-    added_at     TEXT DEFAULT NULL
+    added_at     TEXT DEFAULT NULL,
+    notes        TEXT DEFAULT NULL
 );
 
 -- ─── snapshots ────────────────────────────────────────────────────────────────

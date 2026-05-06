@@ -5249,6 +5249,7 @@ def api_get_profiles():
             p.source_url,
             p.is_active,
             p.added_at,
+            p.notes,
             (SELECT MAX(timestamp) FROM snapshots WHERE profile_id = p.id) as last_scraped,
             (SELECT COUNT(*) FROM snapshots WHERE profile_id = p.id) as snapshot_count,
             (SELECT COUNT(*) FROM notifications WHERE profile_id = p.id AND is_read = 0) as unread_notifications
@@ -5306,6 +5307,11 @@ def api_add_profile():
         return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
 
     slug = data.get('slug', '').strip()
+    notes_raw = data.get('notes', '')
+    if notes_raw is None:
+        notes_raw = ''
+    notes = str(notes_raw).strip()[:2000]
+    notes_value = notes if notes else None
 
     if not slug:
         return jsonify({'success': False, 'error': 'Username is required'}), 400
@@ -5326,21 +5332,21 @@ def api_add_profile():
 
         if BACKEND == 'supabase':
             c.execute("""
-                INSERT INTO profiles (slug, name, url, source_url, is_active, added_at)
-                VALUES (?, ?, ?, ?, 1, ?)
+                INSERT INTO profiles (slug, name, url, source_url, is_active, added_at, notes)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
                 RETURNING id
-            """, (slug, name, url, url, now_ist().isoformat()))
+            """, (slug, name, url, url, now_ist().isoformat(), notes_value))
         else:
             c.execute("""
-                INSERT INTO profiles (slug, name, url, source_url, is_active, added_at)
-                VALUES (?, ?, ?, ?, 1, ?)
-            """, (slug, name, url, url, now_ist().isoformat()))
+                INSERT INTO profiles (slug, name, url, source_url, is_active, added_at, notes)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+            """, (slug, name, url, url, now_ist().isoformat(), notes_value))
 
         profile_id = last_insert_id(c)
         conn.commit()
 
         profile = c.execute("""
-            SELECT id, slug, name, source_url, is_active, added_at
+            SELECT id, slug, name, source_url, is_active, added_at, notes
             FROM profiles WHERE id = ?
         """, (profile_id,)).fetchone()
 
@@ -5381,6 +5387,36 @@ def api_toggle_profile(profile_id):
         'success': True,
         'message': 'Profile ' + ('enabled' if new_status else 'disabled'),
         'is_active': new_status
+    })
+
+
+@app.route('/api/profiles/<int:profile_id>/notes', methods=['PATCH'])
+@login_required
+def api_update_profile_notes(profile_id):
+    """Update notes for an existing profile."""
+    data = request.get_json(silent=True) or {}
+    notes_raw = data.get('notes', '')
+    if notes_raw is None:
+        notes_raw = ''
+    notes = str(notes_raw).strip()[:2000]
+    notes_value = notes if notes else None
+
+    conn = get_db()
+    c = conn.cursor()
+
+    profile = c.execute("SELECT id FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+    if not profile:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Profile not found'}), 404
+
+    c.execute("UPDATE profiles SET notes = ? WHERE id = ?", (notes_value, profile_id))
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'message': 'Notes updated',
+        'notes': notes_value or '',
     })
 
 
@@ -6169,10 +6205,10 @@ _JSONB_COLS = {'raw_data', 'notification_data'}
 
 # ─── Profile Sync (Local SQLite → Supabase, one-way, matched by slug) ────────
 # Full column list (insert order matters — id first so we can preserve it).
-_PROFILE_COLS = ('id', 'slug', 'name', 'url', 'source_url', 'is_active', 'added_at')
+_PROFILE_COLS = ('id', 'slug', 'name', 'url', 'source_url', 'is_active', 'added_at', 'notes')
 # Columns compared to detect drift between local and Supabase (everything
 # except id, since matching is by slug and we never modify Supabase's id).
-_PROFILE_COMPARE_COLS = ('name', 'url', 'source_url', 'is_active', 'added_at')
+_PROFILE_COMPARE_COLS = ('name', 'url', 'source_url', 'is_active', 'added_at', 'notes')
 
 
 def _normalize_profile_value(col, value):

@@ -69,6 +69,13 @@ def migrate_database():
         migrations_applied += 1
         print("    ✓ Added 'added_at' column")
 
+    # Migration 3b: Add notes column to profiles table if missing
+    if not column_exists(c, 'profiles', 'notes'):
+        print("  - Adding 'notes' column to 'profiles' table...")
+        c.execute("ALTER TABLE profiles ADD COLUMN notes TEXT")
+        migrations_applied += 1
+        print("    ✓ Added 'notes' column")
+
     # Migration 4: Create ai_chat_history table if missing
     if not table_exists(c, 'ai_chat_history'):
         print("  - Creating 'ai_chat_history' table...")

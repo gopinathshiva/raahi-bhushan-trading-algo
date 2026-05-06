@@ -123,6 +123,57 @@
     .icon-btn:hover { background: #f8fafc; border-color: #94a3b8; }
     .icon-btn[title*="Delete"] { color: #dc2626; }
 
+    .add-form .form-group.notes-group { flex: 1 1 100%; min-width: 100%; }
+    .notes-textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px 12px;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        font: inherit;
+        font-size: 14px;
+        color: #0f172a;
+        background: #fff;
+        resize: vertical;
+        min-height: 64px;
+    }
+    .notes-textarea:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.18); }
+    .notes-helper { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; color: #64748b; font-size: 12px; }
+    .notes-counter { font-variant-numeric: tabular-nums; }
+
+    .notes-cell { max-width: 280px; }
+    .notes-view {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    .notes-text {
+        flex: 1;
+        color: #1e293b;
+        font-size: 13px;
+        line-height: 1.4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .notes-text.empty { color: #94a3b8; font-style: italic; }
+    .notes-edit { display: none; }
+    .notes-cell.editing .notes-view { display: none; }
+    .notes-cell.editing .notes-edit { display: block; }
+    .notes-edit textarea {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 70px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font: inherit;
+        font-size: 13px;
+        resize: vertical;
+    }
+    .notes-edit textarea:focus { outline: none; border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79,70,229,0.18); }
+    .notes-actions { display: flex; gap: 6px; margin-top: 6px; }
+
     .modal {
         display: none;
         position: fixed;
@@ -361,6 +412,16 @@
                 </div>
                 <button class="btn btn-primary" onclick="validateProfile()" id="validateBtn">Validate</button>
                 <button class="btn btn-success" onclick="addProfile()" id="addBtn" disabled>Add Profile</button>
+                <div class="form-group notes-group">
+                    <label for="notes">Notes (why this profile? optional)</label>
+                    <textarea id="notes" class="notes-textarea" rows="3" maxlength="2000"
+                        placeholder="Why are you adding this profile? How will it help your analysis?"
+                        oninput="updateNotesCounter()"></textarea>
+                    <div class="notes-helper">
+                        <span>Document the rationale so you remember why this profile is worth tracking.</span>
+                        <span class="notes-counter"><span id="notesCount">0</span>/2000</span>
+                    </div>
+                </div>
             </div>
             <div id="validationMessage"></div>
         </div>
@@ -727,9 +788,15 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
         try {
             const r = await fetch('/api/profiles');
             const data = await r.json();
-            if (data.success) { renderProfiles(data.profiles); updateStats(data.profiles); }
+            if (data.success) { window._profilesCache = data.profiles; renderProfiles(data.profiles); updateStats(data.profiles); }
             else showToast('Failed to load profiles', 'error');
         } catch (e) { showToast('Error loading profiles', 'error'); }
+    }
+
+    function updateNotesCounter() {
+        const ta = document.getElementById('notes');
+        const counter = document.getElementById('notesCount');
+        if (ta && counter) counter.textContent = String(ta.value.length);
     }
 
     function updateStats(profiles) {
@@ -751,6 +818,7 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
                 <thead>
                     <tr>
                         <th>Profile Name</th><th>Status</th><th>Last Scraped</th>
+                        <th>Notes</th>
                         <th>Snapshots</th><th>Unread Notifications</th><th>Actions</th>
                     </tr>
                 </thead>
@@ -761,11 +829,29 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
                         const safeLast = escHtml(formatTimestamp(p.last_scraped));
                         const safeSnapshots = escHtml(String(p.snapshot_count || 0));
                         const safeUnread = escHtml(String(p.unread_notifications || 0));
+                        const notesRaw = p.notes || '';
+                        const safeNotes = escHtml(notesRaw);
+                        const notesCellHtml = notesRaw
+                            ? `<span class="notes-text" title="${safeNotes}">${safeNotes}</span>`
+                            : `<span class="notes-text empty">—</span>`;
                         return `
                     <tr>
                         <td><a href="/profile/${encodeURIComponent(p.slug || '')}" class="profile-link"><strong>${safeName}</strong></a><br><small class="profile-slug">${safeSlug}</small></td>
                         <td><span class="status-badge ${p.is_active ? 'active' : 'inactive'}">${p.is_active ? '✓ Active' : '❌ Disabled'}</span></td>
                         <td>${safeLast}</td>
+                        <td class="notes-cell" data-profile-idx="${idx}">
+                            <div class="notes-view">
+                                ${notesCellHtml}
+                                <button class="icon-btn note-edit-btn" data-profile-idx="${idx}" title="Edit notes">✏️</button>
+                            </div>
+                            <div class="notes-edit">
+                                <textarea maxlength="2000" rows="3" data-profile-idx="${idx}">${safeNotes}</textarea>
+                                <div class="notes-actions">
+                                    <button class="icon-btn note-save-btn" data-profile-idx="${idx}" title="Save notes">✓</button>
+                                    <button class="icon-btn note-cancel-btn" data-profile-idx="${idx}" title="Cancel">✕</button>
+                                </div>
+                            </div>
+                        </td>
                         <td>${safeSnapshots}</td>
                         <td>${safeUnread}</td>
                         <td>
@@ -797,6 +883,78 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
                 openDeleteModal(p.id, p.slug);
             });
         });
+        container.querySelectorAll('.note-edit-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.getAttribute('data-profile-idx'));
+                enterEditNote(idx);
+            });
+        });
+        container.querySelectorAll('.note-cancel-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.getAttribute('data-profile-idx'));
+                cancelEditNote(idx);
+            });
+        });
+        container.querySelectorAll('.note-save-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.getAttribute('data-profile-idx'));
+                const p = profiles[idx];
+                if (!p) return;
+                saveNote(p.id, idx);
+            });
+        });
+    }
+
+    function _noteCell(idx) {
+        return document.querySelector(`.notes-cell[data-profile-idx="${idx}"]`);
+    }
+
+    function enterEditNote(idx) {
+        const cell = _noteCell(idx);
+        if (!cell) return;
+        cell.classList.add('editing');
+        const ta = cell.querySelector('textarea');
+        if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    }
+
+    function cancelEditNote(idx) {
+        const cell = _noteCell(idx);
+        if (!cell) return;
+        const ta = cell.querySelector('textarea');
+        const original = window._profilesCache && window._profilesCache[idx]
+            ? (window._profilesCache[idx].notes || '') : '';
+        if (ta) ta.value = original;
+        cell.classList.remove('editing');
+    }
+
+    async function saveNote(profileId, idx) {
+        const cell = _noteCell(idx);
+        if (!cell) return;
+        const ta = cell.querySelector('textarea');
+        const saveBtn = cell.querySelector('.note-save-btn');
+        const value = (ta?.value || '').trim().slice(0, 2000);
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '…'; }
+        try {
+            const r = await fetch(`/api/profiles/${profileId}/notes`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({notes: value}),
+            });
+            const data = await r.json();
+            if (data.success) {
+                showToast('Notes updated', 'success');
+                if (window._profilesCache && window._profilesCache[idx]) {
+                    window._profilesCache[idx].notes = data.notes || '';
+                }
+                renderProfiles(window._profilesCache);
+            } else {
+                showToast(data.error || 'Failed to update notes', 'error');
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✓'; }
+            }
+        } catch (e) {
+            showToast('Error updating notes', 'error');
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✓'; }
+        }
     }
 
     function formatTimestamp(ts) {
@@ -847,15 +1005,19 @@ copy(JSON.stringify(ids)); // auto-copies to clipboard</pre>
     async function addProfile() {
         if (!validatedSlug) { showToast('Please validate the profile first', 'error'); return; }
         const addBtn = document.getElementById('addBtn');
+        const notesEl = document.getElementById('notes');
+        const notes = (notesEl?.value || '').trim().slice(0, 2000);
         addBtn.disabled = true; addBtn.textContent = 'Adding...';
         try {
             const r = await fetch('/api/profiles/add', {
-                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({slug: validatedSlug})
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({slug: validatedSlug, notes})
             });
             const data = await r.json();
             if (data.success) {
                 showToast('Profile added successfully!', 'success');
                 document.getElementById('username').value = '';
+                if (notesEl) notesEl.value = '';
+                updateNotesCounter();
                 document.getElementById('validationMessage').replaceChildren();
                 validatedSlug = null; loadProfiles();
             } else { showToast(data.error || 'Failed to add profile', 'error'); }

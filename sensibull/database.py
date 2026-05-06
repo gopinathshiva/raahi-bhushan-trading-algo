@@ -30,7 +30,8 @@ def init_db():
             url TEXT,
             source_url TEXT,
             is_active INTEGER DEFAULT 1,
-            added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            notes TEXT DEFAULT NULL
         )
     ''')
     
